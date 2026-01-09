@@ -1,0 +1,29 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AnalysisMode>Recommended</AnalysisMode>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!--
+      CA1848: Use LoggerMessage delegates - deferred for high-perf logging optimization
+      CA2007: ConfigureAwait - not needed in modern .NET library code
+      CA1031: Catch general exceptions - required in infrastructure error handling
+      CA1873: Avoid expensive copies - addressed case-by-case
+    -->
+    <NoWarn>$(NoWarn);CA1848;CA2007;CA1031;CA1873</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Authors>DotCelery Contributors</Authors>
+    <Company>DotCelery</Company>
+    <Product>DotCelery</Product>
+    <Description>Distributed task queue for .NET</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/dotcelery/dotcelery</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+</Project>

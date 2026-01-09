@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>DotCelery.Tests.Integration</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- Disable code analysis rules that are noise for test projects -->
+    <NoWarn>$(NoWarn);CA1707;CA1001;CA2263;CA1816;CS1591;xUnit1051</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DotCelery.Core\DotCelery.Core.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Broker.RabbitMQ\DotCelery.Broker.RabbitMQ.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Broker.Redis\DotCelery.Broker.Redis.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Backend.Redis\DotCelery.Backend.Redis.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Backend.Postgres\DotCelery.Backend.Postgres.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Backend.Mongo\DotCelery.Backend.Mongo.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.1" />
+    <PackageReference Include="Testcontainers.MongoDb" Version="4.10.0" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="4.10.0" />
+    <PackageReference Include="Testcontainers.RabbitMq" Version="4.10.0" />
+    <PackageReference Include="Testcontainers.Redis" Version="4.10.0" />
+    <PackageReference Include="xunit.v3" Version="3.2.1" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

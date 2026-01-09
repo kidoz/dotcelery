@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>DotCelery.Beat</RootNamespace>
+    <Description>Periodic task scheduler (Beat) for DotCelery</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DotCelery.Core\DotCelery.Core.csproj" />
+    <ProjectReference Include="..\DotCelery.Client\DotCelery.Client.csproj" />
+    <ProjectReference Include="..\DotCelery.Cron\DotCelery.Cron.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.1" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>DotCelery.Benchmarks</RootNamespace>
+    <Description>Performance benchmarks for DotCelery</Description>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CA1707;CA1001;CA2263;CA1816;CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DotCelery.Core\DotCelery.Core.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Client\DotCelery.Client.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Worker\DotCelery.Worker.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Broker.InMemory\DotCelery.Broker.InMemory.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Backend.InMemory\DotCelery.Backend.InMemory.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
+  </ItemGroup>
+</Project>

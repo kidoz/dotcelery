@@ -1,0 +1,51 @@
+<Project>
+  <!--
+    MSBuild targets for PostgreSQL SQL validation at build time.
+    Validates all .sql files in the Sql/ directory using Npgquery.
+  -->
+
+  <PropertyGroup>
+    <!-- Enable SQL validation by default -->
+    <ValidateSqlOnBuild Condition="'$(ValidateSqlOnBuild)' == ''">true</ValidateSqlOnBuild>
+    <SqlValidatorProject>$(MSBuildThisFileDirectory)DotCelery.Build.SqlValidator.csproj</SqlValidatorProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Include all SQL files for validation -->
+    <SqlFilesToValidate Include="$(MSBuildProjectDirectory)\Sql\**\*.sql" />
+  </ItemGroup>
+
+  <Target
+    Name="ValidateSqlFiles"
+    BeforeTargets="BeforeBuild"
+    Condition="'$(ValidateSqlOnBuild)' == 'true' AND '@(SqlFilesToValidate)' != ''"
+  >
+    <Message Importance="high" Text="Validating PostgreSQL SQL files..." />
+
+    <!-- Build the validator first if needed -->
+    <MSBuild
+      Projects="$(SqlValidatorProject)"
+      Targets="Build"
+      Properties="Configuration=$(Configuration)"
+      Condition="Exists('$(SqlValidatorProject)')"
+    />
+
+    <!-- Run the validator -->
+    <PropertyGroup>
+      <SqlValidatorExe>$(MSBuildThisFileDirectory)bin\$(Configuration)\net10.0\DotCelery.Build.SqlValidator</SqlValidatorExe>
+    </PropertyGroup>
+
+    <Exec
+      Command="dotnet run --project &quot;$(SqlValidatorProject)&quot; --configuration $(Configuration) -- --directory &quot;$(MSBuildProjectDirectory)\Sql&quot;"
+      ConsoleToMSBuild="true"
+      StandardOutputImportance="high"
+      StandardErrorImportance="high"
+    />
+
+    <Message Importance="high" Text="SQL validation completed successfully." />
+  </Target>
+
+  <Target Name="CleanSqlValidation" AfterTargets="Clean">
+    <Message Importance="normal" Text="Cleaned SQL validation artifacts." />
+  </Target>
+</Project>

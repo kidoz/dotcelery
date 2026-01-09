@@ -1,0 +1,27 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DotCelery.Backend.InMemory/DotCelery.Backend.InMemory.csproj" />
+    <Project Path="src/DotCelery.Backend.Mongo/DotCelery.Backend.Mongo.csproj" />
+    <Project Path="src/DotCelery.Backend.Postgres/DotCelery.Backend.Postgres.csproj" />
+    <Project Path="src/DotCelery.Backend.Redis/DotCelery.Backend.Redis.csproj" />
+    <Project Path="src/DotCelery.Beat/DotCelery.Beat.csproj" />
+    <Project Path="src/DotCelery.Broker.InMemory/DotCelery.Broker.InMemory.csproj" />
+    <Project Path="src/DotCelery.Broker.RabbitMQ/DotCelery.Broker.RabbitMQ.csproj" />
+    <Project Path="src/DotCelery.Client/DotCelery.Client.csproj" />
+    <Project Path="src/DotCelery.Core/DotCelery.Core.csproj" />
+    <Project Path="src/DotCelery.Cron/DotCelery.Cron.csproj" />
+    <Project Path="src/DotCelery.Dashboard/DotCelery.Dashboard.csproj" />
+    <Project Path="src/DotCelery.Telemetry/DotCelery.Telemetry.csproj" />
+    <Project Path="src/DotCelery.Worker/DotCelery.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DotCelery.Tests.Integration/DotCelery.Tests.Integration.csproj" />
+    <Project Path="tests/DotCelery.Tests.Unit/DotCelery.Tests.Unit.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/DotCelery.Demo/DotCelery.Demo.csproj" />
+  </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/DotCelery.Benchmarks/DotCelery.Benchmarks.csproj" />
+  </Folder>
+</Solution>

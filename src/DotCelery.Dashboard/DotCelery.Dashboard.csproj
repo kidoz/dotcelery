@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <RootNamespace>DotCelery.Dashboard</RootNamespace>
+    <Description>Web dashboard for monitoring DotCelery distributed task queue</Description>
+    <OutputType>Library</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DotCelery.Core\DotCelery.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="wwwroot\**\*" />
+    <EmbeddedResource Include="Pages\**\*.cshtml" />
+  </ItemGroup>
+</Project>
