@@ -261,6 +261,8 @@ public sealed class MongoOutboxStore : IOutboxStore
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        await ValueTask.CompletedTask;
+
         if (_disposed)
         {
             return;

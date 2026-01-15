@@ -208,6 +208,8 @@ public sealed class MongoSignalStore : ISignalStore
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        await ValueTask.CompletedTask;
+
         if (_disposed)
         {
             return;

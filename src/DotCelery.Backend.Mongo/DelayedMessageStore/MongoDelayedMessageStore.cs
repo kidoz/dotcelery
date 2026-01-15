@@ -191,6 +191,8 @@ public sealed class MongoDelayedMessageStore : IDelayedMessageStore
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        await ValueTask.CompletedTask;
+
         if (_disposed)
         {
             return;

@@ -242,6 +242,8 @@ public sealed class MongoPartitionLockStore : IPartitionLockStore
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        await ValueTask.CompletedTask;
+
         if (_disposed)
         {
             return;

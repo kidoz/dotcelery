@@ -286,6 +286,8 @@ public sealed class MongoTaskExecutionTracker : ITaskExecutionTracker
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        await ValueTask.CompletedTask;
+
         if (_disposed)
         {
             return;

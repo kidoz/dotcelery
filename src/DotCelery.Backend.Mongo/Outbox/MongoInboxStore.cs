@@ -127,6 +127,8 @@ public sealed class MongoInboxStore : IInboxStore
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        await ValueTask.CompletedTask;
+
         if (_disposed)
         {
             return;

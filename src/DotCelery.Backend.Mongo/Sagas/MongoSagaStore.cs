@@ -351,6 +351,8 @@ public sealed class MongoSagaStore : ISagaStore
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        await ValueTask.CompletedTask;
+
         if (_disposed)
         {
             return;

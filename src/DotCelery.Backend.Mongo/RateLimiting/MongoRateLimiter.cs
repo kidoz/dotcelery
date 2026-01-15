@@ -212,6 +212,8 @@ public sealed class MongoRateLimiter : IRateLimiter
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        await ValueTask.CompletedTask;
+
         if (_disposed)
         {
             return;

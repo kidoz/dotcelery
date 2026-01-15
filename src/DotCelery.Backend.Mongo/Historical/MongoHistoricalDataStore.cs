@@ -296,6 +296,8 @@ public sealed class MongoHistoricalDataStore : IHistoricalDataStore
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        await ValueTask.CompletedTask;
+
         if (_disposed)
         {
             return;
