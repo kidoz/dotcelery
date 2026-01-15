@@ -28,6 +28,7 @@ bld/
 [Ll]ogs/
 
 # .NET / NuGet
+/nupkg/
 *.nupkg
 *.snupkg
 *.nuget.props
