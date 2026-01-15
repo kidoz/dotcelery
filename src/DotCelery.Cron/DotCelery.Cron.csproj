@@ -3,4 +3,7 @@
     <RootNamespace>DotCelery.Cron</RootNamespace>
     <Description>Lightweight cron expression parser for DotCelery</Description>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.102" />
+  </ItemGroup>
 </Project>

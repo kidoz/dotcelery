@@ -3,6 +3,7 @@
     <RootNamespace>DotCelery.Dashboard</RootNamespace>
     <Description>Web dashboard for monitoring DotCelery distributed task queue</Description>
     <OutputType>Library</OutputType>
+    <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
@@ -12,5 +13,9 @@
   <ItemGroup>
     <EmbeddedResource Include="wwwroot\**\*" />
     <EmbeddedResource Include="Pages\**\*.cshtml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.102" />
   </ItemGroup>
 </Project>
