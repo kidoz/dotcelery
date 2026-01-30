@@ -1,0 +1,29 @@
+# Example .editorconfig for DotCelery projects
+# Copy relevant rules to your project's .editorconfig
+
+root = true
+
+[*.cs]
+
+# DotCelery Analyzer Configuration
+
+# Task Definition Issues
+dotnet_diagnostic.DCEL001.severity = error  # Task name cannot be empty
+dotnet_diagnostic.DCEL002.severity = error  # Duplicate task name
+dotnet_diagnostic.DCEL003.severity = warning # Task must be sealed
+
+# Async/Await Issues
+dotnet_diagnostic.DCEL100.severity = warning # Avoid blocking calls
+
+# Attribute Validation
+dotnet_diagnostic.DCEL200.severity = error  # Invalid time limit
+dotnet_diagnostic.DCEL201.severity = error  # Invalid route
+dotnet_diagnostic.DCEL202.severity = error  # Invalid PreventOverlapping
+
+# Serialization Issues
+dotnet_diagnostic.DCEL300.severity = warning # Type must be serializable
+dotnet_diagnostic.DCEL301.severity = suggestion # Avoid mutable collections
+
+# Usage Issues
+dotnet_diagnostic.DCEL400.severity = error  # SendAsync type mismatch
+dotnet_diagnostic.DCEL401.severity = suggestion # Missing task registration

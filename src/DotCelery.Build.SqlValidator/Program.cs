@@ -225,7 +225,7 @@ public static partial class Program
                 }
 
                 // Skip comments
-                if (trimmed.StartsWith("--"))
+                if (trimmed.StartsWith("--", StringComparison.Ordinal))
                 {
                     continue;
                 }
