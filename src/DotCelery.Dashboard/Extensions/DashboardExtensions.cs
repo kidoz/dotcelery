@@ -1,6 +1,8 @@
 using DotCelery.Core.Dashboard;
 using DotCelery.Dashboard.Hubs;
 using DotCelery.Dashboard.Middleware;
+using DotCelery.Dashboard.Routing;
+using DotCelery.Dashboard.Security;
 using DotCelery.Dashboard.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
@@ -24,6 +26,8 @@ public static class DashboardExtensions
         Action<DashboardOptions>? configure = null
     )
     {
+        var routeOptions = CreateConfiguredOptions(configure);
+
         services.AddOptions<DashboardOptions>();
 
         if (configure is not null)
@@ -35,12 +39,21 @@ public static class DashboardExtensions
         services.AddSingleton<IWorkerRegistry, InMemoryWorkerRegistry>();
         services.AddScoped<IDashboardDataProvider, DashboardDataService>();
         services.AddSingleton<DashboardNotificationService>();
+        services.AddScoped<DashboardAuthorizationFilter>();
 
         // Add SignalR
         services.AddSignalR();
 
         // Add controllers for API endpoints
-        services.AddControllers().AddApplicationPart(typeof(DashboardExtensions).Assembly);
+        services
+            .AddControllers(options =>
+            {
+                options.Conventions.Add(
+                    new DashboardRoutePrefixConvention(routeOptions.PathPrefix)
+                );
+                options.Filters.AddService<DashboardAuthorizationFilter>();
+            })
+            .AddApplicationPart(typeof(DashboardExtensions).Assembly);
 
         return services;
     }
@@ -58,6 +71,8 @@ public static class DashboardExtensions
     )
         where TWorkerRegistry : class, IWorkerRegistry
     {
+        var routeOptions = CreateConfiguredOptions(configure);
+
         services.AddOptions<DashboardOptions>();
 
         if (configure is not null)
@@ -69,12 +84,21 @@ public static class DashboardExtensions
         services.AddSingleton<IWorkerRegistry, TWorkerRegistry>();
         services.AddScoped<IDashboardDataProvider, DashboardDataService>();
         services.AddSingleton<DashboardNotificationService>();
+        services.AddScoped<DashboardAuthorizationFilter>();
 
         // Add SignalR
         services.AddSignalR();
 
         // Add controllers for API endpoints
-        services.AddControllers().AddApplicationPart(typeof(DashboardExtensions).Assembly);
+        services
+            .AddControllers(options =>
+            {
+                options.Conventions.Add(
+                    new DashboardRoutePrefixConvention(routeOptions.PathPrefix)
+                );
+                options.Filters.AddService<DashboardAuthorizationFilter>();
+            })
+            .AddApplicationPart(typeof(DashboardExtensions).Assembly);
 
         return services;
     }
@@ -143,5 +167,12 @@ public static class DashboardExtensions
         endpoints.MapControllers();
 
         return endpoints;
+    }
+
+    private static DashboardOptions CreateConfiguredOptions(Action<DashboardOptions>? configure)
+    {
+        var options = new DashboardOptions();
+        configure?.Invoke(options);
+        return options;
     }
 }

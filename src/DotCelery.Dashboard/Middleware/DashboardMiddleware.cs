@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text;
 using System.Web;
+using DotCelery.Dashboard.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 
@@ -42,36 +43,13 @@ public sealed class DashboardMiddleware
             return;
         }
 
-        // Check authorization
-        if (_options.RequireAuthorization)
+        var isAuthorized = await DashboardAuthorization
+            .IsAuthorizedAsync(context, _options)
+            .ConfigureAwait(false);
+        if (!isAuthorized)
         {
-            if (_options.AuthorizationCallback is null)
-            {
-                // Fail-secure: deny access if authorization is required but no callback configured
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                context.Response.ContentType = "text/plain";
-                await context.Response.WriteAsync(
-                    "Dashboard access denied. Configure AuthorizationCallback or set RequireAuthorization = false."
-                );
-                return;
-            }
-
-            var isAuthorized = await _options.AuthorizationCallback(context);
-            if (!isAuthorized)
-            {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                return;
-            }
-        }
-        else if (_options.AuthorizationCallback is not null)
-        {
-            // Authorization is optional but callback is configured, still check it
-            var isAuthorized = await _options.AuthorizationCallback(context);
-            if (!isAuthorized)
-            {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                return;
-            }
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return;
         }
 
         // Get the path after the prefix

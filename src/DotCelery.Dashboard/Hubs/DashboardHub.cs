@@ -1,4 +1,5 @@
 using DotCelery.Core.Dashboard;
+using DotCelery.Dashboard.Security;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 
@@ -19,6 +20,24 @@ public sealed class DashboardHub : Hub
     {
         _dataProvider = dataProvider;
         _options = options.Value;
+    }
+
+    /// <inheritdoc />
+    public override async Task OnConnectedAsync()
+    {
+        var httpContext = Context.GetHttpContext();
+        if (
+            httpContext is null
+            || !await DashboardAuthorization
+                .IsAuthorizedAsync(httpContext, _options)
+                .ConfigureAwait(false)
+        )
+        {
+            Context.Abort();
+            return;
+        }
+
+        await base.OnConnectedAsync().ConfigureAwait(false);
     }
 
     /// <summary>
