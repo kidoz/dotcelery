@@ -1,4 +1,5 @@
 using DotCelery.Core.Filters;
+using DotCelery.Core.Models;
 using DotCelery.Core.MultiTenancy;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -53,11 +54,24 @@ public sealed class TenantContextFilter : ITaskFilterWithExceptionHandling
             if (!_options.ValidTenants.Contains(tenantId))
             {
                 _logger.LogWarning(
-                    "Invalid tenant {TenantId} for task {TaskId}, using default",
+                    "Invalid tenant {TenantId} for task {TaskId}, rejecting task",
                     tenantId,
                     context.TaskId
                 );
-                tenantId = _options.DefaultTenantId;
+                context.SkipExecution = true;
+                context.SkipResult = new TaskResult
+                {
+                    TaskId = context.TaskId,
+                    State = TaskState.Rejected,
+                    CompletedAt = DateTimeOffset.UtcNow,
+                    Duration = TimeSpan.Zero,
+                    Exception = new TaskExceptionInfo
+                    {
+                        Type = "InvalidTenant",
+                        Message = $"Tenant '{tenantId}' is not valid",
+                    },
+                };
+                return ValueTask.CompletedTask;
             }
         }
 

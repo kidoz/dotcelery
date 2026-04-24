@@ -1,5 +1,6 @@
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
+using DotCelery.Core.MultiTenancy;
 using DotCelery.Core.Routing;
 using DotCelery.Core.Signals;
 using Microsoft.Extensions.Logging;
@@ -18,6 +19,7 @@ public sealed class CeleryClient : ICeleryClient
     private readonly IRevocationStore? _revocationStore;
     private readonly IDelayedMessageStore? _delayedMessageStore;
     private readonly ITaskRouter? _taskRouter;
+    private readonly ITenantRouter? _tenantRouter;
     private readonly ITaskSignalDispatcher _signalDispatcher;
     private readonly CeleryClientOptions _options;
     private readonly ILogger<CeleryClient> _logger;
@@ -34,6 +36,7 @@ public sealed class CeleryClient : ICeleryClient
     /// <param name="signalDispatcher">Optional signal dispatcher for lifecycle events.</param>
     /// <param name="taskRouter">Optional task router for queue routing.</param>
     /// <param name="delayedMessageStore">Optional delayed message store for scheduled tasks.</param>
+    /// <param name="tenantRouter">Optional tenant router for multi-tenant queue routing.</param>
     public CeleryClient(
         IMessageBroker broker,
         IResultBackend backend,
@@ -43,7 +46,8 @@ public sealed class CeleryClient : ICeleryClient
         IRevocationStore? revocationStore = null,
         ITaskSignalDispatcher? signalDispatcher = null,
         ITaskRouter? taskRouter = null,
-        IDelayedMessageStore? delayedMessageStore = null
+        IDelayedMessageStore? delayedMessageStore = null,
+        ITenantRouter? tenantRouter = null
     )
     {
         _broker = broker;
@@ -52,6 +56,7 @@ public sealed class CeleryClient : ICeleryClient
         _revocationStore = revocationStore;
         _delayedMessageStore = delayedMessageStore;
         _taskRouter = taskRouter;
+        _tenantRouter = tenantRouter;
         _signalDispatcher = signalDispatcher ?? NullTaskSignalDispatcher.Instance;
         _options = options.Value;
         _logger = logger;
@@ -336,10 +341,14 @@ public sealed class CeleryClient : ICeleryClient
         }
 
         // Determine queue: explicit option > router > default
-        var queue =
+        var baseQueue =
             options?.Queue
             ?? _taskRouter?.GetQueue(taskName, _options.DefaultQueue)
             ?? _options.DefaultQueue;
+        var queue =
+            options?.TenantId is not null && options.Queue is null && _tenantRouter is not null
+                ? _tenantRouter.GetQueue(options.TenantId, baseQueue)
+                : baseQueue;
 
         var eta = options?.Eta;
         if (options?.Countdown.HasValue == true)
@@ -360,6 +369,8 @@ public sealed class CeleryClient : ICeleryClient
             Priority = options?.Priority ?? 0,
             Queue = queue,
             CorrelationId = options?.CorrelationId,
+            TenantId = options?.TenantId,
+            PartitionKey = options?.PartitionKey,
             Headers = options?.Headers,
         };
 

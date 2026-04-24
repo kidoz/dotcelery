@@ -46,6 +46,17 @@ public sealed record SendOptions
     public string? CorrelationId { get; init; }
 
     /// <summary>
+    /// Gets the tenant ID for multi-tenant task routing and execution context.
+    /// </summary>
+    public string? TenantId { get; init; }
+
+    /// <summary>
+    /// Gets the partition key for ordered processing.
+    /// Tasks with the same partition key are processed sequentially when partitioning is enabled.
+    /// </summary>
+    public string? PartitionKey { get; init; }
+
+    /// <summary>
     /// Gets the custom headers.
     /// </summary>
     public IReadOnlyDictionary<string, string>? Headers { get; init; }

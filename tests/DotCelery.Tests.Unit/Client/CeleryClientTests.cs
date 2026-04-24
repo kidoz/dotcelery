@@ -3,6 +3,7 @@ using DotCelery.Broker.InMemory;
 using DotCelery.Client;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
+using DotCelery.Core.MultiTenancy;
 using DotCelery.Core.Serialization;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -80,6 +81,49 @@ public class CeleryClientTests : IAsyncDisposable
         var result = await _client.SendAsync<TestTask, TestInput, TestOutput>(input, options);
 
         Assert.Equal(customId, result.TaskId);
+    }
+
+    [Fact]
+    public async Task SendAsync_WithTenantAndPartition_SetsMessageFieldsAndTenantQueue()
+    {
+        var tenantRouter = new TenantRouter(
+            Options.Create(
+                new MultiTenancyOptions
+                {
+                    Enabled = true,
+                    QueueStrategy = TenantQueueStrategy.Suffix,
+                }
+            )
+        );
+        var client = new CeleryClient(
+            _broker,
+            _backend,
+            _serializer,
+            Options.Create(new CeleryClientOptions()),
+            NullLogger<CeleryClient>.Instance,
+            tenantRouter: tenantRouter
+        );
+
+        await client.SendAsync<TestTask, TestInput, TestOutput>(
+            new TestInput { Value = 42 },
+            new SendOptions
+            {
+                TenantId = "tenant-a",
+                PartitionKey = "account-42",
+            }
+        );
+
+        BrokerMessage? received = null;
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        await foreach (var message in _broker.ConsumeAsync(["celery-tenant-a"], cts.Token))
+        {
+            received = message;
+            break;
+        }
+
+        Assert.NotNull(received);
+        Assert.Equal("tenant-a", received.Message.TenantId);
+        Assert.Equal("account-42", received.Message.PartitionKey);
     }
 
     [Fact]
