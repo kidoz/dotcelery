@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -17,7 +16,8 @@ public sealed class TaskNameAnalyzer : DiagnosticAnalyzer
         ImmutableArray.Create(
             DiagnosticDescriptors.TaskNameCannotBeEmpty,
             DiagnosticDescriptors.DuplicateTaskName,
-            DiagnosticDescriptors.TaskMustBeSealed);
+            DiagnosticDescriptors.TaskMustBeSealed
+        );
 
     public override void Initialize(AnalysisContext context)
     {
@@ -26,92 +26,108 @@ public sealed class TaskNameAnalyzer : DiagnosticAnalyzer
 
         context.RegisterCompilationStartAction(compilationContext =>
         {
-            var iTaskSymbol = compilationContext.Compilation.GetTypeByMetadataName("DotCelery.Core.Abstractions.ITask");
+            var iTaskSymbol = compilationContext.Compilation.GetTypeByMetadataName(
+                "DotCelery.Core.Abstractions.ITask"
+            );
             if (iTaskSymbol == null)
             {
                 // DotCelery.Core not referenced, skip analysis
                 return;
             }
 
-            var taskNames =
-                new System.Collections.Concurrent.ConcurrentDictionary<
-                    string,
-                    System.Collections.Concurrent.ConcurrentBag<(INamedTypeSymbol Type, Location Location)>
-                >();
+            var taskNames = new System.Collections.Concurrent.ConcurrentDictionary<
+                string,
+                System.Collections.Concurrent.ConcurrentBag<(
+                    INamedTypeSymbol Type,
+                    Location Location
+                )>
+            >();
 
-            compilationContext.RegisterSymbolAction(symbolContext =>
-            {
-                var namedType = (INamedTypeSymbol)symbolContext.Symbol;
-
-                // Check if type implements ITask
-                if (!namedType.AllInterfaces.Any(i => SymbolEqualityComparer.Default.Equals(i.OriginalDefinition, iTaskSymbol) ||
-                                                      i.OriginalDefinition?.AllInterfaces.Any(ii => SymbolEqualityComparer.Default.Equals(ii, iTaskSymbol)) == true))
+            compilationContext.RegisterSymbolAction(
+                symbolContext =>
                 {
-                    return;
-                }
+                    var namedType = (INamedTypeSymbol)symbolContext.Symbol;
 
-                // Skip abstract classes
-                if (namedType.IsAbstract)
-                {
-                    return;
-                }
-
-                // Check if task is sealed
-                if (!namedType.IsSealed)
-                {
-                    var diagnostic = Diagnostic.Create(
-                        DiagnosticDescriptors.TaskMustBeSealed,
-                        namedType.Locations[0],
-                        namedType.Name);
-                    symbolContext.ReportDiagnostic(diagnostic);
-                }
-
-                // Find TaskName property
-                var taskNameProperty = namedType.GetMembers("TaskName")
-                    .OfType<IPropertySymbol>()
-                    .FirstOrDefault(p => p.IsStatic);
-
-                if (taskNameProperty == null)
-                {
-                    // TaskName not found - compiler will catch this
-                    return;
-                }
-
-                // Get TaskName value from syntax
-                var syntaxReference = taskNameProperty.DeclaringSyntaxReferences.FirstOrDefault();
-                if (syntaxReference == null)
-                {
-                    return;
-                }
-
-                var syntax = syntaxReference.GetSyntax();
-                if (syntax is PropertyDeclarationSyntax propertyDecl)
-                {
-                    var taskNameValue = ExtractTaskNameValue(propertyDecl);
-
-                    // Check if TaskName is empty or null
-                    if (taskNameValue == null || string.IsNullOrWhiteSpace(taskNameValue))
+                    // Check if type implements ITask
+                    if (
+                        !namedType.AllInterfaces.Any(i =>
+                            SymbolEqualityComparer.Default.Equals(i.OriginalDefinition, iTaskSymbol)
+                            || i.OriginalDefinition?.AllInterfaces.Any(ii =>
+                                SymbolEqualityComparer.Default.Equals(ii, iTaskSymbol)
+                            ) == true
+                        )
+                    )
                     {
-                        var diagnostic = Diagnostic.Create(
-                            DiagnosticDescriptors.TaskNameCannotBeEmpty,
-                            propertyDecl.Identifier.GetLocation(),
-                            namedType.Name);
-                        symbolContext.ReportDiagnostic(diagnostic);
                         return;
                     }
 
-                    taskNames
-                        .GetOrAdd(
-                            taskNameValue,
-                            _ =>
-                                new System.Collections.Concurrent.ConcurrentBag<(
+                    // Skip abstract classes
+                    if (namedType.IsAbstract)
+                    {
+                        return;
+                    }
+
+                    // Check if task is sealed
+                    if (!namedType.IsSealed)
+                    {
+                        var diagnostic = Diagnostic.Create(
+                            DiagnosticDescriptors.TaskMustBeSealed,
+                            namedType.Locations[0],
+                            namedType.Name
+                        );
+                        symbolContext.ReportDiagnostic(diagnostic);
+                    }
+
+                    // Find TaskName property
+                    var taskNameProperty = namedType
+                        .GetMembers("TaskName")
+                        .OfType<IPropertySymbol>()
+                        .FirstOrDefault(p => p.IsStatic);
+
+                    if (taskNameProperty == null)
+                    {
+                        // TaskName not found - compiler will catch this
+                        return;
+                    }
+
+                    // Get TaskName value from syntax
+                    var syntaxReference =
+                        taskNameProperty.DeclaringSyntaxReferences.FirstOrDefault();
+                    if (syntaxReference == null)
+                    {
+                        return;
+                    }
+
+                    var syntax = syntaxReference.GetSyntax();
+                    if (syntax is PropertyDeclarationSyntax propertyDecl)
+                    {
+                        var taskNameValue = ExtractTaskNameValue(propertyDecl);
+
+                        // Check if TaskName is empty or null
+                        if (taskNameValue == null || string.IsNullOrWhiteSpace(taskNameValue))
+                        {
+                            var diagnostic = Diagnostic.Create(
+                                DiagnosticDescriptors.TaskNameCannotBeEmpty,
+                                propertyDecl.Identifier.GetLocation(),
+                                namedType.Name
+                            );
+                            symbolContext.ReportDiagnostic(diagnostic);
+                            return;
+                        }
+
+                        taskNames
+                            .GetOrAdd(
+                                taskNameValue,
+                                _ => new System.Collections.Concurrent.ConcurrentBag<(
                                     INamedTypeSymbol Type,
                                     Location Location
                                 )>()
-                        )
-                        .Add((namedType, propertyDecl.Identifier.GetLocation()));
-                }
-            }, SymbolKind.NamedType);
+                            )
+                            .Add((namedType, propertyDecl.Identifier.GetLocation()));
+                    }
+                },
+                SymbolKind.NamedType
+            );
 
             compilationContext.RegisterCompilationEndAction(endContext =>
             {
@@ -131,7 +147,8 @@ public sealed class TaskNameAnalyzer : DiagnosticAnalyzer
                             DiagnosticDescriptors.DuplicateTaskName,
                             duplicateTask.Location,
                             duplicateTask.Type.Name,
-                            duplicateGroup.Key);
+                            duplicateGroup.Key
+                        );
                         endContext.ReportDiagnostic(diagnostic);
                     }
                 }
@@ -142,18 +159,23 @@ public sealed class TaskNameAnalyzer : DiagnosticAnalyzer
     private static string? ExtractTaskNameValue(PropertyDeclarationSyntax propertyDecl)
     {
         // Handle: public static string TaskName => "value";
-        if (propertyDecl.ExpressionBody?.Expression is LiteralExpressionSyntax literal &&
-            literal.IsKind(SyntaxKind.StringLiteralExpression))
+        if (
+            propertyDecl.ExpressionBody?.Expression is LiteralExpressionSyntax literal
+            && literal.IsKind(SyntaxKind.StringLiteralExpression)
+        )
         {
             return literal.Token.ValueText;
         }
 
         // Handle: public static string TaskName { get => "value"; }
-        var getter = propertyDecl.AccessorList?.Accessors
-            .FirstOrDefault(a => a.IsKind(SyntaxKind.GetAccessorDeclaration));
+        var getter = propertyDecl.AccessorList?.Accessors.FirstOrDefault(a =>
+            a.IsKind(SyntaxKind.GetAccessorDeclaration)
+        );
 
-        if (getter?.ExpressionBody?.Expression is LiteralExpressionSyntax getterLiteral &&
-            getterLiteral.IsKind(SyntaxKind.StringLiteralExpression))
+        if (
+            getter?.ExpressionBody?.Expression is LiteralExpressionSyntax getterLiteral
+            && getterLiteral.IsKind(SyntaxKind.StringLiteralExpression)
+        )
         {
             return getterLiteral.Token.ValueText;
         }
@@ -161,12 +183,14 @@ public sealed class TaskNameAnalyzer : DiagnosticAnalyzer
         // Handle: public static string TaskName { get { return "value"; } }
         if (getter?.Body != null)
         {
-            var returnStatement = getter.Body.Statements
-                .OfType<ReturnStatementSyntax>()
+            var returnStatement = getter
+                .Body.Statements.OfType<ReturnStatementSyntax>()
                 .FirstOrDefault();
 
-            if (returnStatement?.Expression is LiteralExpressionSyntax returnLiteral &&
-                returnLiteral.IsKind(SyntaxKind.StringLiteralExpression))
+            if (
+                returnStatement?.Expression is LiteralExpressionSyntax returnLiteral
+                && returnLiteral.IsKind(SyntaxKind.StringLiteralExpression)
+            )
             {
                 return returnLiteral.Token.ValueText;
             }

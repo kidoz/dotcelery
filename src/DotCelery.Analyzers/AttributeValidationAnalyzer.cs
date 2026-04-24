@@ -1,8 +1,5 @@
 using System.Collections.Immutable;
-using System.Linq;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace DotCelery.Analyzers;
@@ -17,7 +14,8 @@ public sealed class AttributeValidationAnalyzer : DiagnosticAnalyzer
         ImmutableArray.Create(
             DiagnosticDescriptors.InvalidTimeLimitConfiguration,
             DiagnosticDescriptors.InvalidRouteAttribute,
-            DiagnosticDescriptors.InvalidPreventOverlappingConfiguration);
+            DiagnosticDescriptors.InvalidPreventOverlappingConfiguration
+        );
 
     public override void Initialize(AnalysisContext context)
     {
@@ -26,47 +24,79 @@ public sealed class AttributeValidationAnalyzer : DiagnosticAnalyzer
 
         context.RegisterCompilationStartAction(compilationContext =>
         {
-            var timeLimitAttributeSymbol = compilationContext.Compilation.GetTypeByMetadataName("DotCelery.Core.Attributes.TimeLimitAttribute");
-            var routeAttributeSymbol = compilationContext.Compilation.GetTypeByMetadataName("DotCelery.Core.Routing.RouteAttribute");
-            var preventOverlappingAttributeSymbol = compilationContext.Compilation.GetTypeByMetadataName("DotCelery.Core.Attributes.PreventOverlappingAttribute");
+            var timeLimitAttributeSymbol = compilationContext.Compilation.GetTypeByMetadataName(
+                "DotCelery.Core.Attributes.TimeLimitAttribute"
+            );
+            var routeAttributeSymbol = compilationContext.Compilation.GetTypeByMetadataName(
+                "DotCelery.Core.Routing.RouteAttribute"
+            );
+            var preventOverlappingAttributeSymbol =
+                compilationContext.Compilation.GetTypeByMetadataName(
+                    "DotCelery.Core.Attributes.PreventOverlappingAttribute"
+                );
 
-            if (timeLimitAttributeSymbol == null && routeAttributeSymbol == null && preventOverlappingAttributeSymbol == null)
+            if (
+                timeLimitAttributeSymbol == null
+                && routeAttributeSymbol == null
+                && preventOverlappingAttributeSymbol == null
+            )
             {
                 return;
             }
 
-            compilationContext.RegisterSymbolAction(symbolContext =>
-            {
-                var namedType = (INamedTypeSymbol)symbolContext.Symbol;
-
-                foreach (var attribute in namedType.GetAttributes())
+            compilationContext.RegisterSymbolAction(
+                symbolContext =>
                 {
-                    // Validate TimeLimitAttribute
-                    if (timeLimitAttributeSymbol != null &&
-                        SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, timeLimitAttributeSymbol))
-                    {
-                        ValidateTimeLimitAttribute(attribute, symbolContext);
-                    }
+                    var namedType = (INamedTypeSymbol)symbolContext.Symbol;
 
-                    // Validate RouteAttribute
-                    if (routeAttributeSymbol != null &&
-                        SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, routeAttributeSymbol))
+                    foreach (var attribute in namedType.GetAttributes())
                     {
-                        ValidateRouteAttribute(attribute, symbolContext);
-                    }
+                        // Validate TimeLimitAttribute
+                        if (
+                            timeLimitAttributeSymbol != null
+                            && SymbolEqualityComparer.Default.Equals(
+                                attribute.AttributeClass,
+                                timeLimitAttributeSymbol
+                            )
+                        )
+                        {
+                            ValidateTimeLimitAttribute(attribute, symbolContext);
+                        }
 
-                    // Validate PreventOverlappingAttribute
-                    if (preventOverlappingAttributeSymbol != null &&
-                        SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, preventOverlappingAttributeSymbol))
-                    {
-                        ValidatePreventOverlappingAttribute(attribute, symbolContext);
+                        // Validate RouteAttribute
+                        if (
+                            routeAttributeSymbol != null
+                            && SymbolEqualityComparer.Default.Equals(
+                                attribute.AttributeClass,
+                                routeAttributeSymbol
+                            )
+                        )
+                        {
+                            ValidateRouteAttribute(attribute, symbolContext);
+                        }
+
+                        // Validate PreventOverlappingAttribute
+                        if (
+                            preventOverlappingAttributeSymbol != null
+                            && SymbolEqualityComparer.Default.Equals(
+                                attribute.AttributeClass,
+                                preventOverlappingAttributeSymbol
+                            )
+                        )
+                        {
+                            ValidatePreventOverlappingAttribute(attribute, symbolContext);
+                        }
                     }
-                }
-            }, SymbolKind.NamedType);
+                },
+                SymbolKind.NamedType
+            );
         });
     }
 
-    private static void ValidateTimeLimitAttribute(AttributeData attribute, SymbolAnalysisContext context)
+    private static void ValidateTimeLimitAttribute(
+        AttributeData attribute,
+        SymbolAnalysisContext context
+    )
     {
         int? softLimit = null;
         int? hardLimit = null;
@@ -88,8 +118,10 @@ public sealed class AttributeValidationAnalyzer : DiagnosticAnalyzer
         {
             var diagnostic = Diagnostic.Create(
                 DiagnosticDescriptors.InvalidTimeLimitConfiguration,
-                attribute.ApplicationSyntaxReference?.GetSyntax().GetLocation() ?? context.Symbol.Locations[0],
-                "SoftLimitSeconds must be greater than 0");
+                attribute.ApplicationSyntaxReference?.GetSyntax().GetLocation()
+                    ?? context.Symbol.Locations[0],
+                "SoftLimitSeconds must be greater than 0"
+            );
             context.ReportDiagnostic(diagnostic);
         }
 
@@ -97,8 +129,10 @@ public sealed class AttributeValidationAnalyzer : DiagnosticAnalyzer
         {
             var diagnostic = Diagnostic.Create(
                 DiagnosticDescriptors.InvalidTimeLimitConfiguration,
-                attribute.ApplicationSyntaxReference?.GetSyntax().GetLocation() ?? context.Symbol.Locations[0],
-                "HardLimitSeconds must be greater than 0");
+                attribute.ApplicationSyntaxReference?.GetSyntax().GetLocation()
+                    ?? context.Symbol.Locations[0],
+                "HardLimitSeconds must be greater than 0"
+            );
             context.ReportDiagnostic(diagnostic);
         }
 
@@ -107,13 +141,18 @@ public sealed class AttributeValidationAnalyzer : DiagnosticAnalyzer
         {
             var diagnostic = Diagnostic.Create(
                 DiagnosticDescriptors.InvalidTimeLimitConfiguration,
-                attribute.ApplicationSyntaxReference?.GetSyntax().GetLocation() ?? context.Symbol.Locations[0],
-                "SoftLimitSeconds must be less than HardLimitSeconds");
+                attribute.ApplicationSyntaxReference?.GetSyntax().GetLocation()
+                    ?? context.Symbol.Locations[0],
+                "SoftLimitSeconds must be less than HardLimitSeconds"
+            );
             context.ReportDiagnostic(diagnostic);
         }
     }
 
-    private static void ValidateRouteAttribute(AttributeData attribute, SymbolAnalysisContext context)
+    private static void ValidateRouteAttribute(
+        AttributeData attribute,
+        SymbolAnalysisContext context
+    )
     {
         // RouteAttribute has a required constructor parameter
         if (attribute.ConstructorArguments.Length > 0)
@@ -123,13 +162,18 @@ public sealed class AttributeValidationAnalyzer : DiagnosticAnalyzer
             {
                 var diagnostic = Diagnostic.Create(
                     DiagnosticDescriptors.InvalidRouteAttribute,
-                    attribute.ApplicationSyntaxReference?.GetSyntax().GetLocation() ?? context.Symbol.Locations[0]);
+                    attribute.ApplicationSyntaxReference?.GetSyntax().GetLocation()
+                        ?? context.Symbol.Locations[0]
+                );
                 context.ReportDiagnostic(diagnostic);
             }
         }
     }
 
-    private static void ValidatePreventOverlappingAttribute(AttributeData attribute, SymbolAnalysisContext context)
+    private static void ValidatePreventOverlappingAttribute(
+        AttributeData attribute,
+        SymbolAnalysisContext context
+    )
     {
         int? timeoutSeconds = null;
         bool keyByInput = false;
@@ -156,8 +200,10 @@ public sealed class AttributeValidationAnalyzer : DiagnosticAnalyzer
         {
             var diagnostic = Diagnostic.Create(
                 DiagnosticDescriptors.InvalidPreventOverlappingConfiguration,
-                attribute.ApplicationSyntaxReference?.GetSyntax().GetLocation() ?? context.Symbol.Locations[0],
-                "TimeoutSeconds must be greater than 0");
+                attribute.ApplicationSyntaxReference?.GetSyntax().GetLocation()
+                    ?? context.Symbol.Locations[0],
+                "TimeoutSeconds must be greater than 0"
+            );
             context.ReportDiagnostic(diagnostic);
         }
 
@@ -166,8 +212,10 @@ public sealed class AttributeValidationAnalyzer : DiagnosticAnalyzer
         {
             var diagnostic = Diagnostic.Create(
                 DiagnosticDescriptors.InvalidPreventOverlappingConfiguration,
-                attribute.ApplicationSyntaxReference?.GetSyntax().GetLocation() ?? context.Symbol.Locations[0],
-                "KeyProperty can only be set when KeyByInput is true");
+                attribute.ApplicationSyntaxReference?.GetSyntax().GetLocation()
+                    ?? context.Symbol.Locations[0],
+                "KeyProperty can only be set when KeyByInput is true"
+            );
             context.ReportDiagnostic(diagnostic);
         }
     }

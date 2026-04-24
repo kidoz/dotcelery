@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Diagnostics;
 
@@ -11,17 +10,20 @@ namespace DotCelery.Analyzers;
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class SerializationAnalyzer : DiagnosticAnalyzer
 {
-    private static readonly ImmutableHashSet<string> MutableCollectionTypes = ImmutableHashSet.Create(
-        "System.Collections.Generic.List`1",
-        "System.Collections.Generic.Dictionary`2",
-        "System.Collections.Generic.HashSet`1",
-        "System.Collections.ArrayList",
-        "System.Collections.Hashtable");
+    private static readonly ImmutableHashSet<string> MutableCollectionTypes =
+        ImmutableHashSet.Create(
+            "System.Collections.Generic.List`1",
+            "System.Collections.Generic.Dictionary`2",
+            "System.Collections.Generic.HashSet`1",
+            "System.Collections.ArrayList",
+            "System.Collections.Hashtable"
+        );
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
         ImmutableArray.Create(
             DiagnosticDescriptors.TypeMustBeSerializable,
-            DiagnosticDescriptors.AvoidMutableCollections);
+            DiagnosticDescriptors.AvoidMutableCollections
+        );
 
     public override void Initialize(AnalysisContext context)
     {
@@ -30,51 +32,65 @@ public sealed class SerializationAnalyzer : DiagnosticAnalyzer
 
         context.RegisterCompilationStartAction(compilationContext =>
         {
-            var iTaskSymbol = compilationContext.Compilation.GetTypeByMetadataName("DotCelery.Core.Abstractions.ITask");
+            var iTaskSymbol = compilationContext.Compilation.GetTypeByMetadataName(
+                "DotCelery.Core.Abstractions.ITask"
+            );
             if (iTaskSymbol == null)
             {
                 return;
             }
 
-            compilationContext.RegisterSymbolAction(symbolContext =>
-            {
-                var namedType = (INamedTypeSymbol)symbolContext.Symbol;
-
-                // Check if type implements ITask<TInput> or ITask<TInput, TOutput>
-                foreach (var iface in namedType.AllInterfaces)
+            compilationContext.RegisterSymbolAction(
+                symbolContext =>
                 {
-                    if (iface.OriginalDefinition == null || !iface.OriginalDefinition.AllInterfaces.Any(i => SymbolEqualityComparer.Default.Equals(i, iTaskSymbol)))
-                    {
-                        continue;
-                    }
+                    var namedType = (INamedTypeSymbol)symbolContext.Symbol;
 
-                    // Check type arguments
-                    foreach (var typeArg in iface.TypeArguments)
+                    // Check if type implements ITask<TInput> or ITask<TInput, TOutput>
+                    foreach (var iface in namedType.AllInterfaces)
                     {
-                        if (typeArg is INamedTypeSymbol typeArgSymbol)
+                        if (
+                            iface.OriginalDefinition == null
+                            || !iface.OriginalDefinition.AllInterfaces.Any(i =>
+                                SymbolEqualityComparer.Default.Equals(i, iTaskSymbol)
+                            )
+                        )
                         {
-                            // Determine if this is input or output
-                            var paramType = iface.TypeArguments.IndexOf(typeArg) == 0 ? "input" : "output";
+                            continue;
+                        }
 
-                            // Check for parameterless constructor (for classes)
-                            if (typeArgSymbol.TypeKind == TypeKind.Class &&
-                                !typeArgSymbol.IsRecord &&
-                                !HasParameterlessConstructor(typeArgSymbol))
+                        // Check type arguments
+                        foreach (var typeArg in iface.TypeArguments)
+                        {
+                            if (typeArg is INamedTypeSymbol typeArgSymbol)
                             {
-                                var diagnostic = Diagnostic.Create(
-                                    DiagnosticDescriptors.TypeMustBeSerializable,
-                                    namedType.Locations[0],
-                                    typeArgSymbol.Name,
-                                    paramType);
-                                symbolContext.ReportDiagnostic(diagnostic);
-                            }
+                                // Determine if this is input or output
+                                var paramType =
+                                    iface.TypeArguments.IndexOf(typeArg) == 0 ? "input" : "output";
 
-                            // Check for mutable collections in properties
-                            CheckForMutableCollections(typeArgSymbol, symbolContext);
+                                // Check for parameterless constructor (for classes)
+                                if (
+                                    typeArgSymbol.TypeKind == TypeKind.Class
+                                    && !typeArgSymbol.IsRecord
+                                    && !HasParameterlessConstructor(typeArgSymbol)
+                                )
+                                {
+                                    var diagnostic = Diagnostic.Create(
+                                        DiagnosticDescriptors.TypeMustBeSerializable,
+                                        namedType.Locations[0],
+                                        typeArgSymbol.Name,
+                                        paramType
+                                    );
+                                    symbolContext.ReportDiagnostic(diagnostic);
+                                }
+
+                                // Check for mutable collections in properties
+                                CheckForMutableCollections(typeArgSymbol, symbolContext);
+                            }
                         }
                     }
-                }
-            }, SymbolKind.NamedType);
+                },
+                SymbolKind.NamedType
+            );
         });
     }
 
@@ -93,26 +109,37 @@ public sealed class SerializationAnalyzer : DiagnosticAnalyzer
         }
 
         // Check for explicit parameterless constructor
-        return typeSymbol.Constructors.Any(c => c.Parameters.Length == 0 && c.DeclaredAccessibility == Accessibility.Public);
+        return typeSymbol.Constructors.Any(c =>
+            c.Parameters.Length == 0 && c.DeclaredAccessibility == Accessibility.Public
+        );
     }
 
-    private static void CheckForMutableCollections(INamedTypeSymbol typeSymbol, SymbolAnalysisContext context)
+    private static void CheckForMutableCollections(
+        INamedTypeSymbol typeSymbol,
+        SymbolAnalysisContext context
+    )
     {
         foreach (var member in typeSymbol.GetMembers())
         {
-            if (member is IPropertySymbol property && property.DeclaredAccessibility == Accessibility.Public)
+            if (
+                member is IPropertySymbol property
+                && property.DeclaredAccessibility == Accessibility.Public
+            )
             {
                 var propertyType = property.Type;
                 if (propertyType is INamedTypeSymbol namedPropertyType)
                 {
-                    var fullName = namedPropertyType.OriginalDefinition?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                    var fullName = namedPropertyType.OriginalDefinition?.ToDisplayString(
+                        SymbolDisplayFormat.FullyQualifiedFormat
+                    );
                     if (fullName != null && MutableCollectionTypes.Contains(fullName))
                     {
                         var diagnostic = Diagnostic.Create(
                             DiagnosticDescriptors.AvoidMutableCollections,
                             property.Locations[0],
                             typeSymbol.Name,
-                            property.Name);
+                            property.Name
+                        );
                         context.ReportDiagnostic(diagnostic);
                     }
                 }

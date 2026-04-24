@@ -1,4 +1,3 @@
-using System.Text.Json;
 using DotCelery.Core.Batches;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;

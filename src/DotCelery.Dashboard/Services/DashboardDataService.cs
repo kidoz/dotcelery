@@ -1,7 +1,6 @@
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Dashboard;
 using DotCelery.Core.Models;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace DotCelery.Dashboard.Services;

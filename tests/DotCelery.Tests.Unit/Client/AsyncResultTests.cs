@@ -3,12 +3,10 @@ namespace DotCelery.Tests.Unit.Client;
 using DotCelery.Backend.InMemory;
 using DotCelery.Broker.InMemory;
 using DotCelery.Client;
-using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
 using DotCelery.Core.Serialization;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 
 public class AsyncResultTests : IAsyncDisposable
 {

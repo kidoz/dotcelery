@@ -1,5 +1,3 @@
-using DotCelery.Core.Models;
-
 namespace DotCelery.Core.Canvas;
 
 /// <summary>

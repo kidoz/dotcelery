@@ -4,9 +4,6 @@ using DotCelery.Dashboard.Middleware;
 using DotCelery.Dashboard.Routing;
 using DotCelery.Dashboard.Security;
 using DotCelery.Dashboard.Services;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace DotCelery.Dashboard.Extensions;
 

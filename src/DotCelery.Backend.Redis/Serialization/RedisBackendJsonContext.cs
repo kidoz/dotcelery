@@ -5,7 +5,6 @@ using DotCelery.Core.Migrations;
 using DotCelery.Core.Models;
 using DotCelery.Core.Outbox;
 using DotCelery.Core.Sagas;
-using DotCelery.Core.Serialization;
 using DotCelery.Core.Signals;
 
 namespace DotCelery.Backend.Redis.Serialization;

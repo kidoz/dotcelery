@@ -1,12 +1,8 @@
 using DotCelery.Core.Abstractions;
-using DotCelery.Core.Batches;
 using DotCelery.Core.DeadLetter;
-using DotCelery.Core.Execution;
 using DotCelery.Core.Extensions;
-using DotCelery.Core.Filters;
 using DotCelery.Core.MultiTenancy;
 using DotCelery.Core.Outbox;
-using DotCelery.Core.Partitioning;
 using DotCelery.Core.Security;
 using DotCelery.Core.Signals;
 using DotCelery.Worker.Batches;

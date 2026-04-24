@@ -1,13 +1,8 @@
-using Microsoft.AspNetCore.Http;
-
 namespace DotCelery.Dashboard.Security;
 
 internal static class DashboardAuthorization
 {
-    public static async Task<bool> IsAuthorizedAsync(
-        HttpContext context,
-        DashboardOptions options
-    )
+    public static async Task<bool> IsAuthorizedAsync(HttpContext context, DashboardOptions options)
     {
         if (options.RequireAuthorization)
         {

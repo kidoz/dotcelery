@@ -1,4 +1,3 @@
-using DotCelery.Client;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
 using Microsoft.Extensions.Hosting;

@@ -1,8 +1,6 @@
-using System.Reflection;
 using System.Text;
 using System.Web;
 using DotCelery.Dashboard.Security;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 
 namespace DotCelery.Dashboard.Middleware;

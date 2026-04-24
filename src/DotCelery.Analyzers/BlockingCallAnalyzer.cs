@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -23,50 +22,80 @@ public sealed class BlockingCallAnalyzer : DiagnosticAnalyzer
 
         context.RegisterCompilationStartAction(compilationContext =>
         {
-            var iTaskSymbol = compilationContext.Compilation.GetTypeByMetadataName("DotCelery.Core.Abstractions.ITask");
+            var iTaskSymbol = compilationContext.Compilation.GetTypeByMetadataName(
+                "DotCelery.Core.Abstractions.ITask"
+            );
             if (iTaskSymbol == null)
             {
                 return;
             }
 
-            compilationContext.RegisterSyntaxNodeAction(nodeContext =>
-            {
-                // Check if we're inside an ExecuteAsync method of a task class
-                if (!IsInsideTaskExecuteAsync(nodeContext.Node, nodeContext.SemanticModel, iTaskSymbol))
+            compilationContext.RegisterSyntaxNodeAction(
+                nodeContext =>
                 {
-                    return;
-                }
-
-                // Check for Task.Wait()
-                if (nodeContext.Node is InvocationExpressionSyntax invocation)
-                {
-                    if (IsBlockingCall(invocation, nodeContext.SemanticModel, out var blockingMethod))
+                    // Check if we're inside an ExecuteAsync method of a task class
+                    if (
+                        !IsInsideTaskExecuteAsync(
+                            nodeContext.Node,
+                            nodeContext.SemanticModel,
+                            iTaskSymbol
+                        )
+                    )
                     {
-                        var diagnostic = Diagnostic.Create(
-                            DiagnosticDescriptors.AvoidBlockingCallsInTasks,
-                            invocation.GetLocation(),
-                            blockingMethod);
-                        nodeContext.ReportDiagnostic(diagnostic);
+                        return;
                     }
-                }
 
-                // Check for Task.Result
-                if (nodeContext.Node is MemberAccessExpressionSyntax memberAccess)
-                {
-                    if (IsBlockingPropertyAccess(memberAccess, nodeContext.SemanticModel, out var blockingProperty))
+                    // Check for Task.Wait()
+                    if (nodeContext.Node is InvocationExpressionSyntax invocation)
                     {
-                        var diagnostic = Diagnostic.Create(
-                            DiagnosticDescriptors.AvoidBlockingCallsInTasks,
-                            memberAccess.GetLocation(),
-                            blockingProperty);
-                        nodeContext.ReportDiagnostic(diagnostic);
+                        if (
+                            IsBlockingCall(
+                                invocation,
+                                nodeContext.SemanticModel,
+                                out var blockingMethod
+                            )
+                        )
+                        {
+                            var diagnostic = Diagnostic.Create(
+                                DiagnosticDescriptors.AvoidBlockingCallsInTasks,
+                                invocation.GetLocation(),
+                                blockingMethod
+                            );
+                            nodeContext.ReportDiagnostic(diagnostic);
+                        }
                     }
-                }
-            }, SyntaxKind.InvocationExpression, SyntaxKind.SimpleMemberAccessExpression);
+
+                    // Check for Task.Result
+                    if (nodeContext.Node is MemberAccessExpressionSyntax memberAccess)
+                    {
+                        if (
+                            IsBlockingPropertyAccess(
+                                memberAccess,
+                                nodeContext.SemanticModel,
+                                out var blockingProperty
+                            )
+                        )
+                        {
+                            var diagnostic = Diagnostic.Create(
+                                DiagnosticDescriptors.AvoidBlockingCallsInTasks,
+                                memberAccess.GetLocation(),
+                                blockingProperty
+                            );
+                            nodeContext.ReportDiagnostic(diagnostic);
+                        }
+                    }
+                },
+                SyntaxKind.InvocationExpression,
+                SyntaxKind.SimpleMemberAccessExpression
+            );
         });
     }
 
-    private static bool IsInsideTaskExecuteAsync(SyntaxNode node, SemanticModel semanticModel, INamedTypeSymbol iTaskSymbol)
+    private static bool IsInsideTaskExecuteAsync(
+        SyntaxNode node,
+        SemanticModel semanticModel,
+        INamedTypeSymbol iTaskSymbol
+    )
     {
         var method = node.FirstAncestorOrSelf<MethodDeclarationSyntax>();
         if (method == null || method.Identifier.Text != "ExecuteAsync")
@@ -82,11 +111,18 @@ public sealed class BlockingCallAnalyzer : DiagnosticAnalyzer
 
         var containingType = methodSymbol.ContainingType;
         return containingType.AllInterfaces.Any(i =>
-            SymbolEqualityComparer.Default.Equals(i.OriginalDefinition, iTaskSymbol) ||
-            i.OriginalDefinition?.AllInterfaces.Any(ii => SymbolEqualityComparer.Default.Equals(ii, iTaskSymbol)) == true);
+            SymbolEqualityComparer.Default.Equals(i.OriginalDefinition, iTaskSymbol)
+            || i.OriginalDefinition?.AllInterfaces.Any(ii =>
+                SymbolEqualityComparer.Default.Equals(ii, iTaskSymbol)
+            ) == true
+        );
     }
 
-    private static bool IsBlockingCall(InvocationExpressionSyntax invocation, SemanticModel semanticModel, out string blockingMethod)
+    private static bool IsBlockingCall(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        out string blockingMethod
+    )
     {
         blockingMethod = string.Empty;
 
@@ -103,20 +139,25 @@ public sealed class BlockingCallAnalyzer : DiagnosticAnalyzer
         }
 
         // Check for Task.Wait()
-        if (methodSymbol.Name == "Wait" &&
-            (containingType.Name == "Task" || containingType.OriginalDefinition?.Name == "Task") &&
-            containingType.ContainingNamespace?.ToString() == "System.Threading.Tasks")
+        if (
+            methodSymbol.Name == "Wait"
+            && (containingType.Name == "Task" || containingType.OriginalDefinition?.Name == "Task")
+            && containingType.ContainingNamespace?.ToString() == "System.Threading.Tasks"
+        )
         {
             blockingMethod = "Task.Wait()";
             return true;
         }
 
         // Check for .GetAwaiter().GetResult()
-        if (methodSymbol.Name == "GetResult" &&
-            invocation.Expression is MemberAccessExpressionSyntax memberAccess &&
-            memberAccess.Expression is InvocationExpressionSyntax getAwaiterInvocation)
+        if (
+            methodSymbol.Name == "GetResult"
+            && invocation.Expression is MemberAccessExpressionSyntax memberAccess
+            && memberAccess.Expression is InvocationExpressionSyntax getAwaiterInvocation
+        )
         {
-            var getAwaiterSymbol = semanticModel.GetSymbolInfo(getAwaiterInvocation).Symbol as IMethodSymbol;
+            var getAwaiterSymbol =
+                semanticModel.GetSymbolInfo(getAwaiterInvocation).Symbol as IMethodSymbol;
             if (getAwaiterSymbol?.Name == "GetAwaiter")
             {
                 blockingMethod = ".GetAwaiter().GetResult()";
@@ -127,7 +168,11 @@ public sealed class BlockingCallAnalyzer : DiagnosticAnalyzer
         return false;
     }
 
-    private static bool IsBlockingPropertyAccess(MemberAccessExpressionSyntax memberAccess, SemanticModel semanticModel, out string blockingProperty)
+    private static bool IsBlockingPropertyAccess(
+        MemberAccessExpressionSyntax memberAccess,
+        SemanticModel semanticModel,
+        out string blockingProperty
+    )
     {
         blockingProperty = string.Empty;
 
@@ -144,9 +189,11 @@ public sealed class BlockingCallAnalyzer : DiagnosticAnalyzer
         }
 
         // Check for Task.Result
-        if (propertySymbol.Name == "Result" &&
-            (containingType.Name == "Task" || containingType.OriginalDefinition?.Name == "Task") &&
-            containingType.ContainingNamespace?.ToString() == "System.Threading.Tasks")
+        if (
+            propertySymbol.Name == "Result"
+            && (containingType.Name == "Task" || containingType.OriginalDefinition?.Name == "Task")
+            && containingType.ContainingNamespace?.ToString() == "System.Threading.Tasks"
+        )
         {
             blockingProperty = "Task.Result";
             return true;

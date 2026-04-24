@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using DotCelery.Core.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;

@@ -3,7 +3,6 @@ using DotCelery.Broker.InMemory.Extensions;
 using DotCelery.Client;
 using DotCelery.Client.Extensions;
 using DotCelery.Core.Extensions;
-using DotCelery.Core.Models;
 using DotCelery.Demo.Tasks;
 using DotCelery.Worker.Extensions;
 using Microsoft.Extensions.DependencyInjection;

@@ -1,5 +1,4 @@
 using DotCelery.Core.Abstractions;
-using DotCelery.Core.Canvas;
 
 namespace DotCelery.Client.Batches;
 

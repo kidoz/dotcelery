@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using DotCelery.Core.Abstractions;
-using DotCelery.Core.Models;
 using DotCelery.Core.Outbox;
 using DotCelery.Core.Serialization;
 using Microsoft.Extensions.Logging;
