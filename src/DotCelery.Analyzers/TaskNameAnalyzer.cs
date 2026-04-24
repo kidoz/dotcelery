@@ -33,7 +33,11 @@ public sealed class TaskNameAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
-            var taskNames = new System.Collections.Concurrent.ConcurrentDictionary<string, INamedTypeSymbol>();
+            var taskNames =
+                new System.Collections.Concurrent.ConcurrentDictionary<
+                    string,
+                    System.Collections.Concurrent.ConcurrentBag<(INamedTypeSymbol Type, Location Location)>
+                >();
 
             compilationContext.RegisterSymbolAction(symbolContext =>
             {
@@ -90,25 +94,48 @@ public sealed class TaskNameAnalyzer : DiagnosticAnalyzer
                     {
                         var diagnostic = Diagnostic.Create(
                             DiagnosticDescriptors.TaskNameCannotBeEmpty,
-                            propertyDecl.GetLocation(),
+                            propertyDecl.Identifier.GetLocation(),
                             namedType.Name);
                         symbolContext.ReportDiagnostic(diagnostic);
                         return;
                     }
 
-                    // Check for duplicate TaskName
-                    if (!taskNames.TryAdd(taskNameValue, namedType))
-                    {
-                        var existingTask = taskNames[taskNameValue];
-                        var diagnostic = Diagnostic.Create(
-                            DiagnosticDescriptors.DuplicateTaskName,
-                            propertyDecl.GetLocation(),
-                            namedType.Name,
-                            taskNameValue);
-                        symbolContext.ReportDiagnostic(diagnostic);
-                    }
+                    taskNames
+                        .GetOrAdd(
+                            taskNameValue,
+                            _ =>
+                                new System.Collections.Concurrent.ConcurrentBag<(
+                                    INamedTypeSymbol Type,
+                                    Location Location
+                                )>()
+                        )
+                        .Add((namedType, propertyDecl.Identifier.GetLocation()));
                 }
             }, SymbolKind.NamedType);
+
+            compilationContext.RegisterCompilationEndAction(endContext =>
+            {
+                foreach (var duplicateGroup in taskNames)
+                {
+                    var orderedTasks = duplicateGroup
+                        .Value.OrderBy(item => item.Location.SourceSpan.Start)
+                        .ToList();
+                    if (orderedTasks.Count <= 1)
+                    {
+                        continue;
+                    }
+
+                    foreach (var duplicateTask in orderedTasks.Skip(1))
+                    {
+                        var diagnostic = Diagnostic.Create(
+                            DiagnosticDescriptors.DuplicateTaskName,
+                            duplicateTask.Location,
+                            duplicateTask.Type.Name,
+                            duplicateGroup.Key);
+                        endContext.ReportDiagnostic(diagnostic);
+                    }
+                }
+            });
         });
     }
 

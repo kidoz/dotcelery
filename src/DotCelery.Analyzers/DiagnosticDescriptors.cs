@@ -26,7 +26,8 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Task names must be unique across the application for proper routing.");
+        description: "Task names must be unique across the application for proper routing.",
+        customTags: [WellKnownDiagnosticTags.CompilationEnd]);
 
     public static readonly DiagnosticDescriptor TaskMustBeSealed = new(
         id: "DCEL003",
