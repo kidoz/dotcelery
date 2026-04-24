@@ -52,6 +52,17 @@ public sealed class RabbitMQBrokerOptions
     public TimeSpan Heartbeat { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
+    /// Gets or sets whether publisher confirmations are enabled.
+    /// When enabled, publish calls fail if the broker nacks or returns the message.
+    /// </summary>
+    public bool EnablePublisherConfirms { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets whether published messages must route to a queue.
+    /// </summary>
+    public bool MandatoryPublish { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets the maximum message size in bytes.
     /// Messages larger than this will be rejected.
     /// Default is 10 MB. Set to 0 to disable size checking.

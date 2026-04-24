@@ -1,8 +1,11 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Threading.Channels;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
+using DotCelery.Core.Security;
+using DotCelery.Core.Serialization;
 using Microsoft.Extensions.Options;
 
 namespace DotCelery.Broker.InMemory;
@@ -14,6 +17,7 @@ public sealed class InMemoryBroker : IMessageBroker
 {
     private readonly ConcurrentDictionary<string, Channel<BrokerMessage>> _queues = new();
     private readonly InMemoryBrokerOptions _options;
+    private readonly IMessageSecurityValidator? _messageSecurityValidator;
     private readonly Lock _lock = new();
     private bool _disposed;
 
@@ -27,9 +31,14 @@ public sealed class InMemoryBroker : IMessageBroker
     /// Initializes a new instance of the <see cref="InMemoryBroker"/> class.
     /// </summary>
     /// <param name="options">The broker options.</param>
-    public InMemoryBroker(IOptions<InMemoryBrokerOptions> options)
+    /// <param name="messageSecurityValidator">Optional message security validator.</param>
+    public InMemoryBroker(
+        IOptions<InMemoryBrokerOptions> options,
+        IMessageSecurityValidator? messageSecurityValidator = null
+    )
     {
         _options = options.Value;
+        _messageSecurityValidator = messageSecurityValidator;
     }
 
     /// <inheritdoc />
@@ -41,12 +50,18 @@ public sealed class InMemoryBroker : IMessageBroker
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         var channel = GetOrCreateQueue(message.Queue);
+        var rawBody = JsonSerializer.SerializeToUtf8Bytes(
+            message,
+            DotCeleryJsonContext.Default.TaskMessage
+        );
         var brokerMessage = new BrokerMessage
         {
             Message = message,
             DeliveryTag = Guid.NewGuid(),
             Queue = message.Queue,
             ReceivedAt = DateTimeOffset.UtcNow,
+            RawBody = rawBody,
+            Signature = _messageSecurityValidator?.Sign(rawBody),
         };
 
         return channel.Writer.WriteAsync(brokerMessage, cancellationToken);

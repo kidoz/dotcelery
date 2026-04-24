@@ -44,6 +44,35 @@ public sealed class SecurityValidationFilter : ITaskFilter
         CancellationToken cancellationToken
     )
     {
+        if (_validator is not null)
+        {
+            var validationResult = _validator.Validate(
+                context.Message,
+                context.BrokerMessage?.Signature
+            );
+            if (!validationResult.IsValid)
+            {
+                Reject(context, validationResult);
+                return ValueTask.CompletedTask;
+            }
+
+            if (
+                context.BrokerMessage?.RawBody is { Length: > 0 } rawBody
+                && !string.IsNullOrEmpty(context.BrokerMessage.Signature)
+                && !_validator.VerifySignature(rawBody, context.BrokerMessage.Signature)
+            )
+            {
+                Reject(
+                    context,
+                    MessageValidationResult.Failure(
+                        MessageValidationError.InvalidSignature,
+                        "Message signature is invalid"
+                    )
+                );
+                return ValueTask.CompletedTask;
+            }
+        }
+
         // Check schema version
         if (context.Message.SchemaVersion > _options.MaxAllowedSchemaVersion)
         {
@@ -142,5 +171,15 @@ public sealed class SecurityValidationFilter : ITaskFilter
                 ["securityMessage"] = errorMessage,
             },
         };
+    }
+
+    private static void Reject(TaskExecutingContext context, MessageValidationResult result)
+    {
+        context.SkipExecution = true;
+        context.SkipResult = CreateRejectedResult(
+            context.TaskId,
+            result.ErrorCode ?? MessageValidationError.InvalidSignature,
+            result.ErrorMessage ?? "Message security validation failed"
+        );
     }
 }

@@ -1,11 +1,13 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using System.Threading.Channels;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.DeadLetter;
 using DotCelery.Core.Models;
+using DotCelery.Core.Security;
 using DotCelery.Core.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -22,6 +24,7 @@ public sealed class RabbitMQBroker : IMessageBroker
     private readonly RabbitMQBrokerOptions _options;
     private readonly ILogger<RabbitMQBroker> _logger;
     private readonly IDeadLetterStore? _deadLetterStore;
+    private readonly IMessageSecurityValidator? _messageSecurityValidator;
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly SemaphoreSlim _publishChannelLock = new(1, 1);
     private readonly SemaphoreSlim _consumeChannelLock = new(1, 1);
@@ -42,15 +45,18 @@ public sealed class RabbitMQBroker : IMessageBroker
     /// <param name="options">The broker options.</param>
     /// <param name="logger">The logger.</param>
     /// <param name="deadLetterStore">Optional dead letter store for deserialization failures.</param>
+    /// <param name="messageSecurityValidator">Optional message security validator.</param>
     public RabbitMQBroker(
         IOptions<RabbitMQBrokerOptions> options,
         ILogger<RabbitMQBroker> logger,
-        IDeadLetterStore? deadLetterStore = null
+        IDeadLetterStore? deadLetterStore = null,
+        IMessageSecurityValidator? messageSecurityValidator = null
     )
     {
         _options = options.Value;
         _logger = logger;
         _deadLetterStore = deadLetterStore;
+        _messageSecurityValidator = messageSecurityValidator;
     }
 
     /// <inheritdoc />
@@ -92,6 +98,15 @@ public sealed class RabbitMQBroker : IMessageBroker
             CorrelationId = message.CorrelationId,
         };
 
+        var signature = _messageSecurityValidator?.Sign(body);
+        if (!string.IsNullOrEmpty(signature))
+        {
+            properties.Headers = new Dictionary<string, object?>
+            {
+                ["x-dotcelery-signature"] = Encoding.UTF8.GetBytes(signature),
+            };
+        }
+
         if (message.Expires.HasValue)
         {
             var ttl = message.Expires.Value - DateTimeOffset.UtcNow;
@@ -107,7 +122,7 @@ public sealed class RabbitMQBroker : IMessageBroker
             .BasicPublishAsync(
                 exchange: _options.Exchange,
                 routingKey: message.Queue,
-                mandatory: false,
+                mandatory: _options.MandatoryPublish,
                 basicProperties: properties,
                 body: body,
                 cancellationToken: cancellationToken
@@ -169,10 +184,19 @@ public sealed class RabbitMQBroker : IMessageBroker
             try
             {
                 // Deserialize using AOT-friendly type info
+                var body = ea.Body.ToArray();
+                var signature = GetSignature(ea.BasicProperties);
+                if (!IsSignatureValid(body, signature))
+                {
+                    await HandleSecurityFailureAsync(ea, channel, cancellationToken)
+                        .ConfigureAwait(false);
+                    return;
+                }
+
                 TaskMessage? taskMessage;
                 try
                 {
-                    taskMessage = JsonSerializer.Deserialize(ea.Body.Span, TaskMessageTypeInfo);
+                    taskMessage = JsonSerializer.Deserialize(body, TaskMessageTypeInfo);
                 }
                 catch (JsonException jsonEx)
                 {
@@ -194,6 +218,8 @@ public sealed class RabbitMQBroker : IMessageBroker
                     DeliveryTag = ea.DeliveryTag,
                     Queue = ea.RoutingKey,
                     ReceivedAt = DateTimeOffset.UtcNow,
+                    RawBody = body,
+                    Signature = signature,
                 };
 
                 _unackedMessages[ea.DeliveryTag] = brokerMessage;
@@ -491,8 +517,12 @@ public sealed class RabbitMQBroker : IMessageBroker
             }
 
             var connection = await GetConnectionAsync(cancellationToken).ConfigureAwait(false);
+            var channelOptions = new CreateChannelOptions(
+                publisherConfirmationsEnabled: _options.EnablePublisherConfirms,
+                publisherConfirmationTrackingEnabled: _options.EnablePublisherConfirms
+            );
             _publishChannel = await connection
-                .CreateChannelAsync(cancellationToken: cancellationToken)
+                .CreateChannelAsync(channelOptions, cancellationToken)
                 .ConfigureAwait(false);
 
             return _publishChannel;
@@ -615,5 +645,88 @@ public sealed class RabbitMQBroker : IMessageBroker
         {
             _logger.LogError(rejectEx, "Failed to reject message {DeliveryTag}", ea.DeliveryTag);
         }
+    }
+
+    private bool IsSignatureValid(byte[] body, string? signature)
+    {
+        if (_messageSecurityValidator is null)
+        {
+            return true;
+        }
+
+        var validation = _messageSecurityValidator.Validate(
+            new TaskMessage
+            {
+                Id = "unknown",
+                Task = "unknown",
+                Args = [],
+                ContentType = "application/json",
+                Timestamp = DateTimeOffset.UtcNow,
+            },
+            signature
+        );
+
+        if (validation.ErrorCode == MessageValidationError.MissingSignature)
+        {
+            return false;
+        }
+
+        return string.IsNullOrEmpty(signature)
+            || _messageSecurityValidator.VerifySignature(body, signature);
+    }
+
+    private async Task HandleSecurityFailureAsync(
+        BasicDeliverEventArgs ea,
+        IChannel channel,
+        CancellationToken cancellationToken
+    )
+    {
+        _logger.LogWarning(
+            "Rejected message {DeliveryTag} from queue {Queue} due to invalid or missing signature",
+            ea.DeliveryTag,
+            ea.RoutingKey
+        );
+
+        if (_deadLetterStore is not null)
+        {
+            var deadLetterMessage = new DeadLetterMessage
+            {
+                Id = Guid.NewGuid().ToString(),
+                TaskId = ea.BasicProperties?.MessageId ?? "unknown",
+                TaskName = ea.BasicProperties?.Type ?? "unknown",
+                Queue = ea.RoutingKey,
+                Reason = DeadLetterReason.Rejected,
+                OriginalMessage = ea.Body.ToArray(),
+                ExceptionMessage = "Message signature is invalid or missing",
+                ExceptionType = nameof(MessageSecurityException),
+                Timestamp = DateTimeOffset.UtcNow,
+            };
+
+            await _deadLetterStore.StoreAsync(deadLetterMessage, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        await channel
+            .BasicRejectAsync(ea.DeliveryTag, requeue: false, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static string? GetSignature(IReadOnlyBasicProperties? properties)
+    {
+        if (
+            properties?.Headers is null
+            || !properties.Headers.TryGetValue("x-dotcelery-signature", out var value)
+        )
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            byte[] bytes => Encoding.UTF8.GetString(bytes),
+            ReadOnlyMemory<byte> bytes => Encoding.UTF8.GetString(bytes.Span),
+            string text => text,
+            _ => value?.ToString(),
+        };
     }
 }

@@ -24,6 +24,11 @@ public sealed class TaskExecutingContext
     public required TaskMessage Message { get; init; }
 
     /// <summary>
+    /// Gets the broker delivery envelope, when available.
+    /// </summary>
+    public BrokerMessage? BrokerMessage { get; init; }
+
+    /// <summary>
     /// Gets the deserialized task input (may be null for tasks without input).
     /// </summary>
     public object? Input { get; init; }

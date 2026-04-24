@@ -187,6 +187,7 @@ public sealed class TaskExecutor
                     context,
                     registration,
                     filters,
+                    brokerMessage,
                     taskToken
                 )
                 .ConfigureAwait(false);
@@ -625,6 +626,7 @@ public sealed class TaskExecutor
         TaskExecutionContext context,
         TaskRegistration registration,
         IReadOnlyList<ResolvedFilter> filters,
+        BrokerMessage brokerMessage,
         CancellationToken cancellationToken
     )
     {
@@ -638,6 +640,7 @@ public sealed class TaskExecutor
             TaskId = context.TaskId,
             TaskName = context.TaskName,
             Message = context.Message,
+            BrokerMessage = brokerMessage,
             Input = input,
             TaskType = registration.TaskType,
             TaskContext = context,

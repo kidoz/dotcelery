@@ -84,4 +84,16 @@ public sealed class BrokerMessage
     /// Gets when the message was received.
     /// </summary>
     public required DateTimeOffset ReceivedAt { get; init; }
+
+    /// <summary>
+    /// Gets the raw serialized broker payload when available.
+    /// </summary>
+#pragma warning disable CA1819 // Raw payload is byte-oriented transport data
+    public byte[]? RawBody { get; init; }
+#pragma warning restore CA1819
+
+    /// <summary>
+    /// Gets the message signature transported by the broker, if present.
+    /// </summary>
+    public string? Signature { get; init; }
 }

@@ -1,9 +1,11 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using System.Threading.Channels;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
+using DotCelery.Core.Security;
 using DotCelery.Core.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -19,6 +21,7 @@ public sealed class RedisBroker : IMessageBroker
 {
     private readonly RedisBrokerOptions _options;
     private readonly ILogger<RedisBroker> _logger;
+    private readonly IMessageSecurityValidator? _messageSecurityValidator;
     private readonly string _consumerName;
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly HashSet<string> _initializedGroups = [];
@@ -35,10 +38,16 @@ public sealed class RedisBroker : IMessageBroker
     /// </summary>
     /// <param name="options">The broker options.</param>
     /// <param name="logger">The logger.</param>
-    public RedisBroker(IOptions<RedisBrokerOptions> options, ILogger<RedisBroker> logger)
+    /// <param name="messageSecurityValidator">Optional message security validator.</param>
+    public RedisBroker(
+        IOptions<RedisBrokerOptions> options,
+        ILogger<RedisBroker> logger,
+        IMessageSecurityValidator? messageSecurityValidator = null
+    )
     {
         _options = options.Value;
         _logger = logger;
+        _messageSecurityValidator = messageSecurityValidator;
         _consumerName =
             _options.ConsumerName ?? $"{Environment.MachineName}-{Environment.ProcessId}";
 
@@ -62,6 +71,7 @@ public sealed class RedisBroker : IMessageBroker
 
         // Serialize the message to JSON using AOT-friendly type info
         var payload = JsonSerializer.Serialize(message, TaskMessageTypeInfo);
+        var signature = _messageSecurityValidator?.Sign(Encoding.UTF8.GetBytes(payload));
 
         // Validate message size
         if (_options.MaxMessageSizeBytes > 0 && payload.Length > _options.MaxMessageSizeBytes)
@@ -72,9 +82,21 @@ public sealed class RedisBroker : IMessageBroker
         }
 
         // Build stream entry
-        var entries = new NameValueEntry[]
+        var entries = string.IsNullOrEmpty(signature)
+            ? new NameValueEntry[]
+            {
+                new("payload", payload),
+                new(
+                    "timestamp",
+                    DateTimeOffset
+                        .UtcNow.ToUnixTimeMilliseconds()
+                        .ToString(System.Globalization.CultureInfo.InvariantCulture)
+                ),
+            }
+            : new NameValueEntry[]
         {
             new("payload", payload),
+            new("signature", signature),
             new(
                 "timestamp",
                 DateTimeOffset
@@ -231,9 +253,11 @@ public sealed class RedisBroker : IMessageBroker
 
         if (requeue)
         {
-            // Leave in pending list - another consumer will claim it after ClaimTimeout
+            await db.StreamAcknowledgeAsync(streamKey, _options.ConsumerGroupName, messageId)
+                .ConfigureAwait(false);
+            await PublishAsync(message.Message, cancellationToken).ConfigureAwait(false);
             _logger.LogDebug(
-                "Message {MessageId} left in pending list for reclaim from stream {Stream}",
+                "Rejected and requeued message {MessageId} from stream {Stream}",
                 messageId,
                 streamKey
             );
@@ -334,6 +358,15 @@ public sealed class RedisBroker : IMessageBroker
                                     .WriteAsync(brokerMessage, cancellationToken)
                                     .ConfigureAwait(false);
                             }
+                            else
+                            {
+                                await db.StreamAcknowledgeAsync(
+                                        streamKey,
+                                        _options.ConsumerGroupName,
+                                        entry.Id
+                                    )
+                                    .ConfigureAwait(false);
+                            }
                         }
                     }
                 }
@@ -377,12 +410,13 @@ public sealed class RedisBroker : IMessageBroker
         {
             try
             {
-                // Get pending entries for this consumer group
+                // Get pending entries for this consumer group, regardless of
+                // which consumer originally received them.
                 var pending = await db.StreamPendingMessagesAsync(
                         streamKey,
                         _options.ConsumerGroupName,
                         _options.PrefetchCount,
-                        _consumerName
+                        RedisValue.Null
                     )
                     .ConfigureAwait(false);
 
@@ -427,6 +461,15 @@ public sealed class RedisBroker : IMessageBroker
                             .WriteAsync(brokerMessage, cancellationToken)
                             .ConfigureAwait(false);
                     }
+                    else
+                    {
+                        await db.StreamAcknowledgeAsync(
+                                streamKey,
+                                _options.ConsumerGroupName,
+                                entry.Id
+                            )
+                            .ConfigureAwait(false);
+                    }
                 }
             }
             catch (Exception ex)
@@ -451,8 +494,21 @@ public sealed class RedisBroker : IMessageBroker
                 return null;
             }
 
+            var signature = entry["signature"];
+            var signatureText = signature.IsNullOrEmpty ? null : signature.ToString();
+            var payloadText = payload.ToString();
+            var payloadBytes = Encoding.UTF8.GetBytes(payloadText);
+            if (!IsSignatureValid(payloadBytes, signatureText))
+            {
+                _logger.LogWarning(
+                    "Stream entry {EntryId} failed message signature validation",
+                    entry.Id
+                );
+                return null;
+            }
+
             // Deserialize using AOT-friendly type info
-            var taskMessage = JsonSerializer.Deserialize(payload.ToString(), TaskMessageTypeInfo);
+            var taskMessage = JsonSerializer.Deserialize(payloadText, TaskMessageTypeInfo);
 
             if (taskMessage is null)
             {
@@ -474,6 +530,8 @@ public sealed class RedisBroker : IMessageBroker
                 DeliveryTag = CreateDeliveryTag(streamKey, entry.Id),
                 Queue = queue,
                 ReceivedAt = DateTimeOffset.UtcNow,
+                RawBody = payloadBytes,
+                Signature = signatureText,
             };
         }
         catch (Exception ex)
@@ -481,6 +539,34 @@ public sealed class RedisBroker : IMessageBroker
             _logger.LogError(ex, "Error parsing stream entry {EntryId}", entry.Id);
             return null;
         }
+    }
+
+    private bool IsSignatureValid(byte[] payload, string? signature)
+    {
+        if (_messageSecurityValidator is null)
+        {
+            return true;
+        }
+
+        var validation = _messageSecurityValidator.Validate(
+            new TaskMessage
+            {
+                Id = "unknown",
+                Task = "unknown",
+                Args = [],
+                ContentType = "application/json",
+                Timestamp = DateTimeOffset.UtcNow,
+            },
+            signature
+        );
+
+        if (validation.ErrorCode == MessageValidationError.MissingSignature)
+        {
+            return false;
+        }
+
+        return string.IsNullOrEmpty(signature)
+            || _messageSecurityValidator.VerifySignature(payload, signature);
     }
 
     private async Task EnsureConsumerGroupAsync(
