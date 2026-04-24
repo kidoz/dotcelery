@@ -7,9 +7,21 @@ Status and scope may change as the project evolves.
 
 ### Brokers
 - Redis broker (Redis Streams with consumer groups)
+- RabbitMQ publisher confirms and mandatory routing
 
 ### Serialization
 - AOT-friendly serialization contexts (`DotCeleryJsonContext`, `RedisBackendJsonContext`)
+
+### Security
+- HMAC message signing across InMemory, RabbitMQ, and Redis brokers
+- Worker-side signature validation filter with dead-letter rejection
+- Strict tenant validation (invalid tenants are rejected, not defaulted)
+- Dashboard authorization filter applied to controllers, SignalR hub, and middleware
+- Dashboard route prefixing via `DashboardRoutePrefixConvention`
+
+### Task Registration and Dispatch
+- Analyzer reports duplicate task names at compilation end
+- `SendOptions.TenantId` and `SendOptions.PartitionKey` with tenant-aware queue routing
 
 ## Planned Features
 
@@ -34,7 +46,6 @@ Status and scope may change as the project evolves.
 - Batch execution tasks (single-task processing of input batches)
 
 ### Security
-- Message signing
 - Serialization allowlists
 - Message size limits and compression
 
