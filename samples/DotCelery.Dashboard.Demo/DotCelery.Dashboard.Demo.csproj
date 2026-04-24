@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>DotCelery.Dashboard.Demo</RootNamespace>
+    <Description>Sample web host showing how to wire up the DotCelery Dashboard.</Description>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DotCelery.Core\DotCelery.Core.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Client\DotCelery.Client.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Worker\DotCelery.Worker.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Broker.InMemory\DotCelery.Broker.InMemory.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Backend.InMemory\DotCelery.Backend.InMemory.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Dashboard\DotCelery.Dashboard.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.203" />
+  </ItemGroup>
+</Project>

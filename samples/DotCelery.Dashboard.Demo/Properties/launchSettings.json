@@ -1,0 +1,13 @@
+{
+  "profiles": {
+    "DotCelery.Dashboard.Demo": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "launchUrl": "celery/",
+      "applicationUrl": "http://localhost:5080",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}
