@@ -143,6 +143,17 @@ public sealed class TenantRouterTests
     }
 
     [Fact]
+    public void GetQueue_WithValidTenantList_RejectsInvalidTenantByDefault()
+    {
+        // Arrange
+        var options = new MultiTenancyOptions { ValidTenants = ["tenant-1", "tenant-2"] };
+        var router = new TenantRouter(Options.Create(options));
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => router.GetQueue("unknown-tenant", "celery"));
+    }
+
+    [Fact]
     public void GetQueue_WithPrefix_AppliesPrefix()
     {
         // Arrange

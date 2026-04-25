@@ -75,7 +75,8 @@ public sealed class MultiTenancyOptions
 
     /// <summary>
     /// Gets or sets whether to validate tenant IDs.
-    /// Default is false.
+    /// Default is false. Validation is also enforced automatically when
+    /// <see cref="ValidTenants"/> contains at least one tenant.
     /// </summary>
     public bool ValidateTenants { get; set; }
 

@@ -49,7 +49,10 @@ public sealed class TenantContextFilter : ITaskFilterWithExceptionHandling
             ?? _options.DefaultTenantId;
 
         // Validate tenant if enabled
-        if (_options.ValidateTenants && _options.ValidTenants.Count > 0)
+        if (
+            (_options.ValidateTenants || _options.ValidTenants.Count > 0)
+            && _options.ValidTenants.Count > 0
+        )
         {
             if (!_options.ValidTenants.Contains(tenantId))
             {
