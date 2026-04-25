@@ -13,7 +13,9 @@ using DotCelery.Worker.Registry;
 using DotCelery.Worker.Resilience;
 using DotCelery.Worker.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace DotCelery.Worker.Extensions;
 
@@ -85,7 +87,35 @@ public static class WorkerServiceCollectionExtensions
         builder.Services.AddHostedService(sp => sp.GetRequiredService<RevocationManager>());
         builder.Services.AddHostedService<CeleryWorkerService>();
 
+        // Ensure IHost's shutdown budget is at least as long as the worker's drain budget,
+        // otherwise IHostApplicationLifetime cancels the token passed to StopAsync before
+        // in-flight tasks finish. We only raise the timeout — never lower it — so
+        // user-specified longer timeouts are preserved.
+        builder.Services.AddSingleton<
+            IPostConfigureOptions<HostOptions>,
+            AlignHostShutdownWithWorkerTimeout
+        >();
+
         return builder;
+    }
+
+    private sealed class AlignHostShutdownWithWorkerTimeout(
+        IOptions<WorkerOptions> workerOptions
+    ) : IPostConfigureOptions<HostOptions>
+    {
+        public void PostConfigure(string? name, HostOptions options)
+        {
+            if (!workerOptions.Value.EnableGracefulShutdown)
+            {
+                return;
+            }
+
+            var required = workerOptions.Value.ShutdownTimeout;
+            if (options.ShutdownTimeout < required)
+            {
+                options.ShutdownTimeout = required;
+            }
+        }
     }
 
     /// <summary>
