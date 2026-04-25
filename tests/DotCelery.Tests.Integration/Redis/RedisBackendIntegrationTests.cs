@@ -133,6 +133,48 @@ public class RedisBackendIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WaitForResultAsync_Timeout_DoesNotLeakWaiters()
+    {
+        // A long-running worker that waits on tasks that never complete must not
+        // grow _waiters unbounded — every timeout / cancellation path must remove
+        // its entry. We assert the dictionary is empty after a batch of timeouts.
+        const int waiters = 50;
+
+        var timeouts = Enumerable
+            .Range(0, waiters)
+            .Select(i =>
+                Assert.ThrowsAsync<TimeoutException>(() =>
+                    _backend!.WaitForResultAsync(
+                        $"never-completes-{i}",
+                        timeout: TimeSpan.FromMilliseconds(50)
+                    )
+                )
+            )
+            .ToArray();
+
+        await Task.WhenAll(timeouts);
+
+        Assert.Equal(0, _backend!.PendingWaiterCount);
+    }
+
+    [Fact]
+    public async Task WaitForResultAsync_Cancellation_DoesNotLeakWaiters()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(50));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            _backend!.WaitForResultAsync(
+                "never-completes-cancelled",
+                timeout: TimeSpan.FromMinutes(5),
+                cancellationToken: cts.Token
+            )
+        );
+
+        Assert.Equal(0, _backend!.PendingWaiterCount);
+    }
+
+    [Fact]
     public async Task StoreResultAsync_WithExpiry_ResultExpires()
     {
         var result = CreateSuccessResult();

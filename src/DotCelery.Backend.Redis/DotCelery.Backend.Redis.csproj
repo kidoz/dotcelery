@@ -14,4 +14,8 @@
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.7" />
     <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.203" />
   </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DotCelery.Tests.Integration" />
+  </ItemGroup>
 </Project>

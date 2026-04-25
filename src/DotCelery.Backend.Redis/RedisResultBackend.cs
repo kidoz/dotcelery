@@ -29,6 +29,10 @@ public sealed class RedisResultBackend : IResultBackend
     private ISubscriber? _subscriber;
     private bool _disposed;
 
+    // Exposed internally for tests to assert that WaitForResultAsync does not
+    // leak entries on timeout / cancellation paths.
+    internal int PendingWaiterCount => _waiters.Count;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="RedisResultBackend"/> class.
     /// </summary>
@@ -132,7 +136,9 @@ public sealed class RedisResultBackend : IResultBackend
             return existing;
         }
 
-        // Create or get existing waiter with RunContinuationsAsynchronously to prevent inline continuations
+        // Create or get existing waiter with RunContinuationsAsynchronously to prevent inline continuations.
+        // Everything from this point on must run inside the try/finally so the waiter is removed
+        // on every exit path — pub/sub setup failures, cancellation, timeout, or normal completion.
         var tcs = _waiters.GetOrAdd(
             taskId,
             _ => new TaskCompletionSource<TaskResult>(
@@ -140,76 +146,67 @@ public sealed class RedisResultBackend : IResultBackend
             )
         );
 
-        // Check again after adding waiter (race condition)
-        existing = await GetResultAsync(taskId, cancellationToken).ConfigureAwait(false);
-        if (existing is not null)
-        {
-            _waiters.TryRemove(taskId, out _);
-            return existing;
-        }
-
-        // Subscribe to pub/sub notifications
         ChannelMessageQueue? subscription = null;
-        if (_options.UsePubSub)
-        {
-            var subscriber = await GetSubscriberAsync(cancellationToken).ConfigureAwait(false);
-            var channel = new RedisChannel(
-                GetPubSubChannel(taskId),
-                RedisChannel.PatternMode.Literal
-            );
-            subscription = await subscriber.SubscribeAsync(channel).ConfigureAwait(false);
-
-            // Handle messages in background with proper exception handling
-            _ = Task.Run(
-                async () =>
-                {
-                    try
-                    {
-                        await foreach (
-                            var message in subscription.WithCancellation(cancellationToken)
-                        )
-                        {
-                            if (message.Message.HasValue)
-                            {
-                                var result = JsonSerializer.Deserialize(
-                                    (string)message.Message!,
-                                    TaskResultTypeInfo
-                                );
-                                if (
-                                    result is not null
-                                    && _waiters.TryRemove(taskId, out var waiter)
-                                )
-                                {
-                                    waiter.TrySetResult(result);
-                                }
-                            }
-                            break;
-                        }
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        // Expected during cancellation
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(
-                            ex,
-                            "Error in pub/sub message handler for task {TaskId}",
-                            taskId
-                        );
-                        // Signal the waiter with the exception so it doesn't hang indefinitely
-                        if (_waiters.TryRemove(taskId, out var waiter))
-                        {
-                            waiter.TrySetException(ex);
-                        }
-                    }
-                },
-                cancellationToken
-            );
-        }
-
         try
         {
+            // Check again after adding waiter (race condition)
+            existing = await GetResultAsync(taskId, cancellationToken).ConfigureAwait(false);
+            if (existing is not null)
+            {
+                return existing;
+            }
+
+            if (_options.UsePubSub)
+            {
+                var subscriber = await GetSubscriberAsync(cancellationToken).ConfigureAwait(false);
+                var channel = new RedisChannel(
+                    GetPubSubChannel(taskId),
+                    RedisChannel.PatternMode.Literal
+                );
+                subscription = await subscriber.SubscribeAsync(channel).ConfigureAwait(false);
+
+                // Handle pub/sub messages in background with proper exception handling
+                _ = Task.Run(
+                    async () =>
+                    {
+                        try
+                        {
+                            await foreach (
+                                var message in subscription.WithCancellation(cancellationToken)
+                            )
+                            {
+                                if (message.Message.HasValue)
+                                {
+                                    var result = JsonSerializer.Deserialize(
+                                        (string)message.Message!,
+                                        TaskResultTypeInfo
+                                    );
+                                    if (result is not null)
+                                    {
+                                        tcs.TrySetResult(result);
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // Expected during cancellation
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(
+                                ex,
+                                "Error in pub/sub message handler for task {TaskId}",
+                                taskId
+                            );
+                            tcs.TrySetException(ex);
+                        }
+                    },
+                    cancellationToken
+                );
+            }
+
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             if (timeout.HasValue)
             {
@@ -218,7 +215,7 @@ public sealed class RedisResultBackend : IResultBackend
 
             await using var registration = cts.Token.Register(() => tcs.TrySetCanceled(cts.Token));
 
-            // Also poll in case pub/sub notification is missed
+            // Also poll in case the pub/sub notification is missed (reconnect, dropped publish, etc.)
             _ = Task.Run(
                 async () =>
                 {
@@ -231,9 +228,9 @@ public sealed class RedisResultBackend : IResultBackend
 
                             var result = await GetResultAsync(taskId, cts.Token)
                                 .ConfigureAwait(false);
-                            if (result is not null && _waiters.TryRemove(taskId, out var waiter))
+                            if (result is not null)
                             {
-                                waiter.TrySetResult(result);
+                                tcs.TrySetResult(result);
                                 break;
                             }
                         }
@@ -245,11 +242,7 @@ public sealed class RedisResultBackend : IResultBackend
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "Error in polling handler for task {TaskId}", taskId);
-                        // Signal the waiter with the exception so it doesn't hang indefinitely
-                        if (_waiters.TryRemove(taskId, out var waiter))
-                        {
-                            waiter.TrySetException(ex);
-                        }
+                        tcs.TrySetException(ex);
                     }
                 },
                 cts.Token
@@ -266,12 +259,24 @@ public sealed class RedisResultBackend : IResultBackend
         }
         finally
         {
-            // Always clean up waiter to prevent memory leaks
+            // Always clean up the waiter so the dictionary cannot grow unbounded across
+            // timeouts, cancellations, revoked tasks, or pub/sub setup failures.
             _waiters.TryRemove(taskId, out _);
 
             if (subscription is not null)
             {
-                await subscription.UnsubscribeAsync().ConfigureAwait(false);
+                try
+                {
+                    await subscription.UnsubscribeAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(
+                        ex,
+                        "Failed to unsubscribe pub/sub channel for task {TaskId}",
+                        taskId
+                    );
+                }
             }
         }
     }
