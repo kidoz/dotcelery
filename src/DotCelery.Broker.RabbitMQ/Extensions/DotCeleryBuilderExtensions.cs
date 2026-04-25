@@ -1,6 +1,9 @@
+using DotCelery.Broker.RabbitMQ.Services;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Extensions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace DotCelery.Broker.RabbitMQ.Extensions;
 
@@ -35,6 +38,9 @@ public static class DotCeleryBuilderExtensions
         }
 
         builder.Services.AddSingleton<IMessageBroker, RabbitMQBroker>();
+        builder.Services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, RabbitMQInsecureDefaultsCheck>()
+        );
 
         return builder;
     }

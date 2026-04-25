@@ -1,6 +1,9 @@
+using DotCelery.Broker.Redis.Services;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Extensions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace DotCelery.Broker.Redis.Extensions;
 
@@ -35,6 +38,9 @@ public static class DotCeleryBuilderExtensions
         }
 
         builder.Services.AddSingleton<IMessageBroker, RedisBroker>();
+        builder.Services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, RedisBrokerInsecureDefaultsCheck>()
+        );
 
         return builder;
     }

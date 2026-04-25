@@ -6,10 +6,16 @@ namespace DotCelery.Broker.RabbitMQ;
 public sealed class RabbitMQBrokerOptions
 {
     /// <summary>
+    /// The built-in development connection string. Uses cleartext AMQP and the
+    /// well-known default credentials — only safe for a developer laptop.
+    /// </summary>
+    public const string DevelopmentDefaultConnectionString = "amqp://guest:guest@localhost:5672/";
+
+    /// <summary>
     /// Gets or sets the RabbitMQ connection string (AMQP URI).
     /// Example: "amqp://guest:guest@localhost:5672/"
     /// </summary>
-    public string ConnectionString { get; set; } = "amqp://guest:guest@localhost:5672/";
+    public string ConnectionString { get; set; } = DevelopmentDefaultConnectionString;
 
     /// <summary>
     /// Gets or sets the client-provided connection name for identification.

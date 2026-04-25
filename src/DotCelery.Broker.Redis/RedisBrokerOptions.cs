@@ -6,10 +6,16 @@ namespace DotCelery.Broker.Redis;
 public sealed class RedisBrokerOptions
 {
     /// <summary>
+    /// The built-in development connection string. Cleartext, no AUTH —
+    /// only safe for a developer laptop.
+    /// </summary>
+    public const string DevelopmentDefaultConnectionString = "localhost:6379";
+
+    /// <summary>
     /// Gets or sets the Redis connection string.
     /// Example: "localhost:6379" or "redis://localhost:6379/0"
     /// </summary>
-    public string ConnectionString { get; set; } = "localhost:6379";
+    public string ConnectionString { get; set; } = DevelopmentDefaultConnectionString;
 
     /// <summary>
     /// Gets or sets the database index to use.
