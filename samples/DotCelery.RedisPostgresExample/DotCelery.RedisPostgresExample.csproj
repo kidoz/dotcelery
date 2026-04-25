@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>DotCelery.RedisPostgresExample</RootNamespace>
+    <Description>Example application using Redis broker with Redis or PostgreSQL result backends</Description>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DotCelery.Core\DotCelery.Core.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Client\DotCelery.Client.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Worker\DotCelery.Worker.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Broker.Redis\DotCelery.Broker.Redis.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Backend.Redis\DotCelery.Backend.Redis.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Backend.Postgres\DotCelery.Backend.Postgres.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.203" />
+  </ItemGroup>
+</Project>

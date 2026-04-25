@@ -25,6 +25,7 @@
   <Folder Name="/samples/">
     <Project Path="samples/DotCelery.Demo/DotCelery.Demo.csproj" />
     <Project Path="samples/DotCelery.Dashboard.Demo/DotCelery.Dashboard.Demo.csproj" />
+    <Project Path="samples/DotCelery.RedisPostgresExample/DotCelery.RedisPostgresExample.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/DotCelery.Benchmarks/DotCelery.Benchmarks.csproj" />

@@ -48,6 +48,21 @@ dotnet add package DotCelery.Broker.RabbitMQ
 dotnet add package DotCelery.Backend.Redis
 ```
 
+### Local Redis/Postgres Example
+
+The repository includes a runnable sample that uses Redis Streams as the broker and PostgreSQL as the default result backend:
+
+```bash
+docker compose up -d redis postgres
+dotnet run --project samples/DotCelery.RedisPostgresExample
+```
+
+The same sample can store task results in Redis:
+
+```bash
+dotnet run --project samples/DotCelery.RedisPostgresExample -- --result-backend=redis
+```
+
 ### Define a Task
 
 ```csharp

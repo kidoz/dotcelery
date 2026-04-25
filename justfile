@@ -49,6 +49,22 @@ install-tools:
 run-demo:
     dotnet run --project samples/DotCelery.Demo
 
+# Start local dependencies used by the Redis/Postgres example
+compose-up:
+    docker compose up -d redis postgres
+
+# Stop local example dependencies
+compose-down:
+    docker compose down
+
+# Run the Redis broker + PostgreSQL backend example
+run-redis-postgres-example:
+    dotnet run --project samples/DotCelery.RedisPostgresExample
+
+# Run the Redis broker + Redis backend example
+run-redis-example:
+    dotnet run --project samples/DotCelery.RedisPostgresExample -- --result-backend=redis
+
 # Pack NuGet packages
 pack:
     dotnet pack -c Release
