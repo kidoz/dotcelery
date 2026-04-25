@@ -72,8 +72,19 @@ public sealed record SignalMessage
     public ITaskSignal Deserialize(JsonSerializerOptions? jsonOptions = null)
     {
         var type =
-            Type.GetType(SignalType)
+            Type.GetType(SignalType, throwOnError: false)
             ?? throw new InvalidOperationException($"Cannot resolve signal type: {SignalType}");
+
+        // Guard against gadget deserialization: reject any type that is not an
+        // ITaskSignal *before* handing the payload to the JSON serializer. Without
+        // this check a crafted message could request an arbitrary .NET type and
+        // trigger side effects during deserialization.
+        if (!typeof(ITaskSignal).IsAssignableFrom(type) || type.IsAbstract || type.IsInterface)
+        {
+            throw new InvalidOperationException(
+                $"Refusing to deserialize signal type '{SignalType}': not a concrete ITaskSignal."
+            );
+        }
 
         return (ITaskSignal)(
             JsonSerializer.Deserialize(Payload, type, jsonOptions)

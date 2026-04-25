@@ -68,6 +68,17 @@ public sealed class TaskRegistry
     /// </exception>
     public void Register(Type taskType, string taskName)
     {
+        ArgumentNullException.ThrowIfNull(taskType);
+        ArgumentException.ThrowIfNullOrEmpty(taskName);
+
+        if (!typeof(ITask).IsAssignableFrom(taskType) || taskType.IsAbstract || taskType.IsInterface)
+        {
+            throw new ArgumentException(
+                $"Type '{taskType.FullName}' cannot be registered as a task: it must be a concrete class implementing {nameof(ITask)}.",
+                nameof(taskType)
+            );
+        }
+
         RegisterInternal(taskType, taskName);
     }
 

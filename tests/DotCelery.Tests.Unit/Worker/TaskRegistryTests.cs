@@ -118,6 +118,49 @@ public class TaskRegistryTests
         Assert.Null(registration.OutputType);
     }
 
+    [Fact]
+    public void Register_ByType_RejectsNonITaskType()
+    {
+        var registry = new TaskRegistry();
+
+        var ex = Assert.Throws<ArgumentException>(
+            () => registry.Register(typeof(string), "malicious.type")
+        );
+        Assert.Contains("ITask", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Register_ByType_RejectsAbstractType()
+    {
+        var registry = new TaskRegistry();
+
+        Assert.Throws<ArgumentException>(
+            () => registry.Register(typeof(AbstractTask), "abstract.task")
+        );
+    }
+
+    [Fact]
+    public void Register_ByType_RejectsNullOrEmptyName()
+    {
+        var registry = new TaskRegistry();
+
+        Assert.Throws<ArgumentNullException>(
+            () => registry.Register(typeof(TestTask), null!)
+        );
+        Assert.Throws<ArgumentException>(() => registry.Register(typeof(TestTask), string.Empty));
+    }
+
+    private abstract class AbstractTask : ITask<TestInput, TestOutput>
+    {
+        public static string TaskName => "abstract.task";
+
+        public abstract Task<TestOutput> ExecuteAsync(
+            TestInput input,
+            ITaskContext context,
+            CancellationToken cancellationToken = default
+        );
+    }
+
     private sealed class TestTask : ITask<TestInput, TestOutput>
     {
         public static string TaskName => "test.task";
