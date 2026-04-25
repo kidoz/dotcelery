@@ -17,7 +17,8 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "TaskName is used for routing and must be a valid identifier.");
+        description: "TaskName is used for routing and must be a valid identifier."
+    );
 
     public static readonly DiagnosticDescriptor DuplicateTaskName = new(
         id: "DCEL002",
@@ -27,7 +28,8 @@ public static class DiagnosticDescriptors
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
         description: "Task names must be unique across the application for proper routing.",
-        customTags: [WellKnownDiagnosticTags.CompilationEnd]);
+        customTags: [WellKnownDiagnosticTags.CompilationEnd]
+    );
 
     public static readonly DiagnosticDescriptor TaskMustBeSealed = new(
         id: "DCEL003",
@@ -36,7 +38,8 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "Task classes should be sealed to prevent inheritance issues.");
+        description: "Task classes should be sealed to prevent inheritance issues."
+    );
 
     // DCEL100-199: Async/Await Issues
     public static readonly DiagnosticDescriptor AvoidBlockingCallsInTasks = new(
@@ -46,7 +49,8 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "Blocking calls like Task.Wait(), Task.Result, or .GetAwaiter().GetResult() can cause deadlocks. Use await instead.");
+        description: "Blocking calls like Task.Wait(), Task.Result, or .GetAwaiter().GetResult() can cause deadlocks. Use await instead."
+    );
 
     // DCEL200-299: Attribute Validation
     public static readonly DiagnosticDescriptor InvalidTimeLimitConfiguration = new(
@@ -56,7 +60,8 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Time limits must be positive and SoftLimit must be less than HardLimit.");
+        description: "Time limits must be positive and SoftLimit must be less than HardLimit."
+    );
 
     public static readonly DiagnosticDescriptor InvalidRouteAttribute = new(
         id: "DCEL201",
@@ -65,7 +70,8 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Queue names must be valid non-empty strings.");
+        description: "Queue names must be valid non-empty strings."
+    );
 
     public static readonly DiagnosticDescriptor InvalidPreventOverlappingConfiguration = new(
         id: "DCEL202",
@@ -74,7 +80,8 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "PreventOverlapping attribute must be configured correctly.");
+        description: "PreventOverlapping attribute must be configured correctly."
+    );
 
     // DCEL300-399: Serialization Issues
     public static readonly DiagnosticDescriptor TypeMustBeSerializable = new(
@@ -84,7 +91,8 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "Task input and output types must be serializable. Consider adding a parameterless constructor or using records.");
+        description: "Task input and output types must be serializable. Consider adding a parameterless constructor or using records."
+    );
 
     public static readonly DiagnosticDescriptor AvoidMutableCollections = new(
         id: "DCEL301",
@@ -93,7 +101,8 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Info,
         isEnabledByDefault: true,
-        description: "Mutable collections can lead to race conditions in distributed scenarios.");
+        description: "Mutable collections can lead to race conditions in distributed scenarios."
+    );
 
     // DCEL400-499: Usage Issues
     public static readonly DiagnosticDescriptor SendAsyncTypeMismatch = new(
@@ -103,7 +112,8 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "The input and output types specified in SendAsync must match the task's generic parameters.");
+        description: "The input and output types specified in SendAsync must match the task's generic parameters."
+    );
 
     public static readonly DiagnosticDescriptor MissingTaskRegistration = new(
         id: "DCEL401",
@@ -112,5 +122,6 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Info,
         isEnabledByDefault: true,
-        description: "Tasks must be registered in the DI container to be executed by workers.");
+        description: "Tasks must be registered in the DI container to be executed by workers."
+    );
 }

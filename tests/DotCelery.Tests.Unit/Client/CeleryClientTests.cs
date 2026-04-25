@@ -106,11 +106,7 @@ public class CeleryClientTests : IAsyncDisposable
 
         await client.SendAsync<TestTask, TestInput, TestOutput>(
             new TestInput { Value = 42 },
-            new SendOptions
-            {
-                TenantId = "tenant-a",
-                PartitionKey = "account-42",
-            }
+            new SendOptions { TenantId = "tenant-a", PartitionKey = "account-42" }
         );
 
         BrokerMessage? received = null;

@@ -94,16 +94,16 @@ public sealed class RedisBroker : IMessageBroker
                 ),
             }
             : new NameValueEntry[]
-        {
-            new("payload", payload),
-            new("signature", signature),
-            new(
-                "timestamp",
-                DateTimeOffset
-                    .UtcNow.ToUnixTimeMilliseconds()
-                    .ToString(System.Globalization.CultureInfo.InvariantCulture)
-            ),
-        };
+            {
+                new("payload", payload),
+                new("signature", signature),
+                new(
+                    "timestamp",
+                    DateTimeOffset
+                        .UtcNow.ToUnixTimeMilliseconds()
+                        .ToString(System.Globalization.CultureInfo.InvariantCulture)
+                ),
+            };
 
         // Add to stream with optional trimming
         if (_options.MaxStreamLength.HasValue)

@@ -31,7 +31,8 @@ public class TaskNameAnalyzerTests
 
         await CSharpAnalyzerVerifier<TaskNameAnalyzer>.VerifyAnalyzerAsync(
             test,
-            DiagnosticDescriptors.TaskNameCannotBeEmpty);
+            DiagnosticDescriptors.TaskNameCannotBeEmpty
+        );
     }
 
     [Fact]
@@ -58,7 +59,8 @@ public class TaskNameAnalyzerTests
 
         await CSharpAnalyzerVerifier<TaskNameAnalyzer>.VerifyAnalyzerAsync(
             test,
-            DiagnosticDescriptors.TaskNameCannotBeEmpty);
+            DiagnosticDescriptors.TaskNameCannotBeEmpty
+        );
     }
 
     [Fact]
@@ -95,7 +97,8 @@ public class TaskNameAnalyzerTests
 
         await CSharpAnalyzerVerifier<TaskNameAnalyzer>.VerifyAnalyzerAsync(
             test,
-            DiagnosticDescriptors.DuplicateTaskName);
+            DiagnosticDescriptors.DuplicateTaskName
+        );
     }
 
     [Fact]
@@ -122,7 +125,8 @@ public class TaskNameAnalyzerTests
 
         await CSharpAnalyzerVerifier<TaskNameAnalyzer>.VerifyAnalyzerAsync(
             test,
-            DiagnosticDescriptors.TaskMustBeSealed);
+            DiagnosticDescriptors.TaskMustBeSealed
+        );
     }
 
     [Fact]

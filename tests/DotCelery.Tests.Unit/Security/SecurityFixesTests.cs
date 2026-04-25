@@ -291,8 +291,7 @@ public class SecurityFixesTests
         public string? TenantId => null;
         public string? PartitionKey => null;
         public IReadOnlyDictionary<string, string>? Headers => null;
-        public IProgressReporter Progress =>
-            throw new NotSupportedException();
+        public IProgressReporter Progress => throw new NotSupportedException();
 
         public void Retry(TimeSpan? countdown = null, Exception? exception = null) =>
             throw new NotSupportedException();

@@ -123,8 +123,8 @@ public class TaskRegistryTests
     {
         var registry = new TaskRegistry();
 
-        var ex = Assert.Throws<ArgumentException>(
-            () => registry.Register(typeof(string), "malicious.type")
+        var ex = Assert.Throws<ArgumentException>(() =>
+            registry.Register(typeof(string), "malicious.type")
         );
         Assert.Contains("ITask", ex.Message, StringComparison.Ordinal);
     }
@@ -134,8 +134,8 @@ public class TaskRegistryTests
     {
         var registry = new TaskRegistry();
 
-        Assert.Throws<ArgumentException>(
-            () => registry.Register(typeof(AbstractTask), "abstract.task")
+        Assert.Throws<ArgumentException>(() =>
+            registry.Register(typeof(AbstractTask), "abstract.task")
         );
     }
 
@@ -144,9 +144,7 @@ public class TaskRegistryTests
     {
         var registry = new TaskRegistry();
 
-        Assert.Throws<ArgumentNullException>(
-            () => registry.Register(typeof(TestTask), null!)
-        );
+        Assert.Throws<ArgumentNullException>(() => registry.Register(typeof(TestTask), null!));
         Assert.Throws<ArgumentException>(() => registry.Register(typeof(TestTask), string.Empty));
     }
 

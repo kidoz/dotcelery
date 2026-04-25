@@ -20,7 +20,8 @@ public sealed class DotCeleryBackendHealthCheck(IResultBackend backend) : IHealt
     {
         try
         {
-            _ = await backend.GetResultAsync(SentinelTaskId, cancellationToken)
+            _ = await backend
+                .GetResultAsync(SentinelTaskId, cancellationToken)
                 .ConfigureAwait(false);
             return HealthCheckResult.Healthy("Result backend is reachable.");
         }

@@ -113,8 +113,7 @@ finally
 static string GetBackendName(string[] args)
 {
     const string prefix = "--result-backend=";
-    var arg = args.FirstOrDefault(a =>
-        a.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    var arg = args.FirstOrDefault(a => a.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
 
     if (arg is null)
     {

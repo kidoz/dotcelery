@@ -25,13 +25,12 @@ internal sealed class DashboardRoutePrefixConvention : IApplicationModelConventi
 
             foreach (var selector in controller.Selectors)
             {
-                selector.AttributeRouteModel =
-                    selector.AttributeRouteModel is null
-                        ? _routePrefix
-                        : AttributeRouteModel.CombineAttributeRouteModel(
-                            _routePrefix,
-                            selector.AttributeRouteModel
-                        );
+                selector.AttributeRouteModel = selector.AttributeRouteModel is null
+                    ? _routePrefix
+                    : AttributeRouteModel.CombineAttributeRouteModel(
+                        _routePrefix,
+                        selector.AttributeRouteModel
+                    );
             }
         }
     }

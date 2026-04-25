@@ -33,7 +33,8 @@ public class BlockingCallAnalyzerTests
 
         await CSharpAnalyzerVerifier<BlockingCallAnalyzer>.VerifyAnalyzerAsync(
             test,
-            DiagnosticDescriptors.AvoidBlockingCallsInTasks);
+            DiagnosticDescriptors.AvoidBlockingCallsInTasks
+        );
     }
 
     [Fact]
@@ -62,7 +63,8 @@ public class BlockingCallAnalyzerTests
 
         await CSharpAnalyzerVerifier<BlockingCallAnalyzer>.VerifyAnalyzerAsync(
             test,
-            DiagnosticDescriptors.AvoidBlockingCallsInTasks);
+            DiagnosticDescriptors.AvoidBlockingCallsInTasks
+        );
     }
 
     [Fact]
@@ -91,7 +93,8 @@ public class BlockingCallAnalyzerTests
 
         await CSharpAnalyzerVerifier<BlockingCallAnalyzer>.VerifyAnalyzerAsync(
             test,
-            DiagnosticDescriptors.AvoidBlockingCallsInTasks);
+            DiagnosticDescriptors.AvoidBlockingCallsInTasks
+        );
     }
 
     [Fact]

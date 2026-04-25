@@ -702,7 +702,8 @@ public sealed class RabbitMQBroker : IMessageBroker
                 Timestamp = DateTimeOffset.UtcNow,
             };
 
-            await _deadLetterStore.StoreAsync(deadLetterMessage, cancellationToken)
+            await _deadLetterStore
+                .StoreAsync(deadLetterMessage, cancellationToken)
                 .ConfigureAwait(false);
         }
 

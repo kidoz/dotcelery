@@ -99,9 +99,8 @@ public static class WorkerServiceCollectionExtensions
         return builder;
     }
 
-    private sealed class AlignHostShutdownWithWorkerTimeout(
-        IOptions<WorkerOptions> workerOptions
-    ) : IPostConfigureOptions<HostOptions>
+    private sealed class AlignHostShutdownWithWorkerTimeout(IOptions<WorkerOptions> workerOptions)
+        : IPostConfigureOptions<HostOptions>
     {
         public void PostConfigure(string? name, HostOptions options)
         {
