@@ -137,11 +137,27 @@ public sealed class RedisDelayedMessageStore : IDelayedMessageStore
             }
 
             var json = (string)item!;
-            var message = JsonSerializer.Deserialize(json, TaskMessageTypeInfo);
+            TaskMessage? message;
+            try
+            {
+                message = JsonSerializer.Deserialize(json, TaskMessageTypeInfo);
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to deserialize delayed message payload of {PayloadLength} characters; dropping malformed entry",
+                    json.Length
+                );
+                continue;
+            }
 
             if (message is null)
             {
-                _logger.LogWarning("Failed to deserialize delayed message: {Json}", json);
+                _logger.LogWarning(
+                    "Failed to deserialize delayed message payload of {PayloadLength} characters; dropping malformed entry",
+                    json.Length
+                );
                 continue;
             }
 
