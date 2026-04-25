@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using DotCelery.Core.Abstractions;
+using DotCelery.Core.Instrumentation;
 using DotCelery.Core.Models;
 using DotCelery.Core.MultiTenancy;
 using DotCelery.Core.Routing;
@@ -356,6 +358,18 @@ public sealed class CeleryClient : ICeleryClient
             eta = DateTimeOffset.UtcNow.Add(options.Countdown.Value);
         }
 
+        using var sendActivity = DotCeleryDiagnostics.ActivitySource.StartActivity(
+            $"send {taskName}",
+            ActivityKind.Producer
+        );
+        sendActivity?.SetTag("messaging.system", "dotcelery");
+        sendActivity?.SetTag("messaging.operation", "send");
+        sendActivity?.SetTag("messaging.destination.name", queue);
+        sendActivity?.SetTag("celery.task.name", taskName);
+        sendActivity?.SetTag("celery.task.id", taskId);
+
+        var headersWithTrace = TraceContextPropagation.InjectCurrent(options?.Headers);
+
         var message = new TaskMessage
         {
             Id = taskId,
@@ -371,7 +385,7 @@ public sealed class CeleryClient : ICeleryClient
             CorrelationId = options?.CorrelationId,
             TenantId = options?.TenantId,
             PartitionKey = options?.PartitionKey,
-            Headers = options?.Headers,
+            Headers = headersWithTrace,
         };
 
         // Dispatch BeforeTaskPublish signal

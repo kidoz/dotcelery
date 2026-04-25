@@ -2,6 +2,7 @@ using System.Diagnostics;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Exceptions;
 using DotCelery.Core.Filters;
+using DotCelery.Core.Instrumentation;
 using DotCelery.Core.Models;
 using DotCelery.Core.Signals;
 using DotCelery.Core.TimeLimits;
@@ -78,6 +79,8 @@ public sealed class TaskExecutor
     {
         var message = brokerMessage.Message;
         var startTime = DateTimeOffset.UtcNow;
+
+        using var processActivity = StartProcessActivity(message);
 
         var registration = _registry.GetTask(message.Task);
         if (registration is null)
@@ -779,5 +782,39 @@ public sealed class TaskExecutor
                 cancellationToken
             )
             .ConfigureAwait(false);
+    }
+
+    private static Activity? StartProcessActivity(TaskMessage message)
+    {
+        var parentExtracted = TraceContextPropagation.TryExtract(
+            message.Headers,
+            out var parentContext
+        );
+
+        var activity = parentExtracted
+            ? DotCeleryDiagnostics.ActivitySource.StartActivity(
+                $"process {message.Task}",
+                ActivityKind.Consumer,
+                parentContext
+            )
+            : DotCeleryDiagnostics.ActivitySource.StartActivity(
+                $"process {message.Task}",
+                ActivityKind.Consumer
+            );
+
+        if (activity is not null)
+        {
+            activity.SetTag("messaging.system", "dotcelery");
+            activity.SetTag("messaging.operation", "process");
+            activity.SetTag("messaging.destination.name", message.Queue);
+            activity.SetTag("celery.task.name", message.Task);
+            activity.SetTag("celery.task.id", message.Id);
+            if (message.CorrelationId is { } correlationId)
+            {
+                activity.SetTag("celery.correlation.id", correlationId);
+            }
+        }
+
+        return activity;
     }
 }

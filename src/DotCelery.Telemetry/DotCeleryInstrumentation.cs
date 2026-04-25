@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using DotCelery.Core.Instrumentation;
 
 namespace DotCelery.Telemetry;
 
@@ -11,18 +12,18 @@ public static class DotCeleryInstrumentation
     /// <summary>
     /// The name of the instrumentation library.
     /// </summary>
-    public const string InstrumentationName = "DotCelery";
+    public const string InstrumentationName = DotCeleryDiagnostics.SourceName;
 
     /// <summary>
     /// The version of the instrumentation library.
     /// </summary>
-    public const string InstrumentationVersion = "1.0.0";
+    public const string InstrumentationVersion = DotCeleryDiagnostics.SourceVersion;
 
     /// <summary>
-    /// Gets the ActivitySource for DotCelery tracing.
+    /// Gets the ActivitySource for DotCelery tracing. Emits the producer/consumer spans
+    /// created by <c>DotCelery.Core</c> as well as any spans started through this class.
     /// </summary>
-    public static ActivitySource ActivitySource { get; } =
-        new(InstrumentationName, InstrumentationVersion);
+    public static ActivitySource ActivitySource => DotCeleryDiagnostics.ActivitySource;
 
     /// <summary>
     /// Gets the Meter for DotCelery metrics.
