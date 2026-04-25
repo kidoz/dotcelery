@@ -6,11 +6,42 @@ using DotCelery.Core.Abstractions;
 namespace DotCelery.Core.Serialization;
 
 /// <summary>
+/// Configuration for <see cref="JsonMessageSerializer"/>.
+/// </summary>
+public sealed class JsonMessageSerializerOptions
+{
+    /// <summary>
+    /// Gets the JSON serializer options. When null, DotCelery uses the default
+    /// AOT-friendly options with reflection fallback.
+    /// </summary>
+    public JsonSerializerOptions? SerializerOptions { get; init; }
+
+    /// <summary>
+    /// Gets whether deserialization is restricted to <see cref="AllowedDeserializationTypes"/>
+    /// and, when enabled, built-in DotCelery model types known to <see cref="DotCeleryJsonContext"/>.
+    /// </summary>
+    public bool EnforceDeserializationTypeAllowlist { get; init; }
+
+    /// <summary>
+    /// Gets whether DotCelery model types registered in <see cref="DotCeleryJsonContext"/>
+    /// are allowed when <see cref="EnforceDeserializationTypeAllowlist"/> is enabled.
+    /// </summary>
+    public bool AllowDotCeleryTypes { get; init; } = true;
+
+    /// <summary>
+    /// Gets the application DTO types that may be deserialized when
+    /// <see cref="EnforceDeserializationTypeAllowlist"/> is enabled.
+    /// </summary>
+    public IReadOnlySet<Type> AllowedDeserializationTypes { get; init; } = new HashSet<Type>();
+}
+
+/// <summary>
 /// JSON serializer using System.Text.Json with AOT support.
 /// </summary>
 public sealed class JsonMessageSerializer : IMessageSerializer
 {
     private static readonly JsonSerializerOptions FallbackOptions = CreateDefaultOptions();
+    private readonly JsonMessageSerializerOptions _serializerOptions;
     private readonly JsonSerializerOptions _options;
 
     /// <summary>
@@ -18,15 +49,27 @@ public sealed class JsonMessageSerializer : IMessageSerializer
     /// using the AOT-friendly default options.
     /// </summary>
     public JsonMessageSerializer()
-        : this(null) { }
+        : this(null, new JsonMessageSerializerOptions()) { }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="JsonMessageSerializer"/> class.
     /// </summary>
     /// <param name="options">Optional JSON serializer options. If null, uses combined AOT + reflection options.</param>
     public JsonMessageSerializer(JsonSerializerOptions? options)
+        : this(options, null) { }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="JsonMessageSerializer"/> class.
+    /// </summary>
+    /// <param name="jsonOptions">Optional JSON serializer options. If null, uses combined AOT + reflection options.</param>
+    /// <param name="serializerOptions">DotCelery JSON serializer options.</param>
+    public JsonMessageSerializer(
+        JsonSerializerOptions? jsonOptions,
+        JsonMessageSerializerOptions? serializerOptions
+    )
     {
-        _options = options ?? CreateCombinedOptions();
+        _serializerOptions = serializerOptions ?? new JsonMessageSerializerOptions();
+        _options = jsonOptions ?? _serializerOptions.SerializerOptions ?? CreateCombinedOptions();
     }
 
     /// <inheritdoc />
@@ -52,6 +95,8 @@ public sealed class JsonMessageSerializer : IMessageSerializer
     /// <inheritdoc />
     public T Deserialize<T>(ReadOnlySpan<byte> data)
     {
+        EnsureDeserializationAllowed(typeof(T));
+
         // Try to use AOT-generated type info if available
         var typeInfo = TryGetTypeInfo<T>();
         var result = typeInfo is not null
@@ -66,6 +111,7 @@ public sealed class JsonMessageSerializer : IMessageSerializer
     public object Deserialize(ReadOnlySpan<byte> data, Type type)
     {
         ArgumentNullException.ThrowIfNull(type);
+        EnsureDeserializationAllowed(type);
 
         // Try to use AOT-generated type info if available
         var typeInfo = DotCeleryJsonContext.Default.GetTypeInfo(type);
@@ -86,6 +132,42 @@ public sealed class JsonMessageSerializer : IMessageSerializer
         catch
         {
             // Type not registered in context, fall back to reflection-based serialization
+            return null;
+        }
+    }
+
+    private void EnsureDeserializationAllowed(Type type)
+    {
+        if (!_serializerOptions.EnforceDeserializationTypeAllowlist)
+        {
+            return;
+        }
+
+        if (_serializerOptions.AllowedDeserializationTypes.Contains(type))
+        {
+            return;
+        }
+
+        if (_serializerOptions.AllowDotCeleryTypes && TryGetTypeInfo(type) is not null)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            $"Deserialization type '{type.FullName}' is not allowed. "
+                + "Add the type to JsonMessageSerializerOptions.AllowedDeserializationTypes "
+                + "or disable EnforceDeserializationTypeAllowlist."
+        );
+    }
+
+    private static JsonTypeInfo? TryGetTypeInfo(Type type)
+    {
+        try
+        {
+            return DotCeleryJsonContext.Default.GetTypeInfo(type);
+        }
+        catch
+        {
             return null;
         }
     }

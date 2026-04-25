@@ -325,6 +325,65 @@ public class JsonMessageSerializerTests
         Assert.Throws<ArgumentNullException>(() => _serializer.Deserialize(bytes, null!));
     }
 
+    [Fact]
+    public void Deserialize_WithTypeAllowlist_RejectsUnlistedApplicationType()
+    {
+        var serializer = new JsonMessageSerializer(
+            null,
+            new JsonMessageSerializerOptions { EnforceDeserializationTypeAllowlist = true }
+        );
+        var bytes = """{"name":"Test","value":42}"""u8.ToArray();
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            serializer.Deserialize<TestData>(bytes)
+        );
+
+        Assert.Contains("is not allowed", ex.Message);
+        Assert.Contains(nameof(TestData), ex.Message);
+    }
+
+    [Fact]
+    public void Deserialize_WithTypeAllowlist_AllowsConfiguredApplicationType()
+    {
+        var serializer = new JsonMessageSerializer(
+            null,
+            new JsonMessageSerializerOptions
+            {
+                EnforceDeserializationTypeAllowlist = true,
+                AllowedDeserializationTypes = new HashSet<Type> { typeof(TestData) },
+            }
+        );
+        var bytes = """{"name":"Test","value":42}"""u8.ToArray();
+
+        var result = serializer.Deserialize<TestData>(bytes);
+
+        Assert.Equal("Test", result.Name);
+        Assert.Equal(42, result.Value);
+    }
+
+    [Fact]
+    public void Deserialize_WithTypeAllowlist_AllowsDotCeleryModelTypesByDefault()
+    {
+        var serializer = new JsonMessageSerializer(
+            null,
+            new JsonMessageSerializerOptions { EnforceDeserializationTypeAllowlist = true }
+        );
+        var message = new TaskMessage
+        {
+            Id = "task-1",
+            Task = "test.task",
+            Args = [],
+            ContentType = "application/json",
+            Timestamp = DateTimeOffset.UtcNow,
+            Queue = "celery",
+        };
+        var bytes = serializer.Serialize(message);
+
+        var result = serializer.Deserialize<TaskMessage>(bytes);
+
+        Assert.Equal("task-1", result.Id);
+    }
+
     private class TestData
     {
         public string? Name { get; set; }
