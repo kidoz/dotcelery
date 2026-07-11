@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
     <RootNamespace>DotCelery.RedisPostgresExample</RootNamespace>
     <Description>Example application using Redis broker with Redis or PostgreSQL result backends</Description>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>

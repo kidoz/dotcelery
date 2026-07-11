@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
     <RootNamespace>DotCelery.Demo</RootNamespace>
     <Description>Demo application showcasing DotCelery distributed task queue</Description>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
