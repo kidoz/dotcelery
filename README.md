@@ -497,7 +497,7 @@ Integration tests use [Testcontainers](https://testcontainers.com/) to spin up R
 Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting a pull request.
 
 ```bash
-git clone https://github.com/dotcelery/dotcelery.git
+git clone https://github.com/kidoz/dotcelery.git
 cd dotcelery
 dotnet restore
 dotnet build
