@@ -72,5 +72,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Requires .NET 10.0 and C# 14
 - First public release
 
-[Unreleased]: https://github.com/dotcelery/dotcelery/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/dotcelery/dotcelery/releases/tag/v0.1.0
+[Unreleased]: https://github.com/kidoz/dotcelery/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/kidoz/dotcelery/releases/tag/v0.1.0
