@@ -26,8 +26,8 @@
     <Copyright>Copyright (c) 2026 Aleksandr Pavlov &lt;ckidoz@gmail.com&gt;</Copyright>
     <Description>Distributed task queue for .NET</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/dotcelery/dotcelery</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/dotcelery/dotcelery</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/kidoz/dotcelery</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/kidoz/dotcelery</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>dotnet;task-queue;distributed;celery;background-jobs;worker;scheduler;rabbitmq;redis</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
