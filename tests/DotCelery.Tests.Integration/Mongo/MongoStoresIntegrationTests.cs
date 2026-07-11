@@ -1,4 +1,3 @@
-using System.Text.Json;
 using DotCelery.Backend.Mongo.Batches;
 using DotCelery.Backend.Mongo.DeadLetter;
 using DotCelery.Backend.Mongo.DelayedMessageStore;
@@ -19,7 +18,6 @@ using DotCelery.Core.Models;
 using DotCelery.Core.Outbox;
 using DotCelery.Core.RateLimiting;
 using DotCelery.Core.Sagas;
-using DotCelery.Core.Serialization;
 using DotCelery.Core.Signals;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -202,10 +200,7 @@ public class MongoStoresIntegrationTests : IAsyncLifetime
         {
             Id = Guid.NewGuid().ToString(),
             Task = "test.task",
-            Args = JsonSerializer.SerializeToUtf8Bytes(
-                new { x = 1 },
-                DotCeleryJsonContext.Default.Options
-            ),
+            Args = """{"x":1}"""u8.ToArray(),
             ContentType = "application/json",
             Timestamp = DateTimeOffset.UtcNow,
         };
