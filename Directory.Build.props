@@ -20,10 +20,10 @@
   <!-- Package Metadata -->
   <PropertyGroup>
     <Version>0.1.0</Version>
-    <Authors>DotCelery Contributors</Authors>
+    <Authors>Aleksandr Pavlov</Authors>
     <Company>DotCelery</Company>
     <Product>DotCelery</Product>
-    <Copyright>Copyright (c) 2026 DotCelery Team</Copyright>
+    <Copyright>Copyright (c) 2026 Aleksandr Pavlov &lt;ckidoz@gmail.com&gt;</Copyright>
     <Description>Distributed task queue for .NET</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/dotcelery/dotcelery</PackageProjectUrl>
