@@ -1,0 +1,57 @@
+name: Build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+      DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER: 1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore tools
+        run: dotnet tool restore
+
+      - name: Restore packages
+        run: dotnet restore DotCelery.slnx
+
+      - name: Check formatting
+        run: dotnet csharpier check .
+
+      - name: Vulnerability audit
+        run: dotnet list DotCelery.slnx package --vulnerable --include-transitive
+
+      - name: Build
+        run: dotnet build DotCelery.slnx --configuration Release --no-restore
+
+      # The integration suite (Testcontainers: Redis, Postgres, RabbitMQ, Mongo)
+      # runs in integration.yml. Run only the container-free suites here.
+      - name: Test
+        run: |
+          dotnet test tests/DotCelery.Tests.Unit --configuration Release --no-build
+          dotnet test tests/DotCelery.Analyzers.Tests --configuration Release --no-build
