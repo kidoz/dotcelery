@@ -61,8 +61,9 @@ public sealed class RedisBrokerOptions
     public int PrefetchCount { get; set; } = 10;
 
     /// <summary>
-    /// Gets or sets the timeout for blocking reads.
-    /// Lower values provide more responsive shutdown but more Redis calls.
+    /// Gets or sets how long to wait before polling the streams again when no messages
+    /// were available. While messages are flowing, the streams are read without waiting.
+    /// Lower values pick up new messages on an idle queue sooner but make more Redis calls.
     /// </summary>
     public TimeSpan BlockTimeout { get; set; } = TimeSpan.FromSeconds(5);
 

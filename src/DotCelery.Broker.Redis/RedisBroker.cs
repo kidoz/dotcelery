@@ -26,6 +26,9 @@ public sealed class RedisBroker : IMessageBroker
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly HashSet<string> _initializedGroups = [];
 
+    private static readonly TimeSpan MinFailureDelay = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan MaxFailureDelay = TimeSpan.FromSeconds(30);
+
     // AOT-friendly type info for TaskMessage serialization
     private static JsonTypeInfo<TaskMessage> TaskMessageTypeInfo =>
         DotCeleryJsonContext.Default.TaskMessage;
@@ -145,7 +148,7 @@ public sealed class RedisBroker : IMessageBroker
         {
             foreach (var queue in queues)
             {
-                await EnsureConsumerGroupAsync(db, queue, cancellationToken).ConfigureAwait(false);
+                await EnsureConsumerGroupAsync(db, GetStreamKey(queue)).ConfigureAwait(false);
             }
         }
 
@@ -162,12 +165,15 @@ public sealed class RedisBroker : IMessageBroker
             }
         );
 
+        // Stops the read loop when the caller stops enumerating, not only on cancellation
+        using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
         // Start background task to read from streams
         var readTask = ReadStreamMessagesAsync(
             db,
             streamKeys,
             messageChannel.Writer,
-            cancellationToken
+            readCts.Token
         );
 
         // Yield messages from the channel
@@ -184,6 +190,8 @@ public sealed class RedisBroker : IMessageBroker
         }
         finally
         {
+            await readCts.CancelAsync().ConfigureAwait(false);
+
             // Ensure read task completes
             try
             {
@@ -197,6 +205,14 @@ public sealed class RedisBroker : IMessageBroker
             {
                 _logger.LogWarning(ex, "Error in stream read task during cleanup");
             }
+
+            var undelivered = new List<BrokerMessage>();
+            while (messageChannel.Reader.TryRead(out var message))
+            {
+                undelivered.Add(message);
+            }
+
+            await ReturnUndeliveredAsync(undelivered).ConfigureAwait(false);
         }
     }
 
@@ -253,9 +269,11 @@ public sealed class RedisBroker : IMessageBroker
 
         if (requeue)
         {
+            // Add the copy before acknowledging the original: a failure in between leaves a
+            // duplicate delivery instead of losing the message.
+            await PublishAsync(message.Message, cancellationToken).ConfigureAwait(false);
             await db.StreamAcknowledgeAsync(streamKey, _options.ConsumerGroupName, messageId)
                 .ConfigureAwait(false);
-            await PublishAsync(message.Message, cancellationToken).ConfigureAwait(false);
             _logger.LogDebug(
                 "Rejected and requeued message {MessageId} from stream {Stream}",
                 messageId,
@@ -325,71 +343,103 @@ public sealed class RedisBroker : IMessageBroker
         CancellationToken cancellationToken
     )
     {
+        var failureDelay = TimeSpan.Zero;
+        var nextPendingCheck = 0L;
+        var recreateGroups = false;
+
         try
         {
+            // Keep reading through transient errors: a consumer that stops here would leave the
+            // worker running without receiving messages.
             while (!cancellationToken.IsCancellationRequested && !_disposed)
             {
-                // First, check for pending messages (recovery)
-                await ProcessPendingMessagesAsync(db, streamKeys, writer, cancellationToken)
-                    .ConfigureAwait(false);
+                var received = 0;
 
-                // Read new messages from each stream
-                // Use ">" to read only new messages in consumer group
-                foreach (var streamKey in streamKeys)
-                {
-                    var entries = await db.StreamReadGroupAsync(
-                            streamKey,
-                            _options.ConsumerGroupName,
-                            _consumerName,
-                            ">", // Only new messages
-                            _options.PrefetchCount,
-                            noAck: false
-                        )
-                        .ConfigureAwait(false);
-
-                    if (entries is not null && entries.Length > 0)
-                    {
-                        foreach (var entry in entries)
-                        {
-                            var brokerMessage = ParseStreamEntry(streamKey, entry);
-                            if (brokerMessage is not null)
-                            {
-                                await writer
-                                    .WriteAsync(brokerMessage, cancellationToken)
-                                    .ConfigureAwait(false);
-                            }
-                            else
-                            {
-                                await db.StreamAcknowledgeAsync(
-                                        streamKey,
-                                        _options.ConsumerGroupName,
-                                        entry.Id
-                                    )
-                                    .ConfigureAwait(false);
-                            }
-                        }
-                    }
-                }
-
-                // Small delay between polling iterations to avoid busy-waiting
                 try
                 {
-                    await Task.Delay(_options.BlockTimeout, cancellationToken)
-                        .ConfigureAwait(false);
+                    if (recreateGroups)
+                    {
+                        foreach (var streamKey in streamKeys)
+                        {
+                            await EnsureConsumerGroupAsync(db, streamKey).ConfigureAwait(false);
+                        }
+
+                        recreateGroups = false;
+                    }
+
+                    // Reclaim messages left pending by consumers that stopped without acknowledging
+                    if (Environment.TickCount64 >= nextPendingCheck)
+                    {
+                        received += await ProcessPendingMessagesAsync(
+                                db,
+                                streamKeys,
+                                writer,
+                                cancellationToken
+                            )
+                            .ConfigureAwait(false);
+                        nextPendingCheck =
+                            Environment.TickCount64
+                            + (long)_options.PendingCheckInterval.TotalMilliseconds;
+                    }
+
+                    foreach (var streamKey in streamKeys)
+                    {
+                        received += await ReadNewMessagesAsync(
+                                db,
+                                streamKey,
+                                writer,
+                                cancellationToken
+                            )
+                            .ConfigureAwait(false);
+                    }
+
+                    failureDelay = TimeSpan.Zero;
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
                     break;
                 }
+                catch (RedisServerException ex)
+                    when (_options.AutoCreateStreams && IsMissingGroupError(ex))
+                {
+                    // The stream or its consumer group was removed (for example, by FLUSHDB)
+                    _logger.LogWarning(
+                        ex,
+                        "Consumer group {Group} is missing, recreating it",
+                        _options.ConsumerGroupName
+                    );
+                    ForgetConsumerGroups(streamKeys);
+                    recreateGroups = true;
+                    failureDelay = NextFailureDelay(failureDelay);
+                }
+                catch (Exception ex)
+                {
+                    failureDelay = NextFailureDelay(failureDelay);
+                    _logger.LogError(
+                        ex,
+                        "Error reading from Redis streams, retrying in {Delay}",
+                        failureDelay
+                    );
+                }
+
+                // Poll again immediately while messages are flowing
+                var delay =
+                    failureDelay > TimeSpan.Zero ? failureDelay
+                    : received == 0 ? _options.BlockTimeout
+                    : TimeSpan.Zero;
+
+                if (delay > TimeSpan.Zero)
+                {
+                    try
+                    {
+                        await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                }
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected on shutdown
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error reading from Redis streams");
         }
         finally
         {
@@ -397,7 +447,112 @@ public sealed class RedisBroker : IMessageBroker
         }
     }
 
-    private async Task ProcessPendingMessagesAsync(
+    private async Task<int> ReadNewMessagesAsync(
+        IDatabase db,
+        string streamKey,
+        ChannelWriter<BrokerMessage> writer,
+        CancellationToken cancellationToken
+    )
+    {
+        // Use ">" to read only new messages in consumer group
+        var entries = await db.StreamReadGroupAsync(
+                streamKey,
+                _options.ConsumerGroupName,
+                _consumerName,
+                ">", // Only new messages
+                _options.PrefetchCount,
+                noAck: false
+            )
+            .ConfigureAwait(false);
+
+        if (entries is null || entries.Length == 0)
+        {
+            return 0;
+        }
+
+        var batch = new List<BrokerMessage>(entries.Length);
+        foreach (var entry in entries)
+        {
+            var brokerMessage = ParseStreamEntry(streamKey, entry);
+            if (brokerMessage is not null)
+            {
+                batch.Add(brokerMessage);
+            }
+            else
+            {
+                await db.StreamAcknowledgeAsync(streamKey, _options.ConsumerGroupName, entry.Id)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        await WriteBatchAsync(writer, batch, cancellationToken).ConfigureAwait(false);
+        return entries.Length;
+    }
+
+    /// <summary>
+    /// Hands a batch read from Redis to the consumer. If consumption stops part-way, the
+    /// messages that were not handed over are returned to their streams.
+    /// </summary>
+    private async Task WriteBatchAsync(
+        ChannelWriter<BrokerMessage> writer,
+        List<BrokerMessage> batch,
+        CancellationToken cancellationToken
+    )
+    {
+        for (var i = 0; i < batch.Count; i++)
+        {
+            try
+            {
+                await writer.WriteAsync(batch[i], cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                await ReturnUndeliveredAsync(batch[i..]).ConfigureAwait(false);
+                throw;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns messages that were read from Redis but never handed to the consumer.
+    /// Without this they stay pending for this consumer until another consumer reclaims
+    /// them after <see cref="RedisBrokerOptions.ClaimTimeout"/>.
+    /// </summary>
+    private async Task ReturnUndeliveredAsync(List<BrokerMessage> messages)
+    {
+        foreach (var message in messages)
+        {
+            try
+            {
+                await RejectAsync(message, requeue: true, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to return undelivered message {MessageId}; it will be reclaimed after the claim timeout",
+                    message.Message.Id
+                );
+            }
+        }
+    }
+
+    private static bool IsMissingGroupError(RedisServerException ex) =>
+        ex.Message.StartsWith("NOGROUP", StringComparison.Ordinal);
+
+    private static TimeSpan NextFailureDelay(TimeSpan current)
+    {
+        if (current <= TimeSpan.Zero)
+        {
+            return MinFailureDelay;
+        }
+
+        var next = current * 2;
+        return next > MaxFailureDelay ? MaxFailureDelay : next;
+    }
+
+    private async Task<int> ProcessPendingMessagesAsync(
         IDatabase db,
         string[] streamKeys,
         ChannelWriter<BrokerMessage> writer,
@@ -405,6 +560,7 @@ public sealed class RedisBroker : IMessageBroker
     )
     {
         var minIdleTime = (long)_options.ClaimTimeout.TotalMilliseconds;
+        var reclaimed = 0;
 
         foreach (var streamKey in streamKeys)
         {
@@ -446,6 +602,7 @@ public sealed class RedisBroker : IMessageBroker
                     )
                     .ConfigureAwait(false);
 
+                var batch = new List<BrokerMessage>(claimed.Length);
                 foreach (var entry in claimed)
                 {
                     var brokerMessage = ParseStreamEntry(streamKey, entry);
@@ -457,9 +614,7 @@ public sealed class RedisBroker : IMessageBroker
                             streamKey
                         );
 
-                        await writer
-                            .WriteAsync(brokerMessage, cancellationToken)
-                            .ConfigureAwait(false);
+                        batch.Add(brokerMessage);
                     }
                     else
                     {
@@ -471,8 +626,11 @@ public sealed class RedisBroker : IMessageBroker
                             .ConfigureAwait(false);
                     }
                 }
+
+                await WriteBatchAsync(writer, batch, cancellationToken).ConfigureAwait(false);
+                reclaimed += batch.Count;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
                 _logger.LogWarning(
                     ex,
@@ -481,6 +639,8 @@ public sealed class RedisBroker : IMessageBroker
                 );
             }
         }
+
+        return reclaimed;
     }
 
     private BrokerMessage? ParseStreamEntry(string streamKey, StreamEntry entry)
@@ -569,14 +729,8 @@ public sealed class RedisBroker : IMessageBroker
             || _messageSecurityValidator.VerifySignature(payload, signature);
     }
 
-    private async Task EnsureConsumerGroupAsync(
-        IDatabase db,
-        string queue,
-        CancellationToken cancellationToken
-    )
+    private async Task EnsureConsumerGroupAsync(IDatabase db, string streamKey)
     {
-        var streamKey = GetStreamKey(queue);
-
         lock (_initializedGroups)
         {
             if (_initializedGroups.Contains(streamKey))
@@ -619,6 +773,17 @@ public sealed class RedisBroker : IMessageBroker
         }
     }
 
+    private void ForgetConsumerGroups(string[] streamKeys)
+    {
+        lock (_initializedGroups)
+        {
+            foreach (var streamKey in streamKeys)
+            {
+                _initializedGroups.Remove(streamKey);
+            }
+        }
+    }
+
     private async Task<IDatabase> GetDatabaseAsync(CancellationToken cancellationToken)
     {
         var connection = await GetConnectionAsync(cancellationToken).ConfigureAwait(false);
@@ -629,7 +794,9 @@ public sealed class RedisBroker : IMessageBroker
         CancellationToken cancellationToken
     )
     {
-        if (_connection?.IsConnected == true)
+        // The multiplexer reconnects on its own after a connection drops, so it is created once
+        // and reused. Replacing it while disconnected would leak connections.
+        if (_connection is not null)
         {
             return _connection;
         }
@@ -637,7 +804,7 @@ public sealed class RedisBroker : IMessageBroker
         await _connectionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_connection?.IsConnected == true)
+            if (_connection is not null)
             {
                 return _connection;
             }

@@ -106,7 +106,10 @@ public sealed class MessageSecurityValidator : IMessageSecurityValidator, IDispo
 {
     private readonly MessageSecurityOptions _options;
     private readonly ILogger<MessageSecurityValidator> _logger;
-    private readonly HMACSHA256? _hmac;
+
+    // HMACSHA256 instances are not thread-safe, and this validator is a shared singleton,
+    // so each signature is computed with the stateless HMACSHA256.HashData API.
+    private readonly byte[]? _signingKey;
     private bool _disposed;
 
     /// <summary>
@@ -122,7 +125,7 @@ public sealed class MessageSecurityValidator : IMessageSecurityValidator, IDispo
 
         if (_options.EnableMessageSigning && _options.SigningKey is not null)
         {
-            _hmac = new HMACSHA256(_options.SigningKey);
+            _signingKey = (byte[])_options.SigningKey.Clone();
         }
     }
 
@@ -217,26 +220,30 @@ public sealed class MessageSecurityValidator : IMessageSecurityValidator, IDispo
     /// <inheritdoc />
     public string? Sign(byte[] payload)
     {
-        if (_hmac is null)
+        if (_signingKey is null)
         {
             return null;
         }
 
-        var hash = _hmac.ComputeHash(payload);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var hash = HMACSHA256.HashData(_signingKey, payload);
         return Convert.ToBase64String(hash);
     }
 
     /// <inheritdoc />
     public bool VerifySignature(byte[] payload, string signature)
     {
-        if (_hmac is null)
+        if (_signingKey is null)
         {
             return false;
         }
 
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
         try
         {
-            var expectedHash = _hmac.ComputeHash(payload);
+            var expectedHash = HMACSHA256.HashData(_signingKey, payload);
             var actualHash = Convert.FromBase64String(signature);
 
             return CryptographicOperations.FixedTimeEquals(expectedHash, actualHash);
@@ -257,6 +264,10 @@ public sealed class MessageSecurityValidator : IMessageSecurityValidator, IDispo
         }
 
         _disposed = true;
-        _hmac?.Dispose();
+
+        if (_signingKey is not null)
+        {
+            CryptographicOperations.ZeroMemory(_signingKey);
+        }
     }
 }

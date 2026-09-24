@@ -71,6 +71,14 @@ public sealed class TaskExecutor
     /// <param name="workerName">The worker name.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The task result.</returns>
+    /// <remarks>
+    /// Exceptions thrown by the task are returned as a <see cref="TaskState.Failure"/> result.
+    /// Any exception thrown by this method means the task outcome was not recorded.
+    /// </remarks>
+    /// <exception cref="UnknownTaskException">The task is not registered.</exception>
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="cancellationToken"/> was cancelled before the outcome was recorded.
+    /// </exception>
     public async Task<TaskResult> ExecuteAsync(
         BrokerMessage brokerMessage,
         string? workerName,
@@ -132,14 +140,19 @@ public sealed class TaskExecutor
 
         _logger.LogDebug("Executing task {TaskName} with ID {TaskId}", message.Task, message.Id);
 
-        // Register task for revocation and get linked token
-        using var taskCts = _revocationManager.RegisterTask(message.Id, cancellationToken);
-        var taskToken = taskCts.Token;
-
         // Update state to Started
         await _resultBackend
             .UpdateStateAsync(message.Id, TaskState.Started, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
+
+        // Register task for revocation and get linked token
+        using var taskCts = _revocationManager.RegisterTask(message.Id, cancellationToken);
+        var taskToken = taskCts.Token;
+
+        // Set once the task body and its filters have finished. Failures after that point
+        // (storing the result, dispatching signals) are infrastructure failures, not task
+        // failures, and propagate to the worker instead of being recorded as a failed task.
+        var taskCompleted = false;
 
         try
         {
@@ -194,6 +207,8 @@ public sealed class TaskExecutor
                     taskToken
                 )
                 .ConfigureAwait(false);
+
+            taskCompleted = true;
 
             // Check if requeue was requested by a filter
             if (requeueRequested)
@@ -323,7 +338,10 @@ public sealed class TaskExecutor
             return taskResult;
         }
         catch (OperationCanceledException)
-            when (taskToken.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            when (!taskCompleted
+                && taskToken.IsCancellationRequested
+                && !cancellationToken.IsCancellationRequested
+            )
         {
             // Task was revoked and terminated during execution
             _logger.LogInformation("Task {TaskId} was cancelled due to revocation", message.Id);
@@ -335,6 +353,16 @@ public sealed class TaskExecutor
                     cancellationToken
                 )
                 .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The worker is stopping. This is not a task failure: the worker returns the
+            // message to the broker so the task runs again.
+            _logger.LogInformation(
+                "Task {TaskId} was interrupted because the worker is stopping",
+                message.Id
+            );
+            throw;
         }
         catch (RetryException ex)
         {
@@ -445,7 +473,7 @@ public sealed class TaskExecutor
 
             return taskResult;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!taskCompleted)
         {
             _logger.LogError(ex, "Task {TaskId} failed", message.Id);
 

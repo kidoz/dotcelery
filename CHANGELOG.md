@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `WorkerOptions.InfrastructureFailureRequeueDelay` sets how long the worker waits before returning a message to the broker after an infrastructure failure
+
+### Changed
+- Graceful shutdown stops taking messages first, returns prefetched messages to the broker, and closes the broker consumer only after every in-flight message is settled
+- The worker stops with an error when the broker ends the message stream unexpectedly, instead of running without a consumer
+- The Redis broker reads again immediately while messages are available; `RedisBrokerOptions.BlockTimeout` applies only after a read returns nothing
+
+### Fixed
+- The worker no longer drops a message when the result backend, revocation store, rate limiter, or retry publish fails; it returns the message to the broker
+- Infrastructure failures after a task succeeds are no longer recorded as task failures
+- Tasks interrupted by shutdown are returned to the broker instead of being recorded as failures, and are not requeued while they are still running
+- A failed acknowledgement no longer stops a worker processing loop
+- Message signing is thread-safe; the shared `HMACSHA256` instance could produce invalid signatures under concurrent use
+- The Redis broker keeps consuming after transient errors and recreates a missing consumer group
+- The Redis broker returns buffered messages to their streams when consumption stops, adds a requeued copy before acknowledging the original, and no longer replaces its connection while reconnecting
+
 ## [0.1.0] - 2026-01-12
 
 ### Added

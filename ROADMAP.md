@@ -30,13 +30,11 @@ but do not yet behave as documented.
 ## Known Gaps
 
 ### Delivery and Reliability
-- The worker rejects messages without requeue on any processing error, so a transient backend outage (revocation check, rate limiter, state write, retry re-publish) drops the message
-- Graceful shutdown keeps consuming during the drain, requeues tasks that are still running, and records shutdown-cancelled tasks as failures
-- Redis broker: the consume loop stops after the first error, polling uses a fixed delay instead of blocking reads, pending-message reclaim takes over messages that live workers are still processing, acknowledged entries are never deleted from streams, and requeue acknowledges before re-adding
+- Redis broker: pending-message reclaim takes over messages that live workers are still processing (no lease renewal), and acknowledged entries are never deleted from streams
 - RabbitMQ broker: reconnect logic competes with the client's automatic recovery and can acknowledge on a different channel than the one that delivered the message; queue arguments (priority, queue type, dead-letter exchange) are fixed
 - Delayed messages are removed from the store before they are published (Redis, PostgreSQL), and MongoDB can dispatch the same message twice
-- Message signing shares one `HMACSHA256` instance across threads
-- Redis stores and the Redis broker open a new connection on reconnect without disposing the old one
+- Redis stores open a new connection on reconnect without disposing the old one
+- Without a delay store, a message with a future ETA holds the worker's consume loop for up to 5 seconds before it is requeued
 - Hard time limits are cooperative; a task that ignores its cancellation token keeps its worker slot
 
 ### Backend Correctness

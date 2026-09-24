@@ -1,8 +1,10 @@
+using System.Diagnostics;
 using DotCelery.Broker.Redis;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using StackExchange.Redis;
 using Testcontainers.Redis;
 
 namespace DotCelery.Tests.Integration.Redis;
@@ -421,6 +423,136 @@ public class RedisBrokerIntegrationTests : IAsyncLifetime
         // No duplicate messages
         var allIds = received1.Concat(received2).Select(m => m.Message.Id).ToList();
         Assert.Equal(allIds.Count, allIds.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task ConsumeAsync_BacklogLargerThanOneRead_IsDrainedWithoutIdleWaits()
+    {
+        // The idle poll interval applies only when a read returns nothing
+        await using var broker = CreateBroker(o =>
+        {
+            o.BlockTimeout = TimeSpan.FromSeconds(5);
+            o.PrefetchCount = 5;
+        });
+
+        const int messageCount = 20;
+        for (var i = 0; i < messageCount; i++)
+        {
+            await broker.PublishAsync(CreateTestMessage());
+        }
+
+        var received = 0;
+        var stopwatch = Stopwatch.StartNew();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        await foreach (var msg in broker.ConsumeAsync(["celery"], cts.Token))
+        {
+            await broker.AckAsync(msg);
+            if (++received == messageCount)
+            {
+                break;
+            }
+        }
+
+        Assert.Equal(messageCount, received);
+        Assert.True(
+            stopwatch.Elapsed < TimeSpan.FromSeconds(4),
+            $"Draining took {stopwatch.Elapsed}"
+        );
+    }
+
+    [Fact]
+    public async Task ConsumeAsync_StreamDeleted_RecreatesConsumerGroupAndContinues()
+    {
+        await using var broker = CreateBroker();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var consumer = broker
+            .ConsumeAsync(["celery"], cts.Token)
+            .GetAsyncEnumerator(cts.Token);
+
+        await broker.PublishAsync(CreateTestMessage());
+        Assert.True(await consumer.MoveNextAsync());
+        await broker.AckAsync(consumer.Current);
+
+        // Deleting the stream also deletes its consumer group, as FLUSHDB or eviction would
+        await using (
+            var redis = await ConnectionMultiplexer.ConnectAsync(_container.GetConnectionString())
+        )
+        {
+            await redis.GetDatabase().KeyDeleteAsync("dotcelery:stream:celery");
+        }
+
+        var next = CreateTestMessage();
+        await broker.PublishAsync(next);
+
+        Assert.True(await consumer.MoveNextAsync());
+        Assert.Equal(next.Id, consumer.Current.Message.Id);
+    }
+
+    [Fact]
+    public async Task ConsumeAsync_StoppedWithBufferedMessages_ReturnsThemToOtherConsumers()
+    {
+        // A long claim timeout: other consumers must not have to wait for a reclaim
+        await using var first = CreateBroker(o =>
+        {
+            o.ConsumerName = "consumer-1";
+            o.ClaimTimeout = TimeSpan.FromMinutes(5);
+        });
+        await using var second = CreateBroker(o =>
+        {
+            o.ConsumerName = "consumer-2";
+            o.ClaimTimeout = TimeSpan.FromMinutes(5);
+        });
+
+        const int messageCount = 5;
+        for (var i = 0; i < messageCount; i++)
+        {
+            await first.PublishAsync(CreateTestMessage());
+        }
+
+        // Take one message, then stop consuming while the rest are buffered
+        BrokerMessage? taken = null;
+        using var cts1 = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await foreach (var msg in first.ConsumeAsync(["celery"], cts1.Token))
+        {
+            taken = msg;
+            break;
+        }
+
+        Assert.NotNull(taken);
+
+        var received = new List<BrokerMessage>();
+        using var cts2 = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await foreach (var msg in second.ConsumeAsync(["celery"], cts2.Token))
+        {
+            received.Add(msg);
+            await second.AckAsync(msg);
+            if (received.Count == messageCount - 1)
+            {
+                break;
+            }
+        }
+
+        Assert.Equal(messageCount - 1, received.Count);
+        Assert.DoesNotContain(received, m => m.Message.Id == taken.Message.Id);
+    }
+
+    private RedisBroker CreateBroker(Action<RedisBrokerOptions>? configure = null)
+    {
+        var options = new RedisBrokerOptions
+        {
+            ConnectionString = _container.GetConnectionString(),
+            PrefetchCount = 10,
+            BlockTimeout = TimeSpan.FromMilliseconds(100),
+            ClaimTimeout = TimeSpan.FromSeconds(5),
+        };
+        configure?.Invoke(options);
+
+        var logger = LoggerFactory
+            .Create(builder => builder.AddConsole())
+            .CreateLogger<RedisBroker>();
+
+        return new RedisBroker(Options.Create(options), logger);
     }
 
     private static TaskMessage CreateTestMessage() =>

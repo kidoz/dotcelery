@@ -1,5 +1,7 @@
+using System.Runtime.ExceptionServices;
 using System.Threading.Channels;
 using DotCelery.Core.Abstractions;
+using DotCelery.Core.Exceptions;
 using DotCelery.Core.Models;
 using DotCelery.Worker.Execution;
 using Microsoft.Extensions.Hosting;
@@ -11,6 +13,17 @@ namespace DotCelery.Worker;
 /// <summary>
 /// Background service that runs the Celery worker.
 /// </summary>
+/// <remarks>
+/// <para>
+/// A message is acknowledged only after its task outcome is stored, so delivery is
+/// at-least-once: a task can run again if the worker stops or a dependency fails first.
+/// </para>
+/// <para>
+/// Messages for unknown tasks are rejected without requeue. After an infrastructure failure,
+/// such as an unavailable result backend, the message is returned to the broker once
+/// <see cref="WorkerOptions.InfrastructureFailureRequeueDelay"/> has elapsed.
+/// </para>
+/// </remarks>
 public sealed class CeleryWorkerService : BackgroundService
 {
     private readonly IMessageBroker _broker;
@@ -23,6 +36,8 @@ public sealed class CeleryWorkerService : BackgroundService
     private readonly Channel<BrokerMessage> _workChannel;
     private readonly string _workerName;
     private readonly TimeProvider _timeProvider;
+    private readonly CancellationTokenSource _stopIntakeCts = new();
+    private readonly CancellationTokenSource _abortExecutionCts = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CeleryWorkerService"/> class.
@@ -69,194 +84,325 @@ public sealed class CeleryWorkerService : BackgroundService
             string.Join(", ", _options.Queues)
         );
 
+        using var intakeCts = CancellationTokenSource.CreateLinkedTokenSource(
+            stoppingToken,
+            _stopIntakeCts.Token
+        );
+        using var executionCts = CancellationTokenSource.CreateLinkedTokenSource(
+            stoppingToken,
+            _abortExecutionCts.Token
+        );
+
+        // Not linked to stoppingToken: the broker consumer is closed only after every worker
+        // has settled its message, because brokers such as RabbitMQ requeue all unsettled
+        // messages when a consumer closes, including messages whose tasks are still running.
+        using var consumeCts = new CancellationTokenSource();
+
         // Start worker tasks
         var workers = Enumerable
             .Range(0, _options.Concurrency)
-            .Select(i => ProcessMessagesAsync(i, stoppingToken))
+            .Select(i => ProcessMessagesAsync(i, intakeCts.Token, executionCts.Token))
             .ToList();
 
-        // Start consumer
-        var consumer = ConsumeMessagesAsync(stoppingToken);
+        var consumer = _broker
+            .ConsumeAsync(_options.Queues.ToList(), consumeCts.Token)
+            .GetAsyncEnumerator(CancellationToken.None);
+
+        Task<bool>? pendingRead = null;
+        Exception? consumeFailure = null;
 
         try
         {
-            await Task.WhenAll([consumer, .. workers]).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            _logger.LogInformation("Worker {WorkerName} shutting down gracefully", _workerName);
+            pendingRead = await PumpMessagesAsync(consumer, intakeCts.Token).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Worker {WorkerName} encountered an error", _workerName);
-            throw;
-        }
-    }
-
-    private async Task ConsumeMessagesAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await foreach (
-                var message in _broker
-                    .ConsumeAsync(_options.Queues.ToList(), cancellationToken)
-                    .ConfigureAwait(false)
-            )
-            {
-                // Wait if kill switch is tripped
-                if (_killSwitch is not null)
-                {
-                    await _killSwitch.WaitUntilReadyAsync(cancellationToken).ConfigureAwait(false);
-                }
-
-                var now = _timeProvider.GetUtcNow();
-
-                // Check if task has expired
-                if (message.Message.Expires.HasValue && message.Message.Expires.Value < now)
-                {
-                    _logger.LogWarning("Task {TaskId} has expired, skipping", message.Message.Id);
-                    await _broker.AckAsync(message, cancellationToken).ConfigureAwait(false);
-                    continue;
-                }
-
-                // Check if ETA is in the future
-                if (message.Message.Eta.HasValue && message.Message.Eta.Value > now)
-                {
-                    if (_options.UseDelayQueue && _delayedMessageStore is not null)
-                    {
-                        // Add to delay store for efficient handling
-                        await _delayedMessageStore
-                            .AddAsync(message.Message, message.Message.Eta.Value, cancellationToken)
-                            .ConfigureAwait(false);
-
-                        await _broker.AckAsync(message, cancellationToken).ConfigureAwait(false);
-
-                        _logger.LogDebug(
-                            "Task {TaskId} scheduled for {Eta} via delay store",
-                            message.Message.Id,
-                            message.Message.Eta.Value
-                        );
-                    }
-                    else
-                    {
-                        // Fallback behavior: wait until ETA or a maximum delay to prevent spin loop
-                        var delayUntilEta = message.Message.Eta.Value - now;
-                        var maxFallbackDelay = TimeSpan.FromSeconds(5);
-                        var actualDelay =
-                            delayUntilEta < maxFallbackDelay ? delayUntilEta : maxFallbackDelay;
-
-                        _logger.LogDebug(
-                            "Task {TaskId} has future ETA {Eta}, waiting {Delay} before requeue (no delay store configured)",
-                            message.Message.Id,
-                            message.Message.Eta.Value,
-                            actualDelay
-                        );
-
-                        await Task.Delay(actualDelay, cancellationToken).ConfigureAwait(false);
-                        await _broker
-                            .RejectAsync(message, requeue: true, cancellationToken)
-                            .ConfigureAwait(false);
-                    }
-                    continue;
-                }
-
-                await _workChannel
-                    .Writer.WriteAsync(message, cancellationToken)
-                    .ConfigureAwait(false);
-            }
+            consumeFailure = ex;
         }
         finally
         {
             _workChannel.Writer.Complete();
         }
+
+        await Task.WhenAll(workers).ConfigureAwait(false);
+        await CloseConsumerAsync(consumer, consumeCts, pendingRead).ConfigureAwait(false);
+
+        if (intakeCts.IsCancellationRequested)
+        {
+            if (consumeFailure is not null)
+            {
+                _logger.LogWarning(
+                    consumeFailure,
+                    "Worker {WorkerName} consumer failed while stopping",
+                    _workerName
+                );
+            }
+
+            _logger.LogInformation("Worker {WorkerName} stopped", _workerName);
+            return;
+        }
+
+        // The broker stopped delivering while the worker was running. Fail the service so the
+        // host stops (or its supervisor restarts it) instead of running without a consumer.
+        if (consumeFailure is not null)
+        {
+            _logger.LogError(
+                consumeFailure,
+                "Worker {WorkerName} stopped because consuming from the broker failed",
+                _workerName
+            );
+            ExceptionDispatchInfo.Capture(consumeFailure).Throw();
+        }
+
+        _logger.LogError(
+            "Worker {WorkerName} stopped because the broker ended the message stream",
+            _workerName
+        );
+        throw new InvalidOperationException(
+            $"Worker {_workerName} stopped because the broker ended the message stream."
+        );
     }
 
-    private async Task ProcessMessagesAsync(int workerId, CancellationToken cancellationToken)
+    /// <summary>
+    /// Moves messages from the broker to the workers until intake stops or the broker ends
+    /// the stream.
+    /// </summary>
+    /// <returns>A broker read that was still in progress when intake stopped, if any.</returns>
+    private async Task<Task<bool>?> PumpMessagesAsync(
+        IAsyncEnumerator<BrokerMessage> consumer,
+        CancellationToken intakeToken
+    )
     {
-        _logger.LogDebug("Worker thread {WorkerId} started", workerId);
-
-        await foreach (
-            var message in _workChannel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)
-        )
+        while (!intakeToken.IsCancellationRequested)
         {
-            // Register task for graceful shutdown tracking
-            using var registration = _shutdownHandler?.RegisterTask(message.Message.Id, message);
+            // Stopping intake must not cancel the broker read itself: that would close the
+            // consumer while tasks are still running.
+            var read = consumer.MoveNextAsync().AsTask();
 
             try
             {
-                var result = await _executor
-                    .ExecuteAsync(message, _workerName, cancellationToken)
-                    .ConfigureAwait(false);
-
-                // Record success/failure for kill switch
-                if (result.State == TaskState.Success)
+                if (!await read.WaitAsync(intakeToken).ConfigureAwait(false))
                 {
-                    _killSwitch?.RecordSuccess();
+                    return null;
                 }
-                else if (result.State == TaskState.Failure || result.State == TaskState.Rejected)
-                {
-                    _killSwitch?.RecordFailure();
-                }
+            }
+            catch (OperationCanceledException) when (intakeToken.IsCancellationRequested)
+            {
+                return read;
+            }
 
-                if (result.State == TaskState.Retry)
+            await DispatchAsync(consumer.Current, intakeToken).ConfigureAwait(false);
+        }
+
+        return null;
+    }
+
+    private async Task DispatchAsync(BrokerMessage message, CancellationToken intakeToken)
+    {
+        try
+        {
+            // Wait if kill switch is tripped
+            if (_killSwitch is not null)
+            {
+                await _killSwitch.WaitUntilReadyAsync(intakeToken).ConfigureAwait(false);
+            }
+
+            var now = _timeProvider.GetUtcNow();
+
+            // Check if task has expired
+            if (message.Message.Expires.HasValue && message.Message.Expires.Value < now)
+            {
+                _logger.LogWarning("Task {TaskId} has expired, skipping", message.Message.Id);
+                await AckAsync(message).ConfigureAwait(false);
+                return;
+            }
+
+            // Check if ETA is in the future
+            if (message.Message.Eta.HasValue && message.Message.Eta.Value > now)
+            {
+                if (_options.UseDelayQueue && _delayedMessageStore is not null)
                 {
-                    await HandleRetryAsync(message, result, cancellationToken)
+                    // Add to delay store for efficient handling
+                    await _delayedMessageStore
+                        .AddAsync(message.Message, message.Message.Eta.Value, intakeToken)
                         .ConfigureAwait(false);
-                }
-                else if (result.State == TaskState.Requeued)
-                {
-                    // Requeue the message for later processing (e.g., partition locked)
-                    // Apply requeue delay to prevent hot loops
-                    if (result.RequeueDelay.HasValue && result.RequeueDelay.Value > TimeSpan.Zero)
-                    {
-                        _logger.LogDebug(
-                            "Task {TaskId} requeued with delay {RequeueDelay}",
-                            message.Message.Id,
-                            result.RequeueDelay.Value
-                        );
-                        await Task.Delay(result.RequeueDelay.Value, cancellationToken)
-                            .ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        _logger.LogDebug(
-                            "Task {TaskId} requeued for later processing",
-                            message.Message.Id
-                        );
-                    }
 
-                    await _broker
-                        .RejectAsync(message, requeue: true, cancellationToken)
-                        .ConfigureAwait(false);
-                }
-                else if (result.State == TaskState.Revoked)
-                {
-                    // Just ack the message, result is already stored
-                    await _broker.AckAsync(message, cancellationToken).ConfigureAwait(false);
+                    await AckAsync(message).ConfigureAwait(false);
+
+                    _logger.LogDebug(
+                        "Task {TaskId} scheduled for {Eta} via delay store",
+                        message.Message.Id,
+                        message.Message.Eta.Value
+                    );
                 }
                 else
                 {
-                    await _broker.AckAsync(message, cancellationToken).ConfigureAwait(false);
+                    // Fallback behavior: wait until ETA or a maximum delay to prevent spin loop
+                    var delayUntilEta = message.Message.Eta.Value - now;
+                    var maxFallbackDelay = TimeSpan.FromSeconds(5);
+                    var actualDelay =
+                        delayUntilEta < maxFallbackDelay ? delayUntilEta : maxFallbackDelay;
+
+                    _logger.LogDebug(
+                        "Task {TaskId} has future ETA {Eta}, waiting {Delay} before requeue (no delay store configured)",
+                        message.Message.Id,
+                        message.Message.Eta.Value,
+                        actualDelay
+                    );
+
+                    await Task.Delay(actualDelay, intakeToken).ConfigureAwait(false);
+                    await ReturnToBrokerAsync(message).ConfigureAwait(false);
                 }
+
+                return;
             }
-            catch (Exception ex)
+
+            await _workChannel.Writer.WriteAsync(message, intakeToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (intakeToken.IsCancellationRequested)
+        {
+            // Intake stopped before the message reached a worker
+            await ReturnToBrokerAsync(message).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to dispatch message {TaskId}, returning it to the broker",
+                message.Message.Id
+            );
+            await ReturnToBrokerAsync(message).ConfigureAwait(false);
+        }
+    }
+
+    private async Task ProcessMessagesAsync(
+        int workerId,
+        CancellationToken intakeToken,
+        CancellationToken executionToken
+    )
+    {
+        _logger.LogDebug("Worker thread {WorkerId} started", workerId);
+
+        // Read until the dispatcher completes the channel so every dispatched message is settled
+        await foreach (var message in _workChannel.Reader.ReadAllAsync().ConfigureAwait(false))
+        {
+            // Register before checking for shutdown: a graceful shutdown that has already
+            // started either waits for this task or sees the message returned to the broker.
+            using var registration = _shutdownHandler?.RegisterTask(message.Message.Id, message);
+
+            if (intakeToken.IsCancellationRequested)
             {
-                _killSwitch?.RecordFailure(ex);
-                _logger.LogError(ex, "Failed to process message {TaskId}", message.Message.Id);
-                await _broker
-                    .RejectAsync(message, requeue: false, cancellationToken)
-                    .ConfigureAwait(false);
+                // Prefetched but not started, so another worker can take it
+                await ReturnToBrokerAsync(message).ConfigureAwait(false);
+                continue;
             }
+
+            await ProcessMessageAsync(message, executionToken).ConfigureAwait(false);
         }
 
         _logger.LogDebug("Worker thread {WorkerId} stopped", workerId);
     }
 
-    private async Task HandleRetryAsync(
-        BrokerMessage message,
-        TaskResult result,
-        CancellationToken cancellationToken
-    )
+    private async Task ProcessMessageAsync(BrokerMessage message, CancellationToken executionToken)
+    {
+        TaskResult result;
+
+        try
+        {
+            result = await _executor
+                .ExecuteAsync(message, _workerName, executionToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (executionToken.IsCancellationRequested)
+        {
+            await HandleInterruptedAsync(message).ConfigureAwait(false);
+            return;
+        }
+        catch (UnknownTaskException ex)
+        {
+            // Redelivering a message that no worker can handle would loop forever
+            _killSwitch?.RecordFailure(ex);
+            _logger.LogError(
+                ex,
+                "Rejecting message {TaskId} for unregistered task {TaskName}",
+                message.Message.Id,
+                message.Message.Task
+            );
+            await RejectAsync(message).ConfigureAwait(false);
+            return;
+        }
+        catch (Exception ex)
+        {
+            // The outcome was not recorded (for example, the result backend is unavailable)
+            _killSwitch?.RecordFailure(ex);
+            _logger.LogError(
+                ex,
+                "Failed to process message {TaskId}, returning it to the broker",
+                message.Message.Id
+            );
+            await ReturnToBrokerAfterFailureAsync(message, executionToken).ConfigureAwait(false);
+            return;
+        }
+
+        // Record success/failure for kill switch
+        if (result.State == TaskState.Success)
+        {
+            _killSwitch?.RecordSuccess();
+        }
+        else if (result.State == TaskState.Failure || result.State == TaskState.Rejected)
+        {
+            _killSwitch?.RecordFailure();
+        }
+
+        if (result.State == TaskState.Retry)
+        {
+            try
+            {
+                await ScheduleRetryAsync(message, result).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // The retry was not scheduled, so keep the original message
+                _logger.LogError(
+                    ex,
+                    "Failed to schedule retry for task {TaskId}, returning the message to the broker",
+                    message.Message.Id
+                );
+                await ReturnToBrokerAfterFailureAsync(message, executionToken)
+                    .ConfigureAwait(false);
+                return;
+            }
+
+            await AckAsync(message).ConfigureAwait(false);
+        }
+        else if (result.State == TaskState.Requeued)
+        {
+            // Requeue the message for later processing (e.g., partition locked)
+            // Apply requeue delay to prevent hot loops
+            if (result.RequeueDelay.HasValue && result.RequeueDelay.Value > TimeSpan.Zero)
+            {
+                _logger.LogDebug(
+                    "Task {TaskId} requeued with delay {RequeueDelay}",
+                    message.Message.Id,
+                    result.RequeueDelay.Value
+                );
+                await DelayAsync(result.RequeueDelay.Value, executionToken).ConfigureAwait(false);
+            }
+            else
+            {
+                _logger.LogDebug("Task {TaskId} requeued for later processing", message.Message.Id);
+            }
+
+            await ReturnToBrokerAsync(message).ConfigureAwait(false);
+        }
+        else
+        {
+            // Success, Failure, Rejected, and Revoked outcomes are already stored
+            await AckAsync(message).ConfigureAwait(false);
+        }
+    }
+
+    private async Task ScheduleRetryAsync(BrokerMessage message, TaskResult result)
     {
         // Only increment retries if the task actually executed and failed
         // Rate-limited tasks never executed, so they shouldn't count toward max retries
@@ -275,7 +421,7 @@ public sealed class CeleryWorkerService : BackgroundService
             {
                 // Add to delay store for delayed requeue
                 await _delayedMessageStore
-                    .AddAsync(retryMessage, deliveryTime, cancellationToken)
+                    .AddAsync(retryMessage, deliveryTime, CancellationToken.None)
                     .ConfigureAwait(false);
 
                 _logger.LogDebug(
@@ -291,7 +437,9 @@ public sealed class CeleryWorkerService : BackgroundService
                 {
                     Eta = deliveryTime,
                 };
-                await _broker.PublishAsync(retryMessage, cancellationToken).ConfigureAwait(false);
+                await _broker
+                    .PublishAsync(retryMessage, CancellationToken.None)
+                    .ConfigureAwait(false);
 
                 _logger.LogDebug(
                     "Task {TaskId} rate limited, requeued with ETA {Eta}",
@@ -303,15 +451,148 @@ public sealed class CeleryWorkerService : BackgroundService
         else
         {
             // Regular retry - requeue immediately
-            await _broker.PublishAsync(retryMessage, cancellationToken).ConfigureAwait(false);
+            await _broker.PublishAsync(retryMessage, CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    private async Task HandleInterruptedAsync(BrokerMessage message)
+    {
+        if (_options.NackOnForcedShutdown)
+        {
+            _logger.LogWarning(
+                "Task {TaskId} did not finish before shutdown, returning it to the broker",
+                message.Message.Id
+            );
+            await ReturnToBrokerAsync(message).ConfigureAwait(false);
+        }
+        else
+        {
+            _logger.LogWarning(
+                "Task {TaskId} did not finish before shutdown, leaving its message unacknowledged",
+                message.Message.Id
+            );
+        }
+    }
+
+    private async Task ReturnToBrokerAfterFailureAsync(
+        BrokerMessage message,
+        CancellationToken executionToken
+    )
+    {
+        await DelayAsync(_options.InfrastructureFailureRequeueDelay, executionToken)
+            .ConfigureAwait(false);
+        await ReturnToBrokerAsync(message).ConfigureAwait(false);
+    }
+
+    private async Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+    {
+        if (delay <= TimeSpan.Zero)
+        {
+            return;
         }
 
-        await _broker.AckAsync(message, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await Task.Delay(delay, _timeProvider, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Stopping: settle the message without waiting out the delay
+        }
+    }
+
+    // Settlement uses CancellationToken.None so it completes during shutdown. A failed settle
+    // leaves the message unsettled, and the broker redelivers it later.
+    private Task AckAsync(BrokerMessage message) =>
+        SettleAsync(
+            message,
+            "acknowledge",
+            static (broker, m) => broker.AckAsync(m, CancellationToken.None)
+        );
+
+    private Task RejectAsync(BrokerMessage message) =>
+        SettleAsync(
+            message,
+            "reject",
+            static (broker, m) => broker.RejectAsync(m, requeue: false, CancellationToken.None)
+        );
+
+    private Task ReturnToBrokerAsync(BrokerMessage message) =>
+        SettleAsync(
+            message,
+            "requeue",
+            static (broker, m) => broker.RejectAsync(m, requeue: true, CancellationToken.None)
+        );
+
+    private async Task SettleAsync(
+        BrokerMessage message,
+        string action,
+        Func<IMessageBroker, BrokerMessage, ValueTask> settle
+    )
+    {
+        try
+        {
+            await settle(_broker, message).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to {Action} message {TaskId}", action, message.Message.Id);
+        }
+    }
+
+    private async Task CloseConsumerAsync(
+        IAsyncEnumerator<BrokerMessage> consumer,
+        CancellationTokenSource consumeCts,
+        Task<bool>? pendingRead
+    )
+    {
+        await consumeCts.CancelAsync().ConfigureAwait(false);
+
+        if (pendingRead is not null)
+        {
+            try
+            {
+                if (await pendingRead.ConfigureAwait(false))
+                {
+                    // Delivered after intake stopped
+                    await ReturnToBrokerAsync(consumer.Current).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected: the read was cancelled when the consumer closed
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Broker read failed while worker {WorkerName} was stopping",
+                    _workerName
+                );
+            }
+        }
+
+        try
+        {
+            await consumer.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to close the broker consumer for worker {WorkerName}",
+                _workerName
+            );
+        }
     }
 
     /// <inheritdoc />
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
+        // Stop taking messages first. Prefetched messages are returned to the broker, and the
+        // broker consumer stays open until every in-flight message is settled.
+        await _stopIntakeCts.CancelAsync().ConfigureAwait(false);
+
         if (!_options.EnableGracefulShutdown || _shutdownHandler is null)
         {
             _logger.LogInformation(
@@ -328,11 +609,20 @@ public sealed class CeleryWorkerService : BackgroundService
             _options.ShutdownTimeout
         );
 
-        var result = await _shutdownHandler
-            .ShutdownAsync(_options.ShutdownTimeout, cancellationToken)
-            .ConfigureAwait(false);
+        GracefulShutdownResult? result = null;
 
-        if (result.CompletedGracefully)
+        try
+        {
+            result = await _shutdownHandler
+                .ShutdownAsync(_options.ShutdownTimeout, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The host's shutdown budget ran out before the worker's own timeout
+        }
+
+        if (result is { CompletedGracefully: true })
         {
             _logger.LogInformation(
                 "Worker {WorkerName} graceful shutdown completed. All {Total} tasks finished in {Duration}",
@@ -346,44 +636,23 @@ public sealed class CeleryWorkerService : BackgroundService
             _logger.LogWarning(
                 "Worker {WorkerName} forced shutdown. Completed: {Completed}, Cancelled: {Cancelled}",
                 _workerName,
-                result.CompletedTasks,
-                result.CancelledTasks
+                result?.CompletedTasks ?? 0,
+                result?.CancelledTasks ?? _shutdownHandler.ActiveTaskCount
             );
 
-            if (_options.NackOnForcedShutdown)
-            {
-                var pendingMessages = _shutdownHandler.GetPendingMessages();
-
-                foreach (var message in pendingMessages)
-                {
-                    try
-                    {
-                        await _broker
-                            .RejectAsync(message, requeue: true, CancellationToken.None)
-                            .ConfigureAwait(false);
-
-                        _logger.LogDebug(
-                            "Task {TaskId} nacked for redelivery during forced shutdown",
-                            message.Message.Id
-                        );
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(
-                            ex,
-                            "Failed to nack task {TaskId} during forced shutdown",
-                            message.Message.Id
-                        );
-                    }
-                }
-
-                _logger.LogInformation(
-                    "Nacked {Count} messages for redelivery",
-                    pendingMessages.Count
-                );
-            }
+            // Cancel the remaining tasks. Each worker settles its own message once its task
+            // has stopped, so a message is never requeued while its task is still running.
+            await _abortExecutionCts.CancelAsync().ConfigureAwait(false);
         }
 
         await base.StopAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public override void Dispose()
+    {
+        base.Dispose();
+        _stopIntakeCts.Dispose();
+        _abortExecutionCts.Dispose();
     }
 }

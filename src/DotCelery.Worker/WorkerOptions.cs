@@ -30,6 +30,15 @@ public sealed class WorkerOptions
     /// </summary>
     public TimeSpan ShutdownTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// Gets or sets how long to wait before returning a message to the broker after an
+    /// infrastructure failure, such as an unavailable result backend or a failed retry publish.
+    /// The message is redelivered, so the task can run again (at-least-once delivery).
+    /// The delay keeps a failing dependency from turning redeliveries into a tight loop.
+    /// Zero or a negative value returns the message immediately.
+    /// </summary>
+    public TimeSpan InfrastructureFailureRequeueDelay { get; set; } = TimeSpan.FromSeconds(5);
+
     // ========== Delay Queue Settings ==========
 
     /// <summary>
@@ -87,14 +96,16 @@ public sealed class WorkerOptions
 
     /// <summary>
     /// Gets or sets whether to wait for in-flight tasks during shutdown.
-    /// When enabled, the worker will wait for active tasks to complete before stopping.
+    /// When enabled, the worker stops taking new messages, returns prefetched messages
+    /// to the broker, and waits up to <see cref="ShutdownTimeout"/> for active tasks to complete.
     /// </summary>
     public bool EnableGracefulShutdown { get; set; } = true;
 
     /// <summary>
     /// Gets or sets whether to nack unfinished messages for redelivery on forced shutdown.
-    /// When enabled, messages for tasks that didn't complete within the shutdown timeout
-    /// will be rejected with requeue=true so they can be processed by another worker.
+    /// When enabled, tasks that didn't complete within the shutdown timeout are cancelled,
+    /// and their messages are rejected with requeue=true once the task has stopped,
+    /// so they can be processed by another worker.
     /// </summary>
     public bool NackOnForcedShutdown { get; set; } = true;
 
