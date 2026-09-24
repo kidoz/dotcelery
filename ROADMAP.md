@@ -73,13 +73,18 @@ but do not yet behave as documented.
 
 ## Planned Features
 
+### Storage
+- Build every store once in Core on the storage primitives (`IStorageProvider`), so a backend implements only documents, leases, queues, counters, and notifications; the primitives, the in-memory provider, and the conformance tests exist
+- `DotCelery.Storage.Sql`: schema defined in code, a generic migrator, per-database dialects, and validation of every statement against the migrated schema
+- PostgreSQL, Redis, and MongoDB providers of the primitives, replacing their per-store implementations
+
 ### Brokers
 - Azure Service Bus broker
 - Amazon SQS broker
 - Broker contract extensions these require: lease renewal for long-running tasks, native delayed delivery, explicit dead-letter versus discard, and capability flags (priority, ordering, maximum message size)
 
 ### Backends
-- SQL Server result backend (after the PostgreSQL gaps are fixed; share an ADO.NET base with a dialect layer)
+- SQL Server backend as a dialect of `DotCelery.Storage.Sql`
 
 ### Serialization
 - Pluggable serializers (MessagePack/Protobuf); brokers currently hard-code the JSON envelope, and Redis saga scripts decode JSON server-side

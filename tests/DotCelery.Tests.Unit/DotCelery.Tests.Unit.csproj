@@ -19,6 +19,7 @@
     <ProjectReference Include="..\..\src\DotCelery.Beat\DotCelery.Beat.csproj" />
     <ProjectReference Include="..\..\src\DotCelery.Cron\DotCelery.Cron.csproj" />
     <ProjectReference Include="..\..\src\DotCelery.Telemetry\DotCelery.Telemetry.csproj" />
+    <ProjectReference Include="..\DotCelery.Tests.Conformance\DotCelery.Tests.Conformance.csproj" />
   </ItemGroup>
 
   <ItemGroup>

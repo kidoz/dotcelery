@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PostgreSQL schema migrations: `PostgresMigrator` applies each store's versioned migrations when the host starts, under an advisory lock, and records them with checksums in a `dotcelery_migrations` table
 - `PostgresMigrator.GenerateScript()` produces a re-runnable SQL script for databases where schema changes are applied by hand
 - `AddPostgres...` registration methods for every PostgreSQL store; each also registers the store's migrations
+- Storage primitives in `DotCelery.Core.Storage` (`IStorageProvider` with documents, leases, queues, counters, and notifications), an in-memory provider, and conformance tests that every provider runs; stores will be rebuilt on these primitives
 
 ### Changed
 - PostgreSQL stores no longer create their tables on first use; run migrations first (automatic with a generic host)
