@@ -225,11 +225,7 @@ public sealed class RedisDeadLetterStore : IDeadLetterStore
         var db = await GetDatabaseAsync(cancellationToken).ConfigureAwait(false);
         var count = await db.SortedSetLengthAsync(_options.IndexKey).ConfigureAwait(false);
 
-        var transaction = db.CreateTransaction();
-        _ = transaction.KeyDeleteAsync(_options.IndexKey);
-        _ = transaction.KeyDeleteAsync(_options.DataKey);
-
-        await transaction.ExecuteAsync().ConfigureAwait(false);
+        await db.KeyDeleteAsync([_options.IndexKey, _options.DataKey]).ConfigureAwait(false);
 
         _logger.LogInformation("Purged {Count} messages from dead letter queue", count);
         return count;

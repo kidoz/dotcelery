@@ -4,6 +4,6 @@
     <Description>Lightweight cron expression parser for DotCelery</Description>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.300" />
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.401" />
   </ItemGroup>
 </Project>
