@@ -6,7 +6,6 @@ using DotCelery.Backend.Postgres.Execution;
 using DotCelery.Backend.Postgres.Extensions;
 using DotCelery.Backend.Postgres.Historical;
 using DotCelery.Backend.Postgres.Metrics;
-using DotCelery.Backend.Postgres.Migrations;
 using DotCelery.Backend.Postgres.Outbox;
 using DotCelery.Backend.Postgres.Partitioning;
 using DotCelery.Backend.Postgres.RateLimiting;
@@ -14,6 +13,7 @@ using DotCelery.Backend.Postgres.Revocation;
 using DotCelery.Backend.Postgres.Sagas;
 using DotCelery.Backend.Postgres.Signals;
 using DotCelery.Core.Abstractions;
+using DotCelery.Storage.Sql.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -203,7 +203,7 @@ public sealed class PostgresMigrationIntegrationTests : IAsyncLifetime
         }
     }
 
-    private (List<PostgresMigrationModule> Modules, List<string> Tables) AllStores(string schema)
+    private (List<SqlMigrationModule> Modules, List<string> Tables) AllStores(string schema)
     {
         var results = new PostgresBackendOptions
         {
@@ -316,24 +316,24 @@ public sealed class PostgresMigrationIntegrationTests : IAsyncLifetime
         );
     }
 
-    private PostgresMigrationModule CustomModule(params string[] statements) =>
+    private SqlMigrationModule CustomModule(params string[] statements) =>
         new(
             "test/items",
             _connectionString,
             "public",
-            [new PostgresMigration(1, "Create items", statements)]
+            [
+                new SqlMigration(
+                    1,
+                    "Create items",
+                    [.. statements.Select(s => new SchemaOperation.ExecuteSql(s))]
+                ),
+            ]
         );
 
-    private static PostgresMigrator CreateMigrator(
+    private static SqlMigrator CreateMigrator(
         IPostgresDataSourceProvider dataSources,
-        IEnumerable<PostgresMigrationModule> modules
-    ) =>
-        new(
-            dataSources,
-            modules,
-            Options.Create(new PostgresMigrationOptions()),
-            NullLogger<PostgresMigrator>.Instance
-        );
+        IEnumerable<SqlMigrationModule> modules
+    ) => PostgresTestMigrator.Create(dataSources, modules);
 
     private async Task ExecuteAsync(string sql)
     {

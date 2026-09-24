@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Data.Common;
+using DotCelery.Storage.Sql.Execution;
 using Npgsql;
 
 namespace DotCelery.Backend.Postgres;
@@ -7,14 +9,14 @@ namespace DotCelery.Backend.Postgres;
 /// Provides shared <see cref="NpgsqlDataSource"/> instances for PostgreSQL stores.
 /// This helps prevent connection pool fragmentation when multiple stores are registered.
 /// </summary>
-public interface IPostgresDataSourceProvider : IAsyncDisposable
+public interface IPostgresDataSourceProvider : ISqlDataSourceProvider, IAsyncDisposable
 {
     /// <summary>
     /// Gets or creates a shared <see cref="NpgsqlDataSource"/> for the given connection string.
     /// </summary>
     /// <param name="connectionString">The PostgreSQL connection string.</param>
     /// <returns>A shared data source instance.</returns>
-    NpgsqlDataSource GetDataSource(string connectionString);
+    new NpgsqlDataSource GetDataSource(string connectionString);
 }
 
 /// <summary>
@@ -42,6 +44,10 @@ public sealed class PostgresDataSourceProvider : IPostgresDataSourceProvider
             }
         );
     }
+
+    /// <inheritdoc />
+    DbDataSource ISqlDataSourceProvider.GetDataSource(string connectionString) =>
+        GetDataSource(connectionString);
 
     /// <inheritdoc />
     public async ValueTask DisposeAsync()

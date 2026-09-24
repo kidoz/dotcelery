@@ -126,13 +126,9 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
     )
     {
         StorageGuard.ThrowIfInvalidName(collection);
-        ValidateFilter(filter);
+        StorageGuard.ThrowIfInvalid(filter);
+        StorageGuard.ThrowIfInvalid(page);
         page ??= new DocumentPage();
-        ArgumentOutOfRangeException.ThrowIfNegative(page.Offset, nameof(page));
-        if (page.Limit is < 1)
-        {
-            throw new ArgumentOutOfRangeException(nameof(page), "Limit must be at least 1.");
-        }
 
         List<StoredDocument> results;
         lock (_lock)
@@ -167,7 +163,7 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
     )
     {
         StorageGuard.ThrowIfInvalidName(collection);
-        ValidateFilter(filter);
+        StorageGuard.ThrowIfInvalid(filter);
 
         lock (_lock)
         {
@@ -182,7 +178,7 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
     )
     {
         StorageGuard.ThrowIfInvalidName(collection);
-        ValidateFilter(filter);
+        StorageGuard.ThrowIfInvalid(filter);
 
         lock (_lock)
         {
@@ -218,21 +214,7 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
     {
         StorageGuard.ThrowIfInvalidName(collection);
         StorageGuard.ThrowIfInvalidKey(id);
-
-        if (options is not null)
-        {
-            StorageGuard.ThrowIfInvalidOptionalKey(options.IndexKey);
-            if (options.TimeToLive is { } timeToLive)
-            {
-                StorageGuard.ThrowIfNotPositive(timeToLive);
-            }
-        }
-    }
-
-    private static void ValidateFilter(DocumentFilter filter)
-    {
-        ArgumentNullException.ThrowIfNull(filter);
-        StorageGuard.ThrowIfInvalidOptionalKey(filter.IndexKey);
+        StorageGuard.ThrowIfInvalid(options);
     }
 
     private static bool IsExpired(Entry entry, DateTimeOffset now) => entry.ExpiresAt <= now;

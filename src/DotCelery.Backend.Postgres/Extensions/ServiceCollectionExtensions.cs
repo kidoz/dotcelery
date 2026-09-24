@@ -4,21 +4,25 @@ using DotCelery.Backend.Postgres.DelayedMessageStore;
 using DotCelery.Backend.Postgres.Execution;
 using DotCelery.Backend.Postgres.Historical;
 using DotCelery.Backend.Postgres.Metrics;
-using DotCelery.Backend.Postgres.Migrations;
 using DotCelery.Backend.Postgres.Outbox;
 using DotCelery.Backend.Postgres.Partitioning;
 using DotCelery.Backend.Postgres.RateLimiting;
 using DotCelery.Backend.Postgres.Revocation;
 using DotCelery.Backend.Postgres.Sagas;
 using DotCelery.Backend.Postgres.Signals;
+using DotCelery.Backend.Postgres.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Batches;
 using DotCelery.Core.Execution;
 using DotCelery.Core.Partitioning;
 using DotCelery.Core.Sagas;
+using DotCelery.Core.Storage;
+using DotCelery.Storage.Sql;
+using DotCelery.Storage.Sql.Execution;
+using DotCelery.Storage.Sql.Extensions;
+using DotCelery.Storage.Sql.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 namespace DotCelery.Backend.Postgres.Extensions;
@@ -45,30 +49,64 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Adds the migrator that applies the registered stores' migrations, and runs it when
-    /// the host starts unless <see cref="PostgresMigrationOptions.RunAtStartup"/> is disabled.
-    /// Without a host, resolve <see cref="PostgresMigrator"/> and call
-    /// <see cref="PostgresMigrator.MigrateAsync"/> before using the stores.
+    /// Adds the migrator that applies the registered migration modules with the PostgreSQL
+    /// dialect, and runs it when the host starts unless
+    /// <see cref="SqlMigrationOptions.RunAtStartup"/> is disabled. Without a host, resolve
+    /// <see cref="SqlMigrator"/> and call <see cref="SqlMigrator.MigrateAsync"/> before using
+    /// the stores.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Optional migration options configuration.</param>
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddPostgresMigrations(
         this IServiceCollection services,
-        Action<PostgresMigrationOptions>? configure = null
+        Action<SqlMigrationOptions>? configure = null
     )
     {
         services.AddPostgresDataSourceProvider();
-        services.AddOptions<PostgresMigrationOptions>();
+        services.TryAddSingleton<SqlDialect>(PostgresDialect.Instance);
+        services.TryAddSingleton<ISqlDataSourceProvider>(sp =>
+            sp.GetRequiredService<IPostgresDataSourceProvider>()
+        );
+        services.AddSqlMigrations(configure);
+
+        return services;
+    }
+
+    /// <summary>
+    /// Adds the PostgreSQL storage primitives (<see cref="IStorageProvider"/>) and the
+    /// migrations for their tables.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configure">Optional configuration action.</param>
+    /// <returns>The service collection.</returns>
+    public static IServiceCollection AddPostgresStorage(
+        this IServiceCollection services,
+        Action<PostgresStorageOptions>? configure = null
+    )
+    {
+        ArgumentNullException.ThrowIfNull(services);
 
         if (configure is not null)
         {
             services.Configure(configure);
         }
 
-        services.TryAddSingleton<PostgresMigrator>();
-        services.TryAddEnumerable(
-            ServiceDescriptor.Singleton<IHostedService, PostgresMigrationHostedService>()
+        services.AddPostgresMigrations();
+        services.TryAddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<PostgresStorageOptions>>().Value;
+            return PostgresStorage.CreateProvider(
+                sp.GetRequiredService<IPostgresDataSourceProvider>()
+                    .GetDataSource(options.ConnectionString),
+                options,
+                sp.GetService<TimeProvider>()
+            );
+        });
+        services.AddSingleton(sp =>
+            PostgresStorage.CreateModule(
+                sp.GetRequiredService<IOptions<PostgresStorageOptions>>().Value
+            )
         );
 
         return services;
@@ -308,7 +346,7 @@ public static class ServiceCollectionExtensions
     private static IServiceCollection AddPostgresStore<TService, TImplementation, TOptions>(
         this IServiceCollection services,
         Action<TOptions>? configure,
-        Func<TOptions, PostgresMigrationModule> createModule
+        Func<TOptions, SqlMigrationModule> createModule
     )
         where TService : class
         where TImplementation : class, TService

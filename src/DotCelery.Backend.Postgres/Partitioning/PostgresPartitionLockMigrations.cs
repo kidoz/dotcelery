@@ -1,4 +1,4 @@
-using DotCelery.Backend.Postgres.Migrations;
+using DotCelery.Storage.Sql.Migrations;
 
 namespace DotCelery.Backend.Postgres.Partitioning;
 
@@ -12,31 +12,35 @@ public static class PostgresPartitionLockMigrations
     /// </summary>
     /// <param name="options">The store options.</param>
     /// <returns>The migration module.</returns>
-    public static PostgresMigrationModule CreateModule(PostgresPartitionLockStoreOptions options)
+    public static SqlMigrationModule CreateModule(PostgresPartitionLockStoreOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        return new PostgresMigrationModule(
+        return new SqlMigrationModule(
             $"partition-locks/{options.TableName}",
             options.ConnectionString,
             options.Schema,
             [
-                new PostgresMigration(
+                new SqlMigration(
                     1,
                     "Create partition lock table",
                     [
-                        $"""
-                        CREATE TABLE IF NOT EXISTS {options.Schema}.{options.TableName} (
-                            partition_key VARCHAR(255) PRIMARY KEY,
-                            task_id VARCHAR(255) NOT NULL,
-                            acquired_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-                            expires_at TIMESTAMP WITH TIME ZONE NOT NULL
-                        )
-                        """,
-                        $"""
-                        CREATE INDEX IF NOT EXISTS idx_{options.TableName}_expires_at
-                            ON {options.Schema}.{options.TableName} (expires_at)
-                        """,
+                        new SchemaOperation.ExecuteSql(
+                            $"""
+                            CREATE TABLE IF NOT EXISTS {options.Schema}.{options.TableName} (
+                                partition_key VARCHAR(255) PRIMARY KEY,
+                                task_id VARCHAR(255) NOT NULL,
+                                acquired_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                                expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+                            )
+                            """
+                        ),
+                        new SchemaOperation.ExecuteSql(
+                            $"""
+                            CREATE INDEX IF NOT EXISTS idx_{options.TableName}_expires_at
+                                ON {options.Schema}.{options.TableName} (expires_at)
+                            """
+                        ),
                     ]
                 ),
             ]

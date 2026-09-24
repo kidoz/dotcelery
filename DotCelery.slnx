@@ -13,6 +13,7 @@
     <Project Path="src/DotCelery.Core/DotCelery.Core.csproj" />
     <Project Path="src/DotCelery.Cron/DotCelery.Cron.csproj" />
     <Project Path="src/DotCelery.Dashboard/DotCelery.Dashboard.csproj" />
+    <Project Path="src/DotCelery.Storage.Sql/DotCelery.Storage.Sql.csproj" />
     <Project Path="src/DotCelery.Telemetry/DotCelery.Telemetry.csproj" />
     <Project Path="src/DotCelery.Worker/DotCelery.Worker.csproj" />
   </Folder>

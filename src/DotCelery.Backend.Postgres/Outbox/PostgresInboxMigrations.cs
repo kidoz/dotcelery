@@ -1,4 +1,4 @@
-using DotCelery.Backend.Postgres.Migrations;
+using DotCelery.Storage.Sql.Migrations;
 
 namespace DotCelery.Backend.Postgres.Outbox;
 
@@ -12,29 +12,33 @@ public static class PostgresInboxMigrations
     /// </summary>
     /// <param name="options">The store options.</param>
     /// <returns>The migration module.</returns>
-    public static PostgresMigrationModule CreateModule(PostgresInboxStoreOptions options)
+    public static SqlMigrationModule CreateModule(PostgresInboxStoreOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        return new PostgresMigrationModule(
+        return new SqlMigrationModule(
             $"inbox/{options.TableName}",
             options.ConnectionString,
             options.Schema,
             [
-                new PostgresMigration(
+                new SqlMigration(
                     1,
                     "Create inbox table",
                     [
-                        $"""
-                        CREATE TABLE IF NOT EXISTS {options.Schema}.{options.TableName} (
-                            message_id VARCHAR(255) PRIMARY KEY,
-                            processed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-                        )
-                        """,
-                        $"""
-                        CREATE INDEX IF NOT EXISTS idx_{options.TableName}_processed_at
-                            ON {options.Schema}.{options.TableName} (processed_at)
-                        """,
+                        new SchemaOperation.ExecuteSql(
+                            $"""
+                            CREATE TABLE IF NOT EXISTS {options.Schema}.{options.TableName} (
+                                message_id VARCHAR(255) PRIMARY KEY,
+                                processed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                            )
+                            """
+                        ),
+                        new SchemaOperation.ExecuteSql(
+                            $"""
+                            CREATE INDEX IF NOT EXISTS idx_{options.TableName}_processed_at
+                                ON {options.Schema}.{options.TableName} (processed_at)
+                            """
+                        ),
                     ]
                 ),
             ]

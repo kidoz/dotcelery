@@ -2,22 +2,22 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace DotCelery.Backend.Postgres.Migrations;
+namespace DotCelery.Storage.Sql.Migrations;
 
 /// <summary>
 /// Applies pending migrations while the host is starting, before any hosted service
 /// (such as the worker) starts.
 /// </summary>
-internal sealed class PostgresMigrationHostedService : IHostedLifecycleService
+internal sealed class SqlMigrationHostedService : IHostedLifecycleService
 {
-    private readonly PostgresMigrator _migrator;
-    private readonly PostgresMigrationOptions _options;
-    private readonly ILogger<PostgresMigrationHostedService> _logger;
+    private readonly SqlMigrator _migrator;
+    private readonly SqlMigrationOptions _options;
+    private readonly ILogger<SqlMigrationHostedService> _logger;
 
-    public PostgresMigrationHostedService(
-        PostgresMigrator migrator,
-        IOptions<PostgresMigrationOptions> options,
-        ILogger<PostgresMigrationHostedService> logger
+    public SqlMigrationHostedService(
+        SqlMigrator migrator,
+        IOptions<SqlMigrationOptions> options,
+        ILogger<SqlMigrationHostedService> logger
     )
     {
         _migrator = migrator;
@@ -29,7 +29,7 @@ internal sealed class PostgresMigrationHostedService : IHostedLifecycleService
     {
         if (!_options.RunAtStartup)
         {
-            _logger.LogInformation("PostgreSQL migrations at startup are disabled");
+            _logger.LogInformation("SQL migrations at startup are disabled");
             return;
         }
 

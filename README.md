@@ -456,7 +456,7 @@ builder.Services.AddPostgresOutboxStore(options =>
 });
 ```
 
-Pending migrations run while the host starts, before the worker starts, under a PostgreSQL advisory lock, so several processes can start at the same time. Applied migrations are recorded with a checksum in a `dotcelery_migrations` table in each schema. Without a generic host, resolve `PostgresMigrator` and call `MigrateAsync()` before using the stores.
+Pending migrations run while the host starts, before the worker starts, under a PostgreSQL advisory lock, so several processes can start at the same time. Applied migrations are recorded with a checksum in a `dotcelery_migrations` table in each schema. Without a generic host, resolve `SqlMigrator` and call `MigrateAsync()` before using the stores.
 
 To apply schema changes yourself, turn off `RunAtStartup` and generate a script from the same configuration. The script applies only migrations that are not recorded yet, so it can be run again after each upgrade.
 
@@ -464,7 +464,7 @@ To apply schema changes yourself, turn off `RunAtStartup` and generate a script 
 builder.Services.AddPostgresMigrations(options => options.RunAtStartup = false);
 
 // For example, in a deployment tool that shares the application's service configuration
-var script = host.Services.GetRequiredService<PostgresMigrator>().GenerateScript();
+var script = host.Services.GetRequiredService<SqlMigrator>().GenerateScript();
 ```
 
 ## Project Structure
@@ -485,11 +485,13 @@ dotcelery/
 │   ├── DotCelery.Backend.Redis/     # Redis backend
 │   ├── DotCelery.Backend.Postgres/  # PostgreSQL backend
 │   ├── DotCelery.Backend.Mongo/     # MongoDB backend
+│   ├── DotCelery.Storage.Sql/       # SQL schema model, migrations, and storage primitives
 │   ├── DotCelery.Telemetry/         # OpenTelemetry instrumentation
 │   └── DotCelery.Analyzers/         # Roslyn analyzers for task definitions
 ├── tests/
 │   ├── DotCelery.Tests.Unit/        # Unit tests (xUnit v3)
 │   ├── DotCelery.Tests.Integration/ # Integration tests (Testcontainers)
+│   ├── DotCelery.Tests.Conformance/ # Tests that every storage provider runs
 │   └── DotCelery.Analyzers.Tests/   # Analyzer tests
 ├── samples/                         # Demo, dashboard demo, Redis/PostgreSQL example
 └── benchmarks/                      # BenchmarkDotNet benchmarks

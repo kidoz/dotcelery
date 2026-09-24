@@ -1,5 +1,4 @@
 using DotCelery.Backend.Postgres;
-using DotCelery.Backend.Postgres.Migrations;
 using DotCelery.Backend.Postgres.Signals;
 using DotCelery.Core.Models;
 using DotCelery.Core.Signals;
@@ -43,12 +42,9 @@ public class PostgresBackendIntegrationTests : IAsyncLifetime
 
         var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
 
-        await new PostgresMigrator(
-            _dataSources,
-            [PostgresResultBackendMigrations.CreateModule(options.Value)],
-            Options.Create(new PostgresMigrationOptions()),
-            loggerFactory.CreateLogger<PostgresMigrator>()
-        ).MigrateAsync();
+        await PostgresTestMigrator
+            .Create(_dataSources, [PostgresResultBackendMigrations.CreateModule(options.Value)])
+            .MigrateAsync();
 
         _backend = new PostgresResultBackend(
             options,
@@ -285,12 +281,12 @@ public class PostgresSignalStoreIntegrationTests : IAsyncLifetime
         _connectionString = _container.GetConnectionString();
         _loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
 
-        await new PostgresMigrator(
-            _dataSources,
-            [PostgresSignalMigrations.CreateModule(CreateSignalStoreOptions())],
-            Options.Create(new PostgresMigrationOptions()),
-            _loggerFactory.CreateLogger<PostgresMigrator>()
-        ).MigrateAsync();
+        await PostgresTestMigrator
+            .Create(
+                _dataSources,
+                [PostgresSignalMigrations.CreateModule(CreateSignalStoreOptions())]
+            )
+            .MigrateAsync();
     }
 
     public async ValueTask DisposeAsync()

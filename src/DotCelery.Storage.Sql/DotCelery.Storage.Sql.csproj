@@ -1,16 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <RootNamespace>DotCelery.Backend.Postgres</RootNamespace>
-    <Description>PostgreSQL result backend for DotCelery</Description>
+    <RootNamespace>DotCelery.Storage.Sql</RootNamespace>
+    <Description>Relational storage for DotCelery: schema defined in code, migrations, and the storage primitives over ADO.NET, with a dialect per database</Description>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\DotCelery.Core\DotCelery.Core.csproj" />
-    <ProjectReference Include="..\DotCelery.Storage.Sql\DotCelery.Storage.Sql.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Npgsql" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.12" />
     <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.401" />

@@ -68,15 +68,15 @@ but do not yet behave as documented.
 - No tests exercise the worker consume/ack/retry/shutdown loop, the delayed-message and outbox dispatchers, or the inbox, tenant, and overlap filters
 - The in-memory broker and stores do not model redelivery, serialization round-trips, or concurrent updates; contract tests should run against real brokers and backends
 - No integration coverage for the Redis saga, inbox, outbox, and dead-letter stores, or for RabbitMQ connection loss
-- No test checks every PostgreSQL statement against the migrated schema
+- The per-store PostgreSQL implementations' statements are not checked against the migrated schema (the storage primitives' statements are)
 - Analyzer DCEL001 reports task names that are not string literals (for example, constants) as empty
 
 ## Planned Features
 
 ### Storage
 - Build every store once in Core on the storage primitives (`IStorageProvider`), so a backend implements only documents, leases, queues, counters, and notifications; the primitives, the in-memory provider, and the conformance tests exist
-- `DotCelery.Storage.Sql`: schema defined in code, a generic migrator, per-database dialects, and validation of every statement against the migrated schema
-- PostgreSQL, Redis, and MongoDB providers of the primitives, replacing their per-store implementations
+- Redis and MongoDB providers of the primitives; `DotCelery.Storage.Sql` and the PostgreSQL provider exist and pass the conformance tests
+- Remove the per-store PostgreSQL, Redis, and MongoDB implementations once every store is built on the primitives
 
 ### Brokers
 - Azure Service Bus broker

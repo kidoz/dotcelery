@@ -95,6 +95,76 @@ public static class StorageGuard
         }
     }
 
+    /// <summary>
+    /// Throws if document write options are invalid.
+    /// </summary>
+    /// <param name="options">The options to check; <c>null</c> is valid.</param>
+    /// <param name="paramName">The parameter name, captured automatically.</param>
+    public static void ThrowIfInvalid(
+        DocumentWriteOptions? options,
+        [CallerArgumentExpression(nameof(options))] string? paramName = null
+    )
+    {
+        if (options is null)
+        {
+            return;
+        }
+
+        ThrowIfInvalidOptionalKey(options.IndexKey, paramName);
+        if (options.TimeToLive is { } timeToLive)
+        {
+            ThrowIfNotPositive(timeToLive, paramName);
+        }
+    }
+
+    /// <summary>
+    /// Throws if a document filter is invalid.
+    /// </summary>
+    /// <param name="filter">The filter to check.</param>
+    /// <param name="paramName">The parameter name, captured automatically.</param>
+    public static void ThrowIfInvalid(
+        DocumentFilter filter,
+        [CallerArgumentExpression(nameof(filter))] string? paramName = null
+    )
+    {
+        ArgumentNullException.ThrowIfNull(filter, paramName);
+        ThrowIfInvalidOptionalKey(filter.IndexKey, paramName);
+    }
+
+    /// <summary>
+    /// Throws if document paging is invalid.
+    /// </summary>
+    /// <param name="page">The paging to check; <c>null</c> is valid.</param>
+    /// <param name="paramName">The parameter name, captured automatically.</param>
+    public static void ThrowIfInvalid(
+        DocumentPage? page,
+        [CallerArgumentExpression(nameof(page))] string? paramName = null
+    )
+    {
+        if (page is null)
+        {
+            return;
+        }
+
+        if (page.Offset < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                paramName,
+                page.Offset,
+                "Offset must not be negative."
+            );
+        }
+
+        if (page.Limit is < 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                paramName,
+                page.Limit,
+                "Limit must be at least 1."
+            );
+        }
+    }
+
     private static void ThrowIfTooLong(string value, string? paramName)
     {
         if (value.Length > MaxKeyLength)

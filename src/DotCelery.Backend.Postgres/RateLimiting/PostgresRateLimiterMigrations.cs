@@ -1,4 +1,4 @@
-using DotCelery.Backend.Postgres.Migrations;
+using DotCelery.Storage.Sql.Migrations;
 
 namespace DotCelery.Backend.Postgres.RateLimiting;
 
@@ -12,30 +12,34 @@ public static class PostgresRateLimiterMigrations
     /// </summary>
     /// <param name="options">The store options.</param>
     /// <returns>The migration module.</returns>
-    public static PostgresMigrationModule CreateModule(PostgresRateLimiterOptions options)
+    public static SqlMigrationModule CreateModule(PostgresRateLimiterOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        return new PostgresMigrationModule(
+        return new SqlMigrationModule(
             $"rate-limits/{options.TableName}",
             options.ConnectionString,
             options.Schema,
             [
-                new PostgresMigration(
+                new SqlMigration(
                     1,
                     "Create rate limit table",
                     [
-                        $"""
-                        CREATE TABLE IF NOT EXISTS {options.Schema}.{options.TableName} (
-                            id BIGSERIAL PRIMARY KEY,
-                            resource_key VARCHAR(255) NOT NULL,
-                            timestamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-                        )
-                        """,
-                        $"""
-                        CREATE INDEX IF NOT EXISTS idx_{options.TableName}_resource_timestamp
-                            ON {options.Schema}.{options.TableName} (resource_key, timestamp)
-                        """,
+                        new SchemaOperation.ExecuteSql(
+                            $"""
+                            CREATE TABLE IF NOT EXISTS {options.Schema}.{options.TableName} (
+                                id BIGSERIAL PRIMARY KEY,
+                                resource_key VARCHAR(255) NOT NULL,
+                                timestamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                            )
+                            """
+                        ),
+                        new SchemaOperation.ExecuteSql(
+                            $"""
+                            CREATE INDEX IF NOT EXISTS idx_{options.TableName}_resource_timestamp
+                                ON {options.Schema}.{options.TableName} (resource_key, timestamp)
+                            """
+                        ),
                     ]
                 ),
             ]
