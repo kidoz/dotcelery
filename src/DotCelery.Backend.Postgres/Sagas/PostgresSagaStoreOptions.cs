@@ -85,11 +85,6 @@ public sealed class PostgresSagaStoreOptions
     }
 
     /// <summary>
-    /// Gets or sets whether to auto-create tables.
-    /// </summary>
-    public bool AutoCreateTables { get; set; } = true;
-
-    /// <summary>
     /// Gets or sets the command timeout.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the timeout is out of range.</exception>

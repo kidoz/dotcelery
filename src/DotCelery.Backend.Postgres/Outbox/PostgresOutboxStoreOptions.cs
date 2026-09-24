@@ -55,11 +55,6 @@ public sealed class PostgresOutboxStoreOptions
     }
 
     /// <summary>
-    /// Gets or sets whether to automatically create tables on startup.
-    /// </summary>
-    public bool AutoCreateTables { get; set; } = true;
-
-    /// <summary>
     /// Gets or sets the command timeout.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the timeout is out of range.</exception>

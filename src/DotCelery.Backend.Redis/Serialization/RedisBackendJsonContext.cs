@@ -1,7 +1,6 @@
 using System.Text.Json.Serialization;
 using DotCelery.Core.Batches;
 using DotCelery.Core.DeadLetter;
-using DotCelery.Core.Migrations;
 using DotCelery.Core.Models;
 using DotCelery.Core.Outbox;
 using DotCelery.Core.Sagas;
@@ -26,7 +25,6 @@ namespace DotCelery.Backend.Redis.Serialization;
 [JsonSerializable(typeof(DeadLetterMessage))]
 [JsonSerializable(typeof(OutboxMessage))]
 [JsonSerializable(typeof(SignalMessage))]
-[JsonSerializable(typeof(MigrationRecord))]
 [JsonSerializable(typeof(Saga))]
 // Redis-specific internal types
 [JsonSerializable(typeof(RevocationEntry))]

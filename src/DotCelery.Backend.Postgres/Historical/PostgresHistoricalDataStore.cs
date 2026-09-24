@@ -19,19 +19,19 @@ public sealed class PostgresHistoricalDataStore : IHistoricalDataStore
     private readonly JsonSerializerOptions _jsonOptions;
 
     private bool _disposed;
-    private bool _initialized;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PostgresHistoricalDataStore"/> class.
     /// </summary>
     public PostgresHistoricalDataStore(
         IOptions<PostgresHistoricalDataStoreOptions> options,
+        IPostgresDataSourceProvider dataSources,
         ILogger<PostgresHistoricalDataStore> logger
     )
     {
         _options = options.Value;
         _logger = logger;
-        _dataSource = NpgsqlDataSource.Create(_options.ConnectionString);
+        _dataSource = dataSources.GetDataSource(_options.ConnectionString);
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -46,8 +46,6 @@ public sealed class PostgresHistoricalDataStore : IHistoricalDataStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(snapshot);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var sql = $"""
             INSERT INTO {_options.Schema}.{_options.SnapshotsTableName}
@@ -87,8 +85,6 @@ public sealed class PostgresHistoricalDataStore : IHistoricalDataStore
     )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var sql = $"""
             SELECT
@@ -150,8 +146,6 @@ public sealed class PostgresHistoricalDataStore : IHistoricalDataStore
     )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var bucketSize = GetBucketSize(granularity);
         var truncateExpr = GetTruncateExpression(granularity);
@@ -216,8 +210,6 @@ public sealed class PostgresHistoricalDataStore : IHistoricalDataStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             SELECT
                 task_name,
@@ -274,8 +266,6 @@ public sealed class PostgresHistoricalDataStore : IHistoricalDataStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var cutoff = DateTimeOffset.UtcNow.Subtract(_options.RetentionPeriod);
 
         var sql = $"""
@@ -303,8 +293,6 @@ public sealed class PostgresHistoricalDataStore : IHistoricalDataStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             SELECT COUNT(*) FROM {_options.Schema}.{_options.SnapshotsTableName}
             """;
@@ -316,61 +304,17 @@ public sealed class PostgresHistoricalDataStore : IHistoricalDataStore
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         if (_disposed)
         {
-            return;
+            return ValueTask.CompletedTask;
         }
 
         _disposed = true;
-        await _dataSource.DisposeAsync().ConfigureAwait(false);
         _logger.LogInformation("PostgreSQL historical data store disposed");
-    }
 
-    private async ValueTask EnsureInitializedAsync(CancellationToken cancellationToken)
-    {
-        if (_initialized)
-        {
-            return;
-        }
-
-        if (_options.AutoCreateTables)
-        {
-            await CreateTablesAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        _initialized = true;
-    }
-
-    private async Task CreateTablesAsync(CancellationToken cancellationToken)
-    {
-        var sql = $"""
-            CREATE TABLE IF NOT EXISTS {_options.Schema}.{_options.SnapshotsTableName} (
-                id VARCHAR(64) PRIMARY KEY,
-                timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
-                task_name VARCHAR(255),
-                total_processed BIGINT NOT NULL DEFAULT 0,
-                success_count BIGINT NOT NULL DEFAULT 0,
-                failure_count BIGINT NOT NULL DEFAULT 0,
-                retry_count BIGINT NOT NULL DEFAULT 0,
-                revoked_count BIGINT NOT NULL DEFAULT 0,
-                avg_execution_time_ms DOUBLE PRECISION,
-                queue VARCHAR(255)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_{_options.SnapshotsTableName}_timestamp
-                ON {_options.Schema}.{_options.SnapshotsTableName} (timestamp);
-
-            CREATE INDEX IF NOT EXISTS idx_{_options.SnapshotsTableName}_task_name
-                ON {_options.Schema}.{_options.SnapshotsTableName} (task_name)
-                WHERE task_name IS NOT NULL;
-            """;
-
-        await using var cmd = _dataSource.CreateCommand(sql);
-        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation("PostgreSQL historical data store table created/verified");
+        return ValueTask.CompletedTask;
     }
 
     private static AggregatedMetrics CreateEmptyMetrics(

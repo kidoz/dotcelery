@@ -20,11 +20,6 @@ public static class DotCeleryBuilderExtensions
         Action<PostgresBackendOptions>? configure = null
     )
     {
-        if (configure is not null)
-        {
-            builder.Services.Configure(configure);
-        }
-
         // Remove any existing backend registration
         var existingBackend = builder.Services.FirstOrDefault(d =>
             d.ServiceType == typeof(IResultBackend)
@@ -34,7 +29,7 @@ public static class DotCeleryBuilderExtensions
             builder.Services.Remove(existingBackend);
         }
 
-        builder.Services.AddSingleton<IResultBackend, PostgresResultBackend>();
+        builder.Services.AddPostgresBackend(configure);
 
         return builder;
     }

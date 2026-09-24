@@ -59,7 +59,6 @@ builder.Services.AddDotCelery(celery =>
             options.ConnectionString = postgresConnectionString;
             options.Schema = "public";
             options.TableName = "dotcelery_example_task_results";
-            options.AutoCreateTables = true;
             options.UseListenNotify = true;
         });
     }

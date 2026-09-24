@@ -15,19 +15,19 @@ public sealed class PostgresBatchStore : IBatchStore
     private readonly NpgsqlDataSource _dataSource;
 
     private bool _disposed;
-    private bool _initialized;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PostgresBatchStore"/> class.
     /// </summary>
     public PostgresBatchStore(
         IOptions<PostgresBatchStoreOptions> options,
+        IPostgresDataSourceProvider dataSources,
         ILogger<PostgresBatchStore> logger
     )
     {
         _options = options.Value;
         _logger = logger;
-        _dataSource = NpgsqlDataSource.Create(_options.ConnectionString);
+        _dataSource = dataSources.GetDataSource(_options.ConnectionString);
     }
 
     /// <inheritdoc />
@@ -35,8 +35,6 @@ public sealed class PostgresBatchStore : IBatchStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(batch);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         await using var connection = await _dataSource
             .OpenConnectionAsync(cancellationToken)
@@ -116,8 +114,6 @@ public sealed class PostgresBatchStore : IBatchStore
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(batchId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             SELECT b.id, b.name, b.state, b.callback_task_id, b.created_at, b.completed_at,
                    ARRAY_AGG(t.task_id) FILTER (WHERE t.task_id IS NOT NULL) as task_ids,
@@ -153,8 +149,6 @@ public sealed class PostgresBatchStore : IBatchStore
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(batchId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             UPDATE {_options.Schema}.{_options.BatchesTableName}
             SET state = @state,
@@ -179,8 +173,6 @@ public sealed class PostgresBatchStore : IBatchStore
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(batchId);
         ArgumentException.ThrowIfNullOrEmpty(taskId);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var sql = $"""
             UPDATE {_options.Schema}.{_options.BatchTasksTableName}
@@ -207,8 +199,6 @@ public sealed class PostgresBatchStore : IBatchStore
         ArgumentException.ThrowIfNullOrEmpty(batchId);
         ArgumentException.ThrowIfNullOrEmpty(taskId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             UPDATE {_options.Schema}.{_options.BatchTasksTableName}
             SET is_failed = TRUE
@@ -231,8 +221,6 @@ public sealed class PostgresBatchStore : IBatchStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(batchId);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         await using var connection = await _dataSource
             .OpenConnectionAsync(cancellationToken)
@@ -289,8 +277,6 @@ public sealed class PostgresBatchStore : IBatchStore
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(taskId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             SELECT batch_id FROM {_options.Schema}.{_options.BatchTasksTableName}
             WHERE task_id = @taskId
@@ -305,62 +291,17 @@ public sealed class PostgresBatchStore : IBatchStore
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         if (_disposed)
         {
-            return;
+            return ValueTask.CompletedTask;
         }
 
         _disposed = true;
-        await _dataSource.DisposeAsync().ConfigureAwait(false);
         _logger.LogInformation("PostgreSQL batch store disposed");
-    }
 
-    private async ValueTask EnsureInitializedAsync(CancellationToken cancellationToken)
-    {
-        if (_initialized)
-        {
-            return;
-        }
-
-        if (_options.AutoCreateTables)
-        {
-            await CreateTablesAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        _initialized = true;
-    }
-
-    private async Task CreateTablesAsync(CancellationToken cancellationToken)
-    {
-        var sql = $"""
-            CREATE TABLE IF NOT EXISTS {_options.Schema}.{_options.BatchesTableName} (
-                id VARCHAR(255) PRIMARY KEY,
-                name VARCHAR(255),
-                state VARCHAR(50) NOT NULL,
-                callback_task_id VARCHAR(255),
-                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-                completed_at TIMESTAMP WITH TIME ZONE
-            );
-
-            CREATE TABLE IF NOT EXISTS {_options.Schema}.{_options.BatchTasksTableName} (
-                batch_id VARCHAR(255) NOT NULL,
-                task_id VARCHAR(255) NOT NULL,
-                is_completed BOOLEAN NOT NULL DEFAULT FALSE,
-                is_failed BOOLEAN NOT NULL DEFAULT FALSE,
-                PRIMARY KEY (batch_id, task_id),
-                FOREIGN KEY (batch_id) REFERENCES {_options.Schema}.{_options.BatchesTableName}(id) ON DELETE CASCADE
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_{_options.BatchTasksTableName}_task_id
-                ON {_options.Schema}.{_options.BatchTasksTableName} (task_id);
-            """;
-
-        await using var cmd = _dataSource.CreateCommand(sql);
-        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation("PostgreSQL batch store tables created/verified");
+        return ValueTask.CompletedTask;
     }
 
     private static Batch ReadBatch(NpgsqlDataReader reader)

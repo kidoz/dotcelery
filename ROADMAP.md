@@ -55,7 +55,6 @@ but do not yet behave as documented.
 - Inbox deduplication: `UseInboxDeduplication()` never marks messages as processed, so duplicates still run
 - Beat: schedules without a previous run use a moving baseline (intervals over one day never fire, cron entries fire on startup), there is no leader election across instances, and `PersistState`/`StatePath` are unused
 - Circuit breaker: `UseCircuitBreaker()` registers a factory that nothing uses
-- Migrations: the migration runner is never invoked, and schema is created lazily without locking
 - Tenant context set by `TenantContextFilter` is not visible during task execution
 - Scoped signal handlers are resolved from the root service provider
 
@@ -69,6 +68,7 @@ but do not yet behave as documented.
 - No tests exercise the worker consume/ack/retry/shutdown loop, the delayed-message and outbox dispatchers, or the inbox, tenant, and overlap filters
 - The in-memory broker and stores do not model redelivery, serialization round-trips, or concurrent updates; contract tests should run against real brokers and backends
 - No integration coverage for the Redis saga, inbox, outbox, and dead-letter stores, or for RabbitMQ connection loss
+- No test checks every PostgreSQL statement against the migrated schema
 - Analyzer DCEL001 reports task names that are not string literals (for example, constants) as empty
 
 ## Planned Features
@@ -93,7 +93,7 @@ but do not yet behave as documented.
 
 ### Worker/Execution
 - Exactly-once processing: atomic inbox claim committed together with result storage
-- Connection pooling controls for brokers/backends: shared connections across Redis stores, separate publish and consume connections with channel pooling for RabbitMQ, and shared `NpgsqlDataSource`/`MongoClient` instances across stores
+- Connection pooling controls for brokers/backends: shared connections across Redis stores, separate publish and consume connections with channel pooling for RabbitMQ, and shared `MongoClient` instances across stores
 - Batch execution tasks (single-task processing of input batches)
 
 ### Security

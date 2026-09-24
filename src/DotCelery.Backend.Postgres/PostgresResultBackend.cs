@@ -45,18 +45,17 @@ public sealed partial class PostgresResultBackend : IResultBackend
     /// Initializes a new instance of the <see cref="PostgresResultBackend"/> class.
     /// </summary>
     /// <param name="options">The backend options.</param>
+    /// <param name="dataSources">Provides the shared PostgreSQL data source.</param>
     /// <param name="logger">The logger.</param>
     public PostgresResultBackend(
         IOptions<PostgresBackendOptions> options,
+        IPostgresDataSourceProvider dataSources,
         ILogger<PostgresResultBackend> logger
     )
     {
         _options = options.Value;
         _logger = logger;
-
-        var dataSourceBuilder = new NpgsqlDataSourceBuilder(_options.ConnectionString);
-        dataSourceBuilder.EnableDynamicJson();
-        _dataSource = dataSourceBuilder.Build();
+        _dataSource = dataSources.GetDataSource(_options.ConnectionString);
     }
 
     /// <inheritdoc />
@@ -501,9 +500,6 @@ public sealed partial class PostgresResultBackend : IResultBackend
             }
         }
 
-        // Dispose data source
-        await _dataSource.DisposeAsync().ConfigureAwait(false);
-
         _initLock.Dispose();
         _cleanupCts.Dispose();
 
@@ -525,11 +521,6 @@ public sealed partial class PostgresResultBackend : IResultBackend
                 return;
             }
 
-            if (_options.AutoCreateTables)
-            {
-                await CreateTablesAsync(cancellationToken).ConfigureAwait(false);
-            }
-
             // Note: LISTEN/NOTIFY connections are created per-wait in WaitForResultAsync
             // to avoid holding a connection open indefinitely from the pool
 
@@ -545,34 +536,6 @@ public sealed partial class PostgresResultBackend : IResultBackend
         {
             _initLock.Release();
         }
-    }
-
-    private async Task CreateTablesAsync(CancellationToken cancellationToken)
-    {
-        await using var connection = await _dataSource
-            .OpenConnectionAsync(cancellationToken)
-            .ConfigureAwait(false);
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText =
-            $@"
-            CREATE TABLE IF NOT EXISTS {GetFullTableName()} (
-                task_id VARCHAR(255) PRIMARY KEY,
-                state VARCHAR(20) NOT NULL,
-                result BYTEA,
-                content_type VARCHAR(100),
-                exception JSONB,
-                completed_at TIMESTAMPTZ NOT NULL,
-                duration_ms BIGINT NOT NULL DEFAULT 0,
-                retries INT NOT NULL DEFAULT 0,
-                worker VARCHAR(255),
-                metadata JSONB,
-                expires_at TIMESTAMPTZ
-            );
-            CREATE INDEX IF NOT EXISTS idx_{_options.TableName}_expires_at
-                ON {GetFullTableName()}(expires_at) WHERE expires_at IS NOT NULL;";
-
-        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        _logger.LogDebug("Created/verified table {TableName}", GetFullTableName());
     }
 
     private async Task RunCleanupLoopAsync(CancellationToken cancellationToken)

@@ -24,19 +24,19 @@ public sealed class PostgresRevocationStore : IRevocationStore
     private NpgsqlConnection? _listenerConnection;
     private Task? _listenerTask;
     private bool _disposed;
-    private bool _initialized;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PostgresRevocationStore"/> class.
     /// </summary>
     public PostgresRevocationStore(
         IOptions<PostgresRevocationStoreOptions> options,
+        IPostgresDataSourceProvider dataSources,
         ILogger<PostgresRevocationStore> logger
     )
     {
         _options = options.Value;
         _logger = logger;
-        _dataSource = NpgsqlDataSource.Create(_options.ConnectionString);
+        _dataSource = dataSources.GetDataSource(_options.ConnectionString);
         _eventChannel = Channel.CreateUnbounded<RevocationEvent>();
     }
 
@@ -49,8 +49,6 @@ public sealed class PostgresRevocationStore : IRevocationStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(taskId);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         options ??= new RevokeOptions();
         var now = DateTimeOffset.UtcNow;
@@ -142,8 +140,6 @@ public sealed class PostgresRevocationStore : IRevocationStore
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(taskId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             SELECT EXISTS(
                 SELECT 1 FROM {_options.Schema}.{_options.TableName}
@@ -164,8 +160,6 @@ public sealed class PostgresRevocationStore : IRevocationStore
     )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var sql = $"""
             SELECT task_id FROM {_options.Schema}.{_options.TableName}
@@ -190,8 +184,6 @@ public sealed class PostgresRevocationStore : IRevocationStore
     )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var cutoff = DateTimeOffset.UtcNow - maxAge;
 
@@ -220,7 +212,6 @@ public sealed class PostgresRevocationStore : IRevocationStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
         await StartListenerAsync(cancellationToken).ConfigureAwait(false);
 
         await foreach (var evt in _eventChannel.Reader.ReadAllAsync(cancellationToken))
@@ -259,46 +250,9 @@ public sealed class PostgresRevocationStore : IRevocationStore
             await _listenerConnection.DisposeAsync().ConfigureAwait(false);
         }
 
-        await _dataSource.DisposeAsync().ConfigureAwait(false);
         _listenerCts.Dispose();
 
         _logger.LogInformation("PostgreSQL revocation store disposed");
-    }
-
-    private async ValueTask EnsureInitializedAsync(CancellationToken cancellationToken)
-    {
-        if (_initialized)
-        {
-            return;
-        }
-
-        if (_options.AutoCreateTables)
-        {
-            await CreateTablesAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        _initialized = true;
-    }
-
-    private async Task CreateTablesAsync(CancellationToken cancellationToken)
-    {
-        var sql = $"""
-            CREATE TABLE IF NOT EXISTS {_options.Schema}.{_options.TableName} (
-                task_id VARCHAR(255) PRIMARY KEY,
-                terminate BOOLEAN NOT NULL DEFAULT FALSE,
-                signal VARCHAR(50) NOT NULL DEFAULT 'Graceful',
-                revoked_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-                expires_at TIMESTAMP WITH TIME ZONE NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_{_options.TableName}_expires_at
-                ON {_options.Schema}.{_options.TableName} (expires_at);
-            """;
-
-        await using var cmd = _dataSource.CreateCommand(sql);
-        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation("PostgreSQL revocation store table created/verified");
     }
 
     private async Task StartListenerAsync(CancellationToken cancellationToken)

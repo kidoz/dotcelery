@@ -26,21 +26,22 @@ public sealed class PostgresOutboxStore : IOutboxStore
         DotCeleryJsonContext.Default.TaskMessage;
 
     private bool _disposed;
-    private bool _initialized;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PostgresOutboxStore"/> class.
     /// </summary>
     /// <param name="options">The store options.</param>
+    /// <param name="dataSources">Provides the shared PostgreSQL data source.</param>
     /// <param name="logger">The logger.</param>
     public PostgresOutboxStore(
         IOptions<PostgresOutboxStoreOptions> options,
+        IPostgresDataSourceProvider dataSources,
         ILogger<PostgresOutboxStore> logger
     )
     {
         _options = options.Value;
         _logger = logger;
-        _dataSource = NpgsqlDataSource.Create(_options.ConnectionString);
+        _dataSource = dataSources.GetDataSource(_options.ConnectionString);
     }
 
     /// <inheritdoc />
@@ -52,8 +53,6 @@ public sealed class PostgresOutboxStore : IOutboxStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(message);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var taskMessageJson = JsonSerializer.Serialize(message.TaskMessage, TaskMessageTypeInfo);
 
@@ -87,8 +86,6 @@ public sealed class PostgresOutboxStore : IOutboxStore
     )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var sql = $"""
             SELECT id, task_message, status, created_at, attempts, last_error, dispatched_at, sequence_number
@@ -136,8 +133,6 @@ public sealed class PostgresOutboxStore : IOutboxStore
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(messageId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             UPDATE {_options.Schema}.{_options.TableName}
             SET status = @status, dispatched_at = @dispatchedAt
@@ -164,8 +159,6 @@ public sealed class PostgresOutboxStore : IOutboxStore
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(messageId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             UPDATE {_options.Schema}.{_options.TableName}
             SET
@@ -190,8 +183,6 @@ public sealed class PostgresOutboxStore : IOutboxStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             SELECT COUNT(*) FROM {_options.Schema}.{_options.TableName}
             WHERE status = @status
@@ -211,8 +202,6 @@ public sealed class PostgresOutboxStore : IOutboxStore
     )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var cutoff = DateTime.UtcNow - olderThan;
 
@@ -234,59 +223,17 @@ public sealed class PostgresOutboxStore : IOutboxStore
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         if (_disposed)
         {
-            return;
+            return ValueTask.CompletedTask;
         }
 
         _disposed = true;
 
-        await _dataSource.DisposeAsync().ConfigureAwait(false);
-
         _logger.LogInformation("PostgreSQL outbox store disposed");
-    }
 
-    private async ValueTask EnsureInitializedAsync(CancellationToken cancellationToken)
-    {
-        if (_initialized)
-        {
-            return;
-        }
-
-        if (_options.AutoCreateTables)
-        {
-            await CreateTablesAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        _initialized = true;
-    }
-
-    private async Task CreateTablesAsync(CancellationToken cancellationToken)
-    {
-        var sql = $"""
-            CREATE SEQUENCE IF NOT EXISTS {_options.Schema}.{_options.TableName}_seq;
-
-            CREATE TABLE IF NOT EXISTS {_options.Schema}.{_options.TableName} (
-                id VARCHAR(255) PRIMARY KEY,
-                task_message JSONB NOT NULL,
-                status INTEGER NOT NULL DEFAULT 0,
-                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-                attempts INTEGER NOT NULL DEFAULT 0,
-                last_error TEXT,
-                dispatched_at TIMESTAMP WITH TIME ZONE,
-                sequence_number BIGINT NOT NULL DEFAULT nextval('{_options.Schema}.{_options.TableName}_seq')
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_{_options.TableName}_status_seq
-                ON {_options.Schema}.{_options.TableName} (status, sequence_number)
-                WHERE status = 0;
-            """;
-
-        await using var cmd = _dataSource.CreateCommand(sql);
-        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation("PostgreSQL outbox table created/verified");
+        return ValueTask.CompletedTask;
     }
 }

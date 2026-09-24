@@ -103,11 +103,6 @@ public sealed class PostgresBackendOptions
     }
 
     /// <summary>
-    /// Gets or sets whether to automatically create tables on startup.
-    /// </summary>
-    public bool AutoCreateTables { get; set; } = true;
-
-    /// <summary>
     /// Gets or sets the cleanup interval for expired results.
     /// Set to null to disable automatic cleanup.
     /// </summary>

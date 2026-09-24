@@ -17,19 +17,19 @@ public sealed class PostgresDeadLetterStore : IDeadLetterStore
     private readonly NpgsqlDataSource _dataSource;
 
     private bool _disposed;
-    private bool _initialized;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PostgresDeadLetterStore"/> class.
     /// </summary>
     public PostgresDeadLetterStore(
         IOptions<PostgresDeadLetterStoreOptions> options,
+        IPostgresDataSourceProvider dataSources,
         ILogger<PostgresDeadLetterStore> logger
     )
     {
         _options = options.Value;
         _logger = logger;
-        _dataSource = NpgsqlDataSource.Create(_options.ConnectionString);
+        _dataSource = dataSources.GetDataSource(_options.ConnectionString);
     }
 
     /// <inheritdoc />
@@ -40,8 +40,6 @@ public sealed class PostgresDeadLetterStore : IDeadLetterStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(message);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var expiresAt = message.ExpiresAt ?? DateTimeOffset.UtcNow.Add(_options.DefaultRetention);
 
@@ -103,8 +101,6 @@ public sealed class PostgresDeadLetterStore : IDeadLetterStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             SELECT id, task_id, task_name, queue, reason, original_message, exception_message,
                    exception_type, stack_trace, retry_count, timestamp, expires_at, worker
@@ -136,8 +132,6 @@ public sealed class PostgresDeadLetterStore : IDeadLetterStore
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(messageId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             SELECT id, task_id, task_name, queue, reason, original_message, exception_message,
                    exception_type, stack_trace, retry_count, timestamp, expires_at, worker
@@ -168,8 +162,6 @@ public sealed class PostgresDeadLetterStore : IDeadLetterStore
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(messageId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         // For PostgreSQL, requeue means delete and let the caller handle republishing
         return await DeleteAsync(messageId, cancellationToken).ConfigureAwait(false);
     }
@@ -182,8 +174,6 @@ public sealed class PostgresDeadLetterStore : IDeadLetterStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(messageId);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var sql = $"""
             DELETE FROM {_options.Schema}.{_options.TableName}
@@ -208,8 +198,6 @@ public sealed class PostgresDeadLetterStore : IDeadLetterStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             SELECT COUNT(*) FROM {_options.Schema}.{_options.TableName}
             WHERE expires_at > NOW()
@@ -225,8 +213,6 @@ public sealed class PostgresDeadLetterStore : IDeadLetterStore
     public async ValueTask<long> PurgeAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var sql = $"""
             DELETE FROM {_options.Schema}.{_options.TableName}
@@ -244,8 +230,6 @@ public sealed class PostgresDeadLetterStore : IDeadLetterStore
     public async ValueTask<long> CleanupExpiredAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var sql = $"""
             DELETE FROM {_options.Schema}.{_options.TableName}
@@ -265,66 +249,17 @@ public sealed class PostgresDeadLetterStore : IDeadLetterStore
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         if (_disposed)
         {
-            return;
+            return ValueTask.CompletedTask;
         }
 
         _disposed = true;
-        await _dataSource.DisposeAsync().ConfigureAwait(false);
         _logger.LogInformation("PostgreSQL dead letter store disposed");
-    }
 
-    private async ValueTask EnsureInitializedAsync(CancellationToken cancellationToken)
-    {
-        if (_initialized)
-        {
-            return;
-        }
-
-        if (_options.AutoCreateTables)
-        {
-            await CreateTablesAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        _initialized = true;
-    }
-
-    private async Task CreateTablesAsync(CancellationToken cancellationToken)
-    {
-        var sql = $"""
-            CREATE TABLE IF NOT EXISTS {_options.Schema}.{_options.TableName} (
-                id VARCHAR(255) PRIMARY KEY,
-                task_id VARCHAR(255) NOT NULL,
-                task_name VARCHAR(255) NOT NULL,
-                queue VARCHAR(255) NOT NULL,
-                reason VARCHAR(50) NOT NULL,
-                original_message BYTEA NOT NULL,
-                exception_message TEXT,
-                exception_type VARCHAR(500),
-                stack_trace TEXT,
-                retry_count INTEGER NOT NULL DEFAULT 0,
-                timestamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-                expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                worker VARCHAR(255)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_{_options.TableName}_expires_at
-                ON {_options.Schema}.{_options.TableName} (expires_at);
-
-            CREATE INDEX IF NOT EXISTS idx_{_options.TableName}_timestamp
-                ON {_options.Schema}.{_options.TableName} (timestamp DESC);
-
-            CREATE INDEX IF NOT EXISTS idx_{_options.TableName}_task_id
-                ON {_options.Schema}.{_options.TableName} (task_id);
-            """;
-
-        await using var cmd = _dataSource.CreateCommand(sql);
-        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation("PostgreSQL dead letter store table created/verified");
+        return ValueTask.CompletedTask;
     }
 
     private static DeadLetterMessage ReadDeadLetterMessage(NpgsqlDataReader reader)

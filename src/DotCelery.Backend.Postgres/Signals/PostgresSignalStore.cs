@@ -20,21 +20,22 @@ public sealed class PostgresSignalStore : ISignalStore
     private readonly JsonSerializerOptions _jsonOptions;
 
     private bool _disposed;
-    private bool _initialized;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PostgresSignalStore"/> class.
     /// </summary>
     /// <param name="options">The store options.</param>
+    /// <param name="dataSources">Provides the shared PostgreSQL data source.</param>
     /// <param name="logger">The logger.</param>
     public PostgresSignalStore(
         IOptions<PostgresSignalStoreOptions> options,
+        IPostgresDataSourceProvider dataSources,
         ILogger<PostgresSignalStore> logger
     )
     {
         _options = options.Value;
         _logger = logger;
-        _dataSource = NpgsqlDataSource.Create(_options.ConnectionString);
+        _dataSource = dataSources.GetDataSource(_options.ConnectionString);
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -49,8 +50,6 @@ public sealed class PostgresSignalStore : ISignalStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(message);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var sql = $"""
             INSERT INTO {_options.Schema}.{_options.TableName}
@@ -85,8 +84,6 @@ public sealed class PostgresSignalStore : ISignalStore
     )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var now = DateTime.UtcNow;
         var visibilityTimeout = now.Add(_options.VisibilityTimeout);
@@ -169,8 +166,6 @@ public sealed class PostgresSignalStore : ISignalStore
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(messageId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             DELETE FROM {_options.Schema}.{_options.TableName}
             WHERE id = @id AND status = 1
@@ -196,8 +191,6 @@ public sealed class PostgresSignalStore : ISignalStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(messageId);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         if (requeue)
         {
@@ -238,8 +231,6 @@ public sealed class PostgresSignalStore : ISignalStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             SELECT COUNT(*) FROM {_options.Schema}.{_options.TableName}
             WHERE status = 0
@@ -252,60 +243,17 @@ public sealed class PostgresSignalStore : ISignalStore
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         if (_disposed)
         {
-            return;
+            return ValueTask.CompletedTask;
         }
 
         _disposed = true;
 
-        await _dataSource.DisposeAsync().ConfigureAwait(false);
-
         _logger.LogInformation("PostgreSQL signal store disposed");
-    }
 
-    private async ValueTask EnsureInitializedAsync(CancellationToken cancellationToken)
-    {
-        if (_initialized)
-        {
-            return;
-        }
-
-        if (_options.AutoCreateTables)
-        {
-            await CreateTablesAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        _initialized = true;
-    }
-
-    private async Task CreateTablesAsync(CancellationToken cancellationToken)
-    {
-        var sql = $"""
-            CREATE TABLE IF NOT EXISTS {_options.Schema}.{_options.TableName} (
-                id VARCHAR(255) PRIMARY KEY,
-                signal_type TEXT NOT NULL,
-                task_id VARCHAR(255) NOT NULL,
-                task_name VARCHAR(512) NOT NULL,
-                payload TEXT NOT NULL,
-                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-                status INTEGER NOT NULL DEFAULT 0,
-                visible_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_{_options.TableName}_status_visible
-                ON {_options.Schema}.{_options.TableName} (status, visible_at, created_at)
-                WHERE status = 0;
-
-            CREATE INDEX IF NOT EXISTS idx_{_options.TableName}_task_id
-                ON {_options.Schema}.{_options.TableName} (task_id);
-            """;
-
-        await using var cmd = _dataSource.CreateCommand(sql);
-        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation("PostgreSQL signal store table created/verified");
+        return ValueTask.CompletedTask;
     }
 }

@@ -17,19 +17,19 @@ public sealed class PostgresRateLimiter : IRateLimiter
     private readonly NpgsqlDataSource _dataSource;
 
     private bool _disposed;
-    private bool _initialized;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PostgresRateLimiter"/> class.
     /// </summary>
     public PostgresRateLimiter(
         IOptions<PostgresRateLimiterOptions> options,
+        IPostgresDataSourceProvider dataSources,
         ILogger<PostgresRateLimiter> logger
     )
     {
         _options = options.Value;
         _logger = logger;
-        _dataSource = NpgsqlDataSource.Create(_options.ConnectionString);
+        _dataSource = dataSources.GetDataSource(_options.ConnectionString);
     }
 
     /// <inheritdoc />
@@ -42,8 +42,6 @@ public sealed class PostgresRateLimiter : IRateLimiter
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(resourceKey);
         ArgumentNullException.ThrowIfNull(policy);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var now = DateTimeOffset.UtcNow;
         var windowStart = now.Add(-policy.Window);
@@ -163,8 +161,6 @@ public sealed class PostgresRateLimiter : IRateLimiter
         ArgumentException.ThrowIfNullOrEmpty(resourceKey);
         ArgumentNullException.ThrowIfNull(policy);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var now = DateTimeOffset.UtcNow;
         var windowStart = now.Add(-policy.Window);
 
@@ -210,8 +206,6 @@ public sealed class PostgresRateLimiter : IRateLimiter
         ArgumentException.ThrowIfNullOrEmpty(resourceKey);
         ArgumentNullException.ThrowIfNull(policy);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var now = DateTimeOffset.UtcNow;
         var windowStart = now.Add(-policy.Window);
 
@@ -238,49 +232,16 @@ public sealed class PostgresRateLimiter : IRateLimiter
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         if (_disposed)
         {
-            return;
+            return ValueTask.CompletedTask;
         }
 
         _disposed = true;
-        await _dataSource.DisposeAsync().ConfigureAwait(false);
         _logger.LogInformation("PostgreSQL rate limiter disposed");
-    }
 
-    private async ValueTask EnsureInitializedAsync(CancellationToken cancellationToken)
-    {
-        if (_initialized)
-        {
-            return;
-        }
-
-        if (_options.AutoCreateTables)
-        {
-            await CreateTablesAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        _initialized = true;
-    }
-
-    private async Task CreateTablesAsync(CancellationToken cancellationToken)
-    {
-        var sql = $"""
-            CREATE TABLE IF NOT EXISTS {_options.Schema}.{_options.TableName} (
-                id BIGSERIAL PRIMARY KEY,
-                resource_key VARCHAR(255) NOT NULL,
-                timestamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_{_options.TableName}_resource_timestamp
-                ON {_options.Schema}.{_options.TableName} (resource_key, timestamp);
-            """;
-
-        await using var cmd = _dataSource.CreateCommand(sql);
-        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation("PostgreSQL rate limiter table created/verified");
+        return ValueTask.CompletedTask;
     }
 }

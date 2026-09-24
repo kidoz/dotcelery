@@ -444,6 +444,29 @@ builder.Services.AddOpenTelemetry()
 | `dotcelery.tasks.queue_time` | Time tasks spend in queue before processing (ms) |
 | `dotcelery.tasks.in_progress` | Tasks currently being processed |
 
+## PostgreSQL Schema
+
+PostgreSQL stores get their tables from versioned migrations. Register each store with its `AddPostgres...` method (`UsePostgres` for the result backend); the registration also adds the migrations for that store's tables, using the configured schema and table names.
+
+```csharp
+builder.Services.AddPostgresOutboxStore(options =>
+{
+    options.ConnectionString = connectionString;
+    options.Schema = "celery";
+});
+```
+
+Pending migrations run while the host starts, before the worker starts, under a PostgreSQL advisory lock, so several processes can start at the same time. Applied migrations are recorded with a checksum in a `dotcelery_migrations` table in each schema. Without a generic host, resolve `PostgresMigrator` and call `MigrateAsync()` before using the stores.
+
+To apply schema changes yourself, turn off `RunAtStartup` and generate a script from the same configuration. The script applies only migrations that are not recorded yet, so it can be run again after each upgrade.
+
+```csharp
+builder.Services.AddPostgresMigrations(options => options.RunAtStartup = false);
+
+// For example, in a deployment tool that shares the application's service configuration
+var script = host.Services.GetRequiredService<PostgresMigrator>().GenerateScript();
+```
+
 ## Project Structure
 
 ```
@@ -463,8 +486,7 @@ dotcelery/
 │   ├── DotCelery.Backend.Postgres/  # PostgreSQL backend
 │   ├── DotCelery.Backend.Mongo/     # MongoDB backend
 │   ├── DotCelery.Telemetry/         # OpenTelemetry instrumentation
-│   ├── DotCelery.Analyzers/         # Roslyn analyzers for task definitions
-│   └── DotCelery.Build.SqlValidator/ # SQL file lint tool
+│   └── DotCelery.Analyzers/         # Roslyn analyzers for task definitions
 ├── tests/
 │   ├── DotCelery.Tests.Unit/        # Unit tests (xUnit v3)
 │   ├── DotCelery.Tests.Integration/ # Integration tests (Testcontainers)

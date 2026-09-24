@@ -18,7 +18,6 @@ public sealed class PostgresSagaStore : ISagaStore
     private readonly PostgresSagaStoreOptions _options;
     private readonly ILogger<PostgresSagaStore> _logger;
     private readonly NpgsqlDataSource _dataSource;
-    private readonly bool _ownsDataSource;
 
     // AOT-friendly type info for registered types
     private static JsonTypeInfo<Signature> SignatureTypeInfo =>
@@ -29,38 +28,22 @@ public sealed class PostgresSagaStore : ISagaStore
         JsonMessageSerializer.CreateDefaultOptions();
 
     private bool _disposed;
-    private bool _initialized;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PostgresSagaStore"/> class.
     /// </summary>
     /// <param name="options">The store options.</param>
+    /// <param name="dataSources">Provides the shared PostgreSQL data source.</param>
     /// <param name="logger">The logger.</param>
-    /// <param name="dataSourceProvider">
-    /// Optional shared data source provider. When provided, uses shared connection pool.
-    /// When null, creates a dedicated data source (legacy behavior).
-    /// </param>
     public PostgresSagaStore(
         IOptions<PostgresSagaStoreOptions> options,
-        ILogger<PostgresSagaStore> logger,
-        IPostgresDataSourceProvider? dataSourceProvider = null
+        IPostgresDataSourceProvider dataSources,
+        ILogger<PostgresSagaStore> logger
     )
     {
         _options = options.Value;
         _logger = logger;
-
-        if (dataSourceProvider is not null)
-        {
-            // Use shared data source from provider
-            _dataSource = dataSourceProvider.GetDataSource(_options.ConnectionString);
-            _ownsDataSource = false;
-        }
-        else
-        {
-            // Create dedicated data source (legacy behavior for backwards compatibility)
-            _dataSource = NpgsqlDataSource.Create(_options.ConnectionString);
-            _ownsDataSource = true;
-        }
+        _dataSource = dataSources.GetDataSource(_options.ConnectionString);
     }
 
     /// <inheritdoc />
@@ -68,8 +51,6 @@ public sealed class PostgresSagaStore : ISagaStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(saga);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         await using var connection = await _dataSource
             .OpenConnectionAsync(cancellationToken)
@@ -162,8 +143,6 @@ public sealed class PostgresSagaStore : ISagaStore
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(sagaId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         // Get saga
         var sagaSql = $"""
             SELECT id, name, state, current_step_index, failure_reason, correlation_id,
@@ -226,8 +205,6 @@ public sealed class PostgresSagaStore : ISagaStore
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(sagaId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             UPDATE {_options.Schema}.{_options.SagasTableName}
             SET state = @state,
@@ -264,8 +241,6 @@ public sealed class PostgresSagaStore : ISagaStore
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(sagaId);
         ArgumentException.ThrowIfNullOrEmpty(stepId);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         await using var connection = await _dataSource
             .OpenConnectionAsync(cancellationToken)
@@ -350,8 +325,6 @@ public sealed class PostgresSagaStore : ISagaStore
         ArgumentException.ThrowIfNullOrEmpty(sagaId);
         ArgumentException.ThrowIfNullOrEmpty(stepId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var newState = success ? SagaStepState.Compensated : SagaStepState.CompensationFailed;
 
         var sql = $"""
@@ -385,8 +358,6 @@ public sealed class PostgresSagaStore : ISagaStore
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(sagaId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             UPDATE {_options.Schema}.{_options.SagasTableName}
             SET current_step_index = current_step_index + 1
@@ -409,8 +380,6 @@ public sealed class PostgresSagaStore : ISagaStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(sagaId);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         await using var connection = await _dataSource
             .OpenConnectionAsync(cancellationToken)
@@ -479,8 +448,6 @@ public sealed class PostgresSagaStore : ISagaStore
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(taskId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             SELECT saga_id FROM {_options.Schema}.{_options.TaskSagaTableName}
             WHERE task_id = @taskId
@@ -502,8 +469,6 @@ public sealed class PostgresSagaStore : ISagaStore
     )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var sql = $"""
             SELECT id FROM {_options.Schema}.{_options.SagasTableName}
@@ -537,91 +502,18 @@ public sealed class PostgresSagaStore : ISagaStore
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         if (_disposed)
         {
-            return;
+            return ValueTask.CompletedTask;
         }
 
         _disposed = true;
 
-        // Only dispose data source if we created it (not using shared provider)
-        if (_ownsDataSource)
-        {
-            await _dataSource.DisposeAsync().ConfigureAwait(false);
-        }
-
         _logger.LogInformation("PostgreSQL saga store disposed");
-    }
 
-    private async ValueTask EnsureInitializedAsync(CancellationToken cancellationToken)
-    {
-        if (_initialized)
-        {
-            return;
-        }
-
-        if (_options.AutoCreateTables)
-        {
-            await CreateTablesAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        _initialized = true;
-    }
-
-    private async Task CreateTablesAsync(CancellationToken cancellationToken)
-    {
-        var sql = $"""
-            CREATE TABLE IF NOT EXISTS {_options.Schema}.{_options.SagasTableName} (
-                id VARCHAR(255) PRIMARY KEY,
-                name VARCHAR(255) NOT NULL,
-                state VARCHAR(50) NOT NULL,
-                current_step_index INTEGER NOT NULL DEFAULT 0,
-                failure_reason TEXT,
-                correlation_id VARCHAR(255),
-                metadata JSONB,
-                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-                started_at TIMESTAMP WITH TIME ZONE,
-                completed_at TIMESTAMP WITH TIME ZONE
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_{_options.SagasTableName}_state
-                ON {_options.Schema}.{_options.SagasTableName} (state);
-
-            CREATE INDEX IF NOT EXISTS idx_{_options.SagasTableName}_correlation_id
-                ON {_options.Schema}.{_options.SagasTableName} (correlation_id)
-                WHERE correlation_id IS NOT NULL;
-
-            CREATE TABLE IF NOT EXISTS {_options.Schema}.{_options.SagaStepsTableName} (
-                saga_id VARCHAR(255) NOT NULL,
-                id VARCHAR(255) NOT NULL,
-                name VARCHAR(255) NOT NULL,
-                step_order INTEGER NOT NULL,
-                execute_task JSONB NOT NULL,
-                compensate_task JSONB,
-                state VARCHAR(50) NOT NULL,
-                execute_task_id VARCHAR(255),
-                compensate_task_id VARCHAR(255),
-                result JSONB,
-                error TEXT,
-                started_at TIMESTAMP WITH TIME ZONE,
-                completed_at TIMESTAMP WITH TIME ZONE,
-                PRIMARY KEY (saga_id, id),
-                FOREIGN KEY (saga_id) REFERENCES {_options.Schema}.{_options.SagasTableName}(id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS {_options.Schema}.{_options.TaskSagaTableName} (
-                task_id VARCHAR(255) PRIMARY KEY,
-                saga_id VARCHAR(255) NOT NULL,
-                FOREIGN KEY (saga_id) REFERENCES {_options.Schema}.{_options.SagasTableName}(id) ON DELETE CASCADE
-            );
-            """;
-
-        await using var cmd = _dataSource.CreateCommand(sql);
-        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation("PostgreSQL saga store tables created/verified");
+        return ValueTask.CompletedTask;
     }
 
     private async Task InsertStepAsync(

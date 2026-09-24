@@ -26,11 +26,6 @@ public sealed class PostgresBatchStoreOptions
     public string BatchTasksTableName { get; set; } = "dotcelery_batch_tasks";
 
     /// <summary>
-    /// Gets or sets whether to auto-create tables.
-    /// </summary>
-    public bool AutoCreateTables { get; set; } = true;
-
-    /// <summary>
     /// Gets or sets the command timeout.
     /// </summary>
     public TimeSpan CommandTimeout { get; set; } = TimeSpan.FromSeconds(30);

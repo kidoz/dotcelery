@@ -21,11 +21,6 @@ public sealed class PostgresPartitionLockStoreOptions
     public string TableName { get; set; } = "dotcelery_partition_locks";
 
     /// <summary>
-    /// Gets or sets whether to auto-create tables.
-    /// </summary>
-    public bool AutoCreateTables { get; set; } = true;
-
-    /// <summary>
     /// Gets or sets the command timeout.
     /// </summary>
     public TimeSpan CommandTimeout { get; set; } = TimeSpan.FromSeconds(30);

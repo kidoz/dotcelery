@@ -9,7 +9,6 @@
     <Project Path="src/DotCelery.Broker.InMemory/DotCelery.Broker.InMemory.csproj" />
     <Project Path="src/DotCelery.Broker.RabbitMQ/DotCelery.Broker.RabbitMQ.csproj" />
     <Project Path="src/DotCelery.Broker.Redis/DotCelery.Broker.Redis.csproj" />
-    <Project Path="src/DotCelery.Build.SqlValidator/DotCelery.Build.SqlValidator.csproj" />
     <Project Path="src/DotCelery.Client/DotCelery.Client.csproj" />
     <Project Path="src/DotCelery.Core/DotCelery.Core.csproj" />
     <Project Path="src/DotCelery.Cron/DotCelery.Cron.csproj" />

@@ -15,19 +15,19 @@ public sealed class PostgresQueueMetrics : IQueueMetrics, IAsyncDisposable
     private readonly NpgsqlDataSource _dataSource;
 
     private bool _disposed;
-    private bool _initialized;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PostgresQueueMetrics"/> class.
     /// </summary>
     public PostgresQueueMetrics(
         IOptions<PostgresQueueMetricsOptions> options,
+        IPostgresDataSourceProvider dataSources,
         ILogger<PostgresQueueMetrics> logger
     )
     {
         _options = options.Value;
         _logger = logger;
-        _dataSource = NpgsqlDataSource.Create(_options.ConnectionString);
+        _dataSource = dataSources.GetDataSource(_options.ConnectionString);
     }
 
     /// <inheritdoc />
@@ -37,8 +37,6 @@ public sealed class PostgresQueueMetrics : IQueueMetrics, IAsyncDisposable
     )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var sql = $"""
             SELECT COALESCE(waiting_count, 0) FROM {_options.Schema}.{_options.MetricsTableName}
@@ -62,8 +60,6 @@ public sealed class PostgresQueueMetrics : IQueueMetrics, IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             SELECT COALESCE(running_count, 0) FROM {_options.Schema}.{_options.MetricsTableName}
             WHERE queue = @queue
@@ -85,8 +81,6 @@ public sealed class PostgresQueueMetrics : IQueueMetrics, IAsyncDisposable
     )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var sql = $"""
             SELECT COALESCE(processed_count, 0) FROM {_options.Schema}.{_options.MetricsTableName}
@@ -110,8 +104,6 @@ public sealed class PostgresQueueMetrics : IQueueMetrics, IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             SELECT COALESCE(consumer_count, 0) FROM {_options.Schema}.{_options.MetricsTableName}
             WHERE queue = @queue
@@ -132,8 +124,6 @@ public sealed class PostgresQueueMetrics : IQueueMetrics, IAsyncDisposable
     )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var sql = $"""
             SELECT queue FROM {_options.Schema}.{_options.MetricsTableName}
@@ -160,8 +150,6 @@ public sealed class PostgresQueueMetrics : IQueueMetrics, IAsyncDisposable
     )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var sql = $"""
             SELECT queue, waiting_count, running_count, processed_count, success_count,
@@ -192,8 +180,6 @@ public sealed class PostgresQueueMetrics : IQueueMetrics, IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             SELECT queue, waiting_count, running_count, processed_count, success_count,
                    failure_count, consumer_count, total_duration_ms, completed_count,
@@ -223,8 +209,6 @@ public sealed class PostgresQueueMetrics : IQueueMetrics, IAsyncDisposable
     )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         await using var connection = await _dataSource
             .OpenConnectionAsync(cancellationToken)
@@ -288,8 +272,6 @@ public sealed class PostgresQueueMetrics : IQueueMetrics, IAsyncDisposable
     )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         await using var connection = await _dataSource
             .OpenConnectionAsync(cancellationToken)
@@ -355,8 +337,6 @@ public sealed class PostgresQueueMetrics : IQueueMetrics, IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             INSERT INTO {_options.Schema}.{_options.MetricsTableName}
                 (queue, waiting_count, last_enqueued_at)
@@ -375,64 +355,17 @@ public sealed class PostgresQueueMetrics : IQueueMetrics, IAsyncDisposable
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         if (_disposed)
         {
-            return;
+            return ValueTask.CompletedTask;
         }
 
         _disposed = true;
-        await _dataSource.DisposeAsync().ConfigureAwait(false);
         _logger.LogInformation("PostgreSQL queue metrics disposed");
-    }
 
-    private async ValueTask EnsureInitializedAsync(CancellationToken cancellationToken)
-    {
-        if (_initialized)
-        {
-            return;
-        }
-
-        if (_options.AutoCreateTables)
-        {
-            await CreateTablesAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        _initialized = true;
-    }
-
-    private async Task CreateTablesAsync(CancellationToken cancellationToken)
-    {
-        var sql = $"""
-            CREATE TABLE IF NOT EXISTS {_options.Schema}.{_options.MetricsTableName} (
-                queue VARCHAR(255) PRIMARY KEY,
-                waiting_count BIGINT NOT NULL DEFAULT 0,
-                running_count BIGINT NOT NULL DEFAULT 0,
-                processed_count BIGINT NOT NULL DEFAULT 0,
-                success_count BIGINT NOT NULL DEFAULT 0,
-                failure_count BIGINT NOT NULL DEFAULT 0,
-                consumer_count INTEGER NOT NULL DEFAULT 0,
-                total_duration_ms BIGINT NOT NULL DEFAULT 0,
-                completed_count BIGINT NOT NULL DEFAULT 0,
-                last_enqueued_at TIMESTAMP WITH TIME ZONE,
-                last_completed_at TIMESTAMP WITH TIME ZONE
-            );
-
-            CREATE TABLE IF NOT EXISTS {_options.Schema}.{_options.RunningTasksTableName} (
-                task_id VARCHAR(255) PRIMARY KEY,
-                queue VARCHAR(255) NOT NULL,
-                started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_{_options.RunningTasksTableName}_queue
-                ON {_options.Schema}.{_options.RunningTasksTableName} (queue);
-            """;
-
-        await using var cmd = _dataSource.CreateCommand(sql);
-        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation("PostgreSQL queue metrics tables created/verified");
+        return ValueTask.CompletedTask;
     }
 
     private static QueueMetricsData ReadQueueMetrics(NpgsqlDataReader reader)

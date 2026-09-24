@@ -4,7 +4,6 @@ using DotCelery.Core.Abstractions;
 using DotCelery.Core.Batches;
 using DotCelery.Core.Canvas;
 using DotCelery.Core.DeadLetter;
-using DotCelery.Core.Migrations;
 using DotCelery.Core.Models;
 using DotCelery.Core.Outbox;
 using DotCelery.Core.Progress;
@@ -68,8 +67,6 @@ namespace DotCelery.Core.Serialization;
 [JsonSerializable(typeof(ProgressUpdatedSignal))]
 // Revocation Types
 [JsonSerializable(typeof(RevocationEvent))]
-// Migration Types
-[JsonSerializable(typeof(MigrationRecord))]
 // Collection Types (commonly used in models)
 [JsonSerializable(typeof(IReadOnlyList<string>))]
 [JsonSerializable(typeof(List<string>))]

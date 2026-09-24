@@ -16,19 +16,19 @@ public sealed class PostgresPartitionLockStore : IPartitionLockStore
     private readonly NpgsqlDataSource _dataSource;
 
     private bool _disposed;
-    private bool _initialized;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PostgresPartitionLockStore"/> class.
     /// </summary>
     public PostgresPartitionLockStore(
         IOptions<PostgresPartitionLockStoreOptions> options,
+        IPostgresDataSourceProvider dataSources,
         ILogger<PostgresPartitionLockStore> logger
     )
     {
         _options = options.Value;
         _logger = logger;
-        _dataSource = NpgsqlDataSource.Create(_options.ConnectionString);
+        _dataSource = dataSources.GetDataSource(_options.ConnectionString);
     }
 
     /// <inheritdoc />
@@ -42,8 +42,6 @@ public sealed class PostgresPartitionLockStore : IPartitionLockStore
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(partitionKey);
         ArgumentException.ThrowIfNullOrEmpty(taskId);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var now = DateTimeOffset.UtcNow;
         var expiresAt = now.Add(timeout);
@@ -118,8 +116,6 @@ public sealed class PostgresPartitionLockStore : IPartitionLockStore
         ArgumentException.ThrowIfNullOrEmpty(partitionKey);
         ArgumentException.ThrowIfNullOrEmpty(taskId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             DELETE FROM {_options.Schema}.{_options.TableName}
             WHERE partition_key = @partitionKey AND task_id = @taskId
@@ -152,8 +148,6 @@ public sealed class PostgresPartitionLockStore : IPartitionLockStore
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(partitionKey);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             SELECT EXISTS(
                 SELECT 1 FROM {_options.Schema}.{_options.TableName}
@@ -176,8 +170,6 @@ public sealed class PostgresPartitionLockStore : IPartitionLockStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(partitionKey);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var sql = $"""
             SELECT task_id FROM {_options.Schema}.{_options.TableName}
@@ -203,8 +195,6 @@ public sealed class PostgresPartitionLockStore : IPartitionLockStore
         ArgumentException.ThrowIfNullOrEmpty(partitionKey);
         ArgumentException.ThrowIfNullOrEmpty(taskId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var newExpiresAt = DateTimeOffset.UtcNow.Add(extension);
 
         var sql = $"""
@@ -223,50 +213,16 @@ public sealed class PostgresPartitionLockStore : IPartitionLockStore
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         if (_disposed)
         {
-            return;
+            return ValueTask.CompletedTask;
         }
 
         _disposed = true;
-        await _dataSource.DisposeAsync().ConfigureAwait(false);
         _logger.LogInformation("PostgreSQL partition lock store disposed");
-    }
 
-    private async ValueTask EnsureInitializedAsync(CancellationToken cancellationToken)
-    {
-        if (_initialized)
-        {
-            return;
-        }
-
-        if (_options.AutoCreateTables)
-        {
-            await CreateTablesAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        _initialized = true;
-    }
-
-    private async Task CreateTablesAsync(CancellationToken cancellationToken)
-    {
-        var sql = $"""
-            CREATE TABLE IF NOT EXISTS {_options.Schema}.{_options.TableName} (
-                partition_key VARCHAR(255) PRIMARY KEY,
-                task_id VARCHAR(255) NOT NULL,
-                acquired_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-                expires_at TIMESTAMP WITH TIME ZONE NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_{_options.TableName}_expires_at
-                ON {_options.Schema}.{_options.TableName} (expires_at);
-            """;
-
-        await using var cmd = _dataSource.CreateCommand(sql);
-        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation("PostgreSQL partition lock store table created/verified");
+        return ValueTask.CompletedTask;
     }
 }

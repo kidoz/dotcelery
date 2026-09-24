@@ -1,4 +1,5 @@
 using DotCelery.Backend.Postgres;
+using DotCelery.Backend.Postgres.Migrations;
 using DotCelery.Backend.Postgres.Signals;
 using DotCelery.Core.Models;
 using DotCelery.Core.Signals;
@@ -16,6 +17,7 @@ namespace DotCelery.Tests.Integration.Postgres;
 public class PostgresBackendIntegrationTests : IAsyncLifetime
 {
     private readonly PostgreSqlContainer _container;
+    private readonly PostgresDataSourceProvider _dataSources = new();
     private PostgresResultBackend? _backend;
 
     public PostgresBackendIntegrationTests()
@@ -36,15 +38,23 @@ public class PostgresBackendIntegrationTests : IAsyncLifetime
             {
                 ConnectionString = _container.GetConnectionString(),
                 UseListenNotify = true,
-                AutoCreateTables = true,
             }
         );
 
-        var logger = LoggerFactory
-            .Create(builder => builder.AddConsole())
-            .CreateLogger<PostgresResultBackend>();
+        var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
 
-        _backend = new PostgresResultBackend(options, logger);
+        await new PostgresMigrator(
+            _dataSources,
+            [PostgresResultBackendMigrations.CreateModule(options.Value)],
+            Options.Create(new PostgresMigrationOptions()),
+            loggerFactory.CreateLogger<PostgresMigrator>()
+        ).MigrateAsync();
+
+        _backend = new PostgresResultBackend(
+            options,
+            _dataSources,
+            loggerFactory.CreateLogger<PostgresResultBackend>()
+        );
     }
 
     public async ValueTask DisposeAsync()
@@ -54,6 +64,7 @@ public class PostgresBackendIntegrationTests : IAsyncLifetime
             await _backend.DisposeAsync();
         }
 
+        await _dataSources.DisposeAsync();
         await _container.DisposeAsync();
     }
 
@@ -255,6 +266,7 @@ public class PostgresBackendIntegrationTests : IAsyncLifetime
 public class PostgresSignalStoreIntegrationTests : IAsyncLifetime
 {
     private readonly PostgreSqlContainer _container;
+    private readonly PostgresDataSourceProvider _dataSources = new();
     private string _connectionString = string.Empty;
     private ILoggerFactory _loggerFactory = null!;
 
@@ -272,10 +284,18 @@ public class PostgresSignalStoreIntegrationTests : IAsyncLifetime
         await _container.StartAsync();
         _connectionString = _container.GetConnectionString();
         _loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+
+        await new PostgresMigrator(
+            _dataSources,
+            [PostgresSignalMigrations.CreateModule(CreateSignalStoreOptions())],
+            Options.Create(new PostgresMigrationOptions()),
+            _loggerFactory.CreateLogger<PostgresMigrator>()
+        ).MigrateAsync();
     }
 
     public async ValueTask DisposeAsync()
     {
+        await _dataSources.DisposeAsync();
         await _container.DisposeAsync();
         _loggerFactory.Dispose();
     }
@@ -446,17 +466,13 @@ public class PostgresSignalStoreIntegrationTests : IAsyncLifetime
         Assert.Equal("signal-0", dequeued[0].Id);
     }
 
-    private PostgresSignalStore CreateSignalStore()
-    {
-        return new PostgresSignalStore(
-            Options.Create(
-                new PostgresSignalStoreOptions
-                {
-                    ConnectionString = _connectionString,
-                    AutoCreateTables = true,
-                }
-            ),
+    private PostgresSignalStore CreateSignalStore() =>
+        new(
+            Options.Create(CreateSignalStoreOptions()),
+            _dataSources,
             _loggerFactory.CreateLogger<PostgresSignalStore>()
         );
-    }
+
+    private PostgresSignalStoreOptions CreateSignalStoreOptions() =>
+        new() { ConnectionString = _connectionString };
 }

@@ -24,19 +24,19 @@ public sealed class PostgresDelayedMessageStore : IDelayedMessageStore
         DotCeleryJsonContext.Default.TaskMessage;
 
     private bool _disposed;
-    private bool _initialized;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PostgresDelayedMessageStore"/> class.
     /// </summary>
     public PostgresDelayedMessageStore(
         IOptions<PostgresDelayedMessageStoreOptions> options,
+        IPostgresDataSourceProvider dataSources,
         ILogger<PostgresDelayedMessageStore> logger
     )
     {
         _options = options.Value;
         _logger = logger;
-        _dataSource = NpgsqlDataSource.Create(_options.ConnectionString);
+        _dataSource = dataSources.GetDataSource(_options.ConnectionString);
     }
 
     /// <inheritdoc />
@@ -48,8 +48,6 @@ public sealed class PostgresDelayedMessageStore : IDelayedMessageStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(message);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var json = JsonSerializer.Serialize(message, TaskMessageTypeInfo);
 
@@ -85,8 +83,6 @@ public sealed class PostgresDelayedMessageStore : IDelayedMessageStore
     )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         // Use FOR UPDATE SKIP LOCKED to allow multiple workers to process due messages
         var sql = $"""
@@ -128,8 +124,6 @@ public sealed class PostgresDelayedMessageStore : IDelayedMessageStore
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(taskId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             DELETE FROM {_options.Schema}.{_options.TableName}
             WHERE task_id = @taskId
@@ -153,8 +147,6 @@ public sealed class PostgresDelayedMessageStore : IDelayedMessageStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             SELECT COUNT(*) FROM {_options.Schema}.{_options.TableName}
             """;
@@ -172,8 +164,6 @@ public sealed class PostgresDelayedMessageStore : IDelayedMessageStore
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var sql = $"""
             SELECT MIN(delivery_time) FROM {_options.Schema}.{_options.TableName}
             """;
@@ -190,50 +180,16 @@ public sealed class PostgresDelayedMessageStore : IDelayedMessageStore
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         if (_disposed)
         {
-            return;
+            return ValueTask.CompletedTask;
         }
 
         _disposed = true;
-        await _dataSource.DisposeAsync().ConfigureAwait(false);
         _logger.LogInformation("PostgreSQL delayed message store disposed");
-    }
 
-    private async ValueTask EnsureInitializedAsync(CancellationToken cancellationToken)
-    {
-        if (_initialized)
-        {
-            return;
-        }
-
-        if (_options.AutoCreateTables)
-        {
-            await CreateTablesAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        _initialized = true;
-    }
-
-    private async Task CreateTablesAsync(CancellationToken cancellationToken)
-    {
-        var sql = $"""
-            CREATE TABLE IF NOT EXISTS {_options.Schema}.{_options.TableName} (
-                task_id VARCHAR(255) PRIMARY KEY,
-                message JSONB NOT NULL,
-                delivery_time TIMESTAMP WITH TIME ZONE NOT NULL,
-                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_{_options.TableName}_delivery_time
-                ON {_options.Schema}.{_options.TableName} (delivery_time);
-            """;
-
-        await using var cmd = _dataSource.CreateCommand(sql);
-        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation("PostgreSQL delayed message store table created/verified");
+        return ValueTask.CompletedTask;
     }
 }

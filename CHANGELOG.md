@@ -9,11 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `WorkerOptions.InfrastructureFailureRequeueDelay` sets how long the worker waits before returning a message to the broker after an infrastructure failure
+- PostgreSQL schema migrations: `PostgresMigrator` applies each store's versioned migrations when the host starts, under an advisory lock, and records them with checksums in a `dotcelery_migrations` table
+- `PostgresMigrator.GenerateScript()` produces a re-runnable SQL script for databases where schema changes are applied by hand
+- `AddPostgres...` registration methods for every PostgreSQL store; each also registers the store's migrations
 
 ### Changed
+- PostgreSQL stores no longer create their tables on first use; run migrations first (automatic with a generic host)
+- PostgreSQL stores share one data source (connection pool) per connection string; `IPostgresDataSourceProvider` is a required constructor parameter
 - Graceful shutdown stops taking messages first, returns prefetched messages to the broker, and closes the broker consumer only after every in-flight message is settled
 - The worker stops with an error when the broker ends the message stream unexpectedly, instead of running without a consumer
 - The Redis broker reads again immediately while messages are available; `RedisBrokerOptions.BlockTimeout` applies only after a read returns nothing
+
+### Removed
+- `AutoCreateTables` from every PostgreSQL store's options
+- The unused `DotCelery.Core.Migrations` framework and the Redis and MongoDB migration stores
+- The `DotCelery.Build.SqlValidator` tool, which did not validate any SQL in this repository
 
 ### Fixed
 - The worker no longer drops a message when the result backend, revocation store, rate limiter, or retry publish fails; it returns the message to the broker

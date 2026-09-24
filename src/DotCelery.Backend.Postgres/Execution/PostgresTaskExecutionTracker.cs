@@ -15,19 +15,19 @@ public sealed class PostgresTaskExecutionTracker : ITaskExecutionTracker
     private readonly NpgsqlDataSource _dataSource;
 
     private bool _disposed;
-    private bool _initialized;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PostgresTaskExecutionTracker"/> class.
     /// </summary>
     public PostgresTaskExecutionTracker(
         IOptions<PostgresTaskExecutionTrackerOptions> options,
+        IPostgresDataSourceProvider dataSources,
         ILogger<PostgresTaskExecutionTracker> logger
     )
     {
         _options = options.Value;
         _logger = logger;
-        _dataSource = NpgsqlDataSource.Create(_options.ConnectionString);
+        _dataSource = dataSources.GetDataSource(_options.ConnectionString);
     }
 
     /// <inheritdoc />
@@ -42,8 +42,6 @@ public sealed class PostgresTaskExecutionTracker : ITaskExecutionTracker
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(taskName);
         ArgumentException.ThrowIfNullOrEmpty(taskId);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var lockKey = GetLockKey(taskName, key);
         var now = DateTimeOffset.UtcNow;
@@ -121,8 +119,6 @@ public sealed class PostgresTaskExecutionTracker : ITaskExecutionTracker
         ArgumentException.ThrowIfNullOrEmpty(taskName);
         ArgumentException.ThrowIfNullOrEmpty(taskId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var lockKey = GetLockKey(taskName, key);
 
         var sql = $"""
@@ -153,8 +149,6 @@ public sealed class PostgresTaskExecutionTracker : ITaskExecutionTracker
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(taskName);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var lockKey = GetLockKey(taskName, key);
 
         var sql = $"""
@@ -180,8 +174,6 @@ public sealed class PostgresTaskExecutionTracker : ITaskExecutionTracker
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(taskName);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var lockKey = GetLockKey(taskName, key);
 
@@ -210,8 +202,6 @@ public sealed class PostgresTaskExecutionTracker : ITaskExecutionTracker
         ArgumentException.ThrowIfNullOrEmpty(taskName);
         ArgumentException.ThrowIfNullOrEmpty(taskId);
 
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         var lockKey = GetLockKey(taskName, key);
         var newExpiresAt = DateTimeOffset.UtcNow.Add(extension ?? _options.DefaultTimeout);
 
@@ -236,8 +226,6 @@ public sealed class PostgresTaskExecutionTracker : ITaskExecutionTracker
     )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var sql = $"""
             SELECT lock_key, task_id, execution_key, started_at, expires_at
@@ -267,56 +255,21 @@ public sealed class PostgresTaskExecutionTracker : ITaskExecutionTracker
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         if (_disposed)
         {
-            return;
+            return ValueTask.CompletedTask;
         }
 
         _disposed = true;
-        await _dataSource.DisposeAsync().ConfigureAwait(false);
         _logger.LogInformation("PostgreSQL task execution tracker disposed");
+
+        return ValueTask.CompletedTask;
     }
 
     private static string GetLockKey(string taskName, string? key)
     {
         return key is null ? taskName : $"{taskName}:{key}";
-    }
-
-    private async ValueTask EnsureInitializedAsync(CancellationToken cancellationToken)
-    {
-        if (_initialized)
-        {
-            return;
-        }
-
-        if (_options.AutoCreateTables)
-        {
-            await CreateTablesAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        _initialized = true;
-    }
-
-    private async Task CreateTablesAsync(CancellationToken cancellationToken)
-    {
-        var sql = $"""
-            CREATE TABLE IF NOT EXISTS {_options.Schema}.{_options.TableName} (
-                lock_key VARCHAR(511) PRIMARY KEY,
-                task_id VARCHAR(255) NOT NULL,
-                execution_key VARCHAR(255),
-                started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-                expires_at TIMESTAMP WITH TIME ZONE NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_{_options.TableName}_expires_at
-                ON {_options.Schema}.{_options.TableName} (expires_at);
-            """;
-
-        await using var cmd = _dataSource.CreateCommand(sql);
-        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation("PostgreSQL task execution tracker table created/verified");
     }
 }
