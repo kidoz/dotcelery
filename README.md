@@ -10,22 +10,22 @@ A distributed task queue for .NET 10, inspired by Python's [Celery](https://docs
 
 ### Core Features
 - **Distributed Task Execution** - Execute tasks asynchronously across multiple workers
-- **Multiple Brokers** - RabbitMQ, In-Memory (Redis, Azure Service Bus, Amazon SQS planned)
+- **Multiple Brokers** - RabbitMQ, Redis Streams, In-Memory (Azure Service Bus, Amazon SQS planned)
 - **Result Backends** - Redis, PostgreSQL, MongoDB, In-Memory (SQL Server planned)
-- **Canvas Workflows** - Chain, Group, and Chord primitives for complex workflows
+- **Canvas Workflows** - Chain, Group, and Chord primitives for describing workflows (not yet executed by workers)
 - **Beat Scheduler** - Periodic task scheduling with cron and interval support
-- **OpenTelemetry** - Built-in observability with metrics and distributed tracing
+- **OpenTelemetry** - Built-in distributed tracing (metric instruments are defined but not yet recorded)
 
 ### Enterprise Features
 - **ETA/Countdown** - Schedule tasks for future execution with delayed message store
 - **Task Cancellation** - Revoke running or pending tasks with real-time notifications
-- **Dashboard UI** - Web-based monitoring with SignalR real-time updates
+- **Dashboard UI** - Web-based monitoring UI and SignalR hub (requires custom data providers; live updates not yet raised)
 - **Rate Limiting** - Sliding window algorithm for task throttling
-- **Batches** - Atomic group creation with completion callbacks
-- **Saga State Machine** - Long-running business process coordination
+- **Batches** - Grouped task submission with completion tracking (completion callbacks not yet dispatched)
+- **Saga State Machine** - Long-running business process coordination (incomplete)
 - **Compensating Actions** - Automatic rollback when saga steps fail
 - **Progress Reporting** - Real-time task progress updates during execution
-- **Circuit Breaker** - Fault tolerance with automatic recovery
+- **Circuit Breaker** - Fault tolerance with automatic recovery (not yet applied to task execution)
 - **Kill Switch** - Emergency task execution control
 - **Multi-Tenancy** - Tenant isolation with queue routing
 
@@ -34,7 +34,7 @@ A distributed task queue for .NET 10, inspired by Python's [Celery](https://docs
 - **`params ReadOnlySpan<T>`** - Zero-allocation variadic methods
 - **Operators in Classes** - Fluent API support (`chain + signature`)
 
-See `ROADMAP.md` for planned features.
+See [ROADMAP.md](ROADMAP.md) for known gaps in the features above and for planned features.
 
 ## Quick Start
 
@@ -139,6 +139,9 @@ public class EmailService(ICeleryClient celery)
 ## Canvas Workflows
 
 DotCelery supports workflow primitives for orchestrating complex task execution patterns.
+
+> **Status:** Canvas types describe workflows, but workers do not yet dispatch chains, groups, or chord callbacks. See [ROADMAP.md](ROADMAP.md#known-gaps).
+
 These examples assume an `IMessageSerializer` named `serializer` (for example, `new JsonMessageSerializer()`).
 
 ### Chain - Sequential Execution
@@ -203,6 +206,8 @@ var chord = new Group(
 ## Saga State Machine
 
 Coordinate long-running business processes with automatic compensation on failure.
+
+> **Status:** The DI extensions do not yet register `ISagaOrchestrator`, and the Redis, PostgreSQL, and MongoDB saga stores have known defects. See [ROADMAP.md](ROADMAP.md#known-gaps).
 
 ```csharp
 var saga = new Saga
@@ -275,14 +280,14 @@ public class ProcessFileTask : ITask<FileInput, FileResult>
 
 ## Batches
 
-Create atomic task groups with completion callbacks.
+Submit groups of tasks and track their completion.
 
 ```csharp
 var batchId = await batchClient.CreateBatchAsync(batch =>
 {
     batch.WithName("email-campaign");
-    batch.Enqueue<SendEmailTask, EmailInput>(new EmailInput("user1@example.com", "Newsletter", body));
-    batch.Enqueue<SendEmailTask, EmailInput>(new EmailInput("user2@example.com", "Newsletter", body));
+    batch.Enqueue<SendEmailTask, EmailInput, EmailResult>(new EmailInput("user1@example.com", "Newsletter", body));
+    batch.Enqueue<SendEmailTask, EmailInput, EmailResult>(new EmailInput("user2@example.com", "Newsletter", body));
     batch.OnComplete<CampaignCompleteTask, CampaignCompleteInput>(
         new CampaignCompleteInput("email-campaign"));
 });
@@ -290,7 +295,8 @@ var batchId = await batchClient.CreateBatchAsync(batch =>
 var batchState = await batchClient.WaitForBatchAsync(batchId);
 ```
 
-Batch state tracking requires an `IBatchStore` registration and `AddBatchSupport()` on the worker.
+Sending batches requires `AddBatchClient()`. Batch state tracking requires an `IBatchStore` registration and `AddBatchSupport()` on the worker.
+`OnComplete` callbacks are not yet dispatched; see [ROADMAP.md](ROADMAP.md#known-gaps).
 
 ## Beat Scheduler
 
@@ -373,6 +379,8 @@ public async Task<OrderResult> ExecuteAsync(
 
 Prevent cascade failures with automatic circuit breaking.
 
+> **Status:** `UseCircuitBreaker()` registers the circuit breaker factory, but the worker does not yet use it. See [ROADMAP.md](ROADMAP.md#known-gaps).
+
 ```csharp
 builder.Services.AddDotCelery(celery =>
 {
@@ -423,17 +431,18 @@ builder.Services.AddOpenTelemetry()
 
 ### Available Metrics
 
+> **Status:** These instruments are defined in `DotCelery.Telemetry`, but the client and worker do not record them yet. Distributed tracing is emitted. See [ROADMAP.md](ROADMAP.md#known-gaps).
+
 | Metric | Description |
 |--------|-------------|
-| `dotcelery_tasks_sent_total` | Total tasks sent |
-| `dotcelery_tasks_succeeded_total` | Total successful executions |
-| `dotcelery_tasks_failed_total` | Total failed executions |
-| `dotcelery_tasks_retried_total` | Total retry attempts |
-| `dotcelery_task_duration_seconds` | Task execution duration |
-| `dotcelery_worker_active_tasks` | Currently executing tasks |
-| `dotcelery_circuit_breaker_state` | Circuit breaker state changes |
-| `dotcelery_saga_completed_total` | Completed sagas |
-| `dotcelery_saga_compensated_total` | Compensated sagas |
+| `dotcelery.tasks.sent` | Tasks sent |
+| `dotcelery.tasks.received` | Tasks received by workers |
+| `dotcelery.tasks.succeeded` | Tasks completed successfully |
+| `dotcelery.tasks.failed` | Tasks that failed |
+| `dotcelery.tasks.retried` | Task retries |
+| `dotcelery.tasks.duration` | Task execution duration (ms) |
+| `dotcelery.tasks.queue_time` | Time tasks spend in queue before processing (ms) |
+| `dotcelery.tasks.in_progress` | Tasks currently being processed |
 
 ## Project Structure
 
@@ -448,14 +457,20 @@ dotcelery/
 │   ├── DotCelery.Dashboard/         # Web dashboard with SignalR
 │   ├── DotCelery.Broker.InMemory/   # In-memory broker (testing)
 │   ├── DotCelery.Broker.RabbitMQ/   # RabbitMQ broker
+│   ├── DotCelery.Broker.Redis/      # Redis Streams broker
 │   ├── DotCelery.Backend.InMemory/  # In-memory backend (testing)
 │   ├── DotCelery.Backend.Redis/     # Redis backend
 │   ├── DotCelery.Backend.Postgres/  # PostgreSQL backend
 │   ├── DotCelery.Backend.Mongo/     # MongoDB backend
-│   └── DotCelery.Telemetry/         # OpenTelemetry instrumentation
-└── tests/
-    ├── DotCelery.Tests.Unit/        # Unit tests (xUnit v3)
-    └── DotCelery.Tests.Integration/ # Integration tests (Testcontainers)
+│   ├── DotCelery.Telemetry/         # OpenTelemetry instrumentation
+│   ├── DotCelery.Analyzers/         # Roslyn analyzers for task definitions
+│   └── DotCelery.Build.SqlValidator/ # SQL file lint tool
+├── tests/
+│   ├── DotCelery.Tests.Unit/        # Unit tests (xUnit v3)
+│   ├── DotCelery.Tests.Integration/ # Integration tests (Testcontainers)
+│   └── DotCelery.Analyzers.Tests/   # Analyzer tests
+├── samples/                         # Demo, dashboard demo, Redis/PostgreSQL example
+└── benchmarks/                      # BenchmarkDotNet benchmarks
 ```
 
 ## Requirements
@@ -468,6 +483,7 @@ dotcelery/
 | Broker | Version |
 |--------|---------|
 | RabbitMQ | 3.8+ |
+| Redis | 5.0+ (Streams) |
 
 ### Backend Requirements
 

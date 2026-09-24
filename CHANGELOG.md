@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Brokers
 - In-memory broker for testing and development
-- RabbitMQ broker with connection pooling
+- RabbitMQ broker with publisher confirms and mandatory routing
 - Redis Streams broker with consumer groups
 
 #### Backends
@@ -43,14 +43,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pattern-based task routing (glob patterns)
 - Soft/hard time limits with `SoftTimeLimitExceededException`
 - Dead letter queue with configurable handlers
-- Batches with atomic creation and completion callbacks
+- Batches with completion tracking
 
 #### Reliability
 - Kill switch for auto-stop on failure threshold
 - Circuit breaker for endpoint-level protection
 - Graceful shutdown handler
-- Transactional outbox pattern
-- Transactional inbox for exactly-once processing
+- Outbox store abstraction and dispatcher
+- Inbox store abstraction for message deduplication
 
 #### Workflows
 - Saga state machine for long-running processes
@@ -64,9 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Queue metrics (WaitingCount, RunningCount, ProcessedCount)
 
 #### Observability
-- OpenTelemetry metrics and distributed tracing
-- Web dashboard with SignalR real-time updates
-- Worker registry with heartbeat monitoring
+- OpenTelemetry distributed tracing and metric instrument definitions
+- Web dashboard with SignalR hub
+- Worker registry store with heartbeat tracking
 
 ### Notes
 - Requires .NET 10.0 and C# 14

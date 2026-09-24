@@ -1,7 +1,10 @@
 # Roadmap
 
-This document tracks planned features and larger architectural work that are not yet implemented.
-Status and scope may change as the project evolves.
+This document tracks shipped features, known gaps in them, and planned work.
+Status and scope may change as the project evolves. Last reviewed: 2026-09-24.
+
+Known gaps take priority over new features: several capabilities are exposed in the public API
+but do not yet behave as documented.
 
 ## Completed Features
 
@@ -10,12 +13,13 @@ Status and scope may change as the project evolves.
 - RabbitMQ publisher confirms and mandatory routing
 
 ### Serialization
-- AOT-friendly serialization contexts (`DotCeleryJsonContext`, `RedisBackendJsonContext`)
+- Source-generated JSON contexts for core message types (`DotCeleryJsonContext`, `RedisBackendJsonContext`)
+- Opt-in deserialization type allowlist (`JsonMessageSerializerOptions.EnforceDeserializationTypeAllowlist`)
 
 ### Security
 - HMAC message signing across InMemory, RabbitMQ, and Redis brokers
-- Worker-side signature validation filter with dead-letter rejection
-- Strict tenant validation (invalid tenants are rejected, not defaulted)
+- Worker-side validation filter for signatures, task-name allowlist, schema version, and payload size
+- Tenant validation against a configured tenant list
 - Dashboard authorization filter applied to controllers, SignalR hub, and middleware
 - Dashboard route prefixing via `DashboardRoutePrefixConvention`
 
@@ -23,31 +27,79 @@ Status and scope may change as the project evolves.
 - Analyzer reports duplicate task names at compilation end
 - `SendOptions.TenantId` and `SendOptions.PartitionKey` with tenant-aware queue routing
 
+## Known Gaps
+
+### Delivery and Reliability
+- The worker rejects messages without requeue on any processing error, so a transient backend outage (revocation check, rate limiter, state write, retry re-publish) drops the message
+- Graceful shutdown keeps consuming during the drain, requeues tasks that are still running, and records shutdown-cancelled tasks as failures
+- Redis broker: the consume loop stops after the first error, polling uses a fixed delay instead of blocking reads, pending-message reclaim takes over messages that live workers are still processing, acknowledged entries are never deleted from streams, and requeue acknowledges before re-adding
+- RabbitMQ broker: reconnect logic competes with the client's automatic recovery and can acknowledge on a different channel than the one that delivered the message; queue arguments (priority, queue type, dead-letter exchange) are fixed
+- Delayed messages are removed from the store before they are published (Redis, PostgreSQL), and MongoDB can dispatch the same message twice
+- Message signing shares one `HMACSHA256` instance across threads
+- Redis stores and the Redis broker open a new connection on reconnect without disposing the old one
+- Hard time limits are cooperative; a task that ignores its cancellation token keeps its worker slot
+
+### Backend Correctness
+- PostgreSQL rate limiter issues `SELECT COUNT(*) ... FOR UPDATE`, which PostgreSQL rejects
+- PostgreSQL `LISTEN/NOTIFY` sends the full result as the payload; results over 8000 bytes roll back the write
+- PostgreSQL and MongoDB: the client's `Pending` row makes `AsyncResult.GetAsync` return immediately, and the `Pending` write can overwrite a result that is already stored
+- Redis dead-letter store sets a TTL on the hash that holds every entry
+- Batch completion is a read-modify-write in the Redis and in-memory stores, and the PostgreSQL and MongoDB stores never advance batch state
+- Outbox storage ignores the caller's transaction, and dispatch is not claim-safe across workers
+- Inbox and revocation entries are never cleaned up, and Redis streams grow without bound
+
+### Incomplete Documented Features
+- Canvas: `Chain`, `Group`, and `Chord` define workflows, but nothing dispatches them or runs link and error callbacks
+- Sagas: the orchestrator is not registered by the DI extensions, Redis saga scripts read property names that do not match the stored JSON, and the PostgreSQL and MongoDB stores never mark sagas completed
+- Batches: `OnComplete` callbacks are not dispatched, and tasks are published before the batch record exists
+- Metrics: `DotCeleryInstrumentation` defines instruments, but the client and worker never record them (tracing works)
+- Dashboard: no built-in task query, queue stats, or metrics providers; workers do not register themselves; SignalR notifications are never raised; the middleware serves the UI page for API and hub routes unless endpoints are mapped first
+- Inbox deduplication: `UseInboxDeduplication()` never marks messages as processed, so duplicates still run
+- Beat: schedules without a previous run use a moving baseline (intervals over one day never fire, cron entries fire on startup), there is no leader election across instances, and `PersistState`/`StatePath` are unused
+- Circuit breaker: `UseCircuitBreaker()` registers a factory that nothing uses
+- Migrations: the migration runner is never invoked, and schema is created lazily without locking
+- Tenant context set by `TenantContextFilter` is not visible during task execution
+- Scoped signal handlers are resolved from the root service provider
+
+### Security Hardening
+- Replay protection for signed messages (timestamp and expiry checks)
+- Security validation before state writes and input deserialization, and dead-lettering of rejected messages (they are currently acknowledged)
+- Serializer options, including the deserialization allowlist, configurable through dependency injection
+- Dashboard: authorization before model binding, CSRF/origin checks on state-changing endpoints, and bounds on paging and bulk operations
+
+### Test Coverage
+- No tests exercise the worker consume/ack/retry/shutdown loop, the delayed-message and outbox dispatchers, or the inbox, tenant, and overlap filters
+- The in-memory broker and stores do not model redelivery, serialization round-trips, or concurrent updates; contract tests should run against real brokers and backends
+- No integration coverage for the Redis saga, inbox, outbox, and dead-letter stores, or for RabbitMQ connection loss
+- Analyzer DCEL001 reports task names that are not string literals (for example, constants) as empty
+
 ## Planned Features
 
 ### Brokers
 - Azure Service Bus broker
 - Amazon SQS broker
+- Broker contract extensions these require: lease renewal for long-running tasks, native delayed delivery, explicit dead-letter versus discard, and capability flags (priority, ordering, maximum message size)
 
 ### Backends
-- SQL Server result backend
+- SQL Server result backend (after the PostgreSQL gaps are fixed; share an ADO.NET base with a dialect layer)
 
 ### Serialization
-- Pluggable serializers (MessagePack/Protobuf)
+- Pluggable serializers (MessagePack/Protobuf); brokers currently hard-code the JSON envelope, and Redis saga scripts decode JSON server-side
+- Message compression
+- Verified AOT and trimming compatibility (`IsAotCompatible`, no reflection-based task invocation)
 
 ### Task Registration and Dispatch
-- Source generator for task registration and strongly-typed client helpers
+- Source generator for task registration and strongly-typed client helpers (replaces reflection in `AddTasksFromAssembly` and `CompiledTaskInvoker`)
 - Interceptors to reduce dispatch overhead
-- Extension members for fluent task signatures
+- Extension members for fluent task signatures (after Canvas execution ships)
 
 ### Worker/Execution
-- Inbox-based deduplication wired into worker execution (exactly-once semantics)
-- Connection pooling controls for brokers/backends
+- Exactly-once processing: atomic inbox claim committed together with result storage
+- Connection pooling controls for brokers/backends: shared connections across Redis stores, separate publish and consume connections with channel pooling for RabbitMQ, and shared `NpgsqlDataSource`/`MongoClient` instances across stores
 - Batch execution tasks (single-task processing of input batches)
 
 ### Security
-- Serialization allowlists
-- Message size limits and compression
+- Message size limits enforced at publish time and before deserialization
 
 ### CLI
 - `dotcelery` command-line tool (worker, beat, inspect, task management, queue ops)
