@@ -4,6 +4,7 @@ using DotCelery.Backend.Postgres.Storage;
 using DotCelery.Core.Storage;
 using DotCelery.Storage.Sql.Storage;
 using DotCelery.Tests.Conformance.Storage;
+using DotCelery.Tests.Conformance.Stores;
 using Npgsql;
 using NpgsqlTypes;
 using Testcontainers.PostgreSql;
@@ -102,6 +103,54 @@ public sealed class PostgresNotificationChannelTests(PostgresStorageFixture fixt
 [Collection(PostgresStorageTestGroup.Name)]
 public sealed class PostgresStorageProviderTests(PostgresStorageFixture fixture)
     : StorageProviderConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+}
+
+[Collection(PostgresStorageTestGroup.Name)]
+public sealed class PostgresDelayedMessageStoreTests(PostgresStorageFixture fixture)
+    : DelayedMessageStoreConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+}
+
+[Collection(PostgresStorageTestGroup.Name)]
+public sealed class PostgresOutboxStoreTests(PostgresStorageFixture fixture)
+    : OutboxStoreConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+}
+
+[Collection(PostgresStorageTestGroup.Name)]
+public sealed class PostgresSignalStoreTests(PostgresStorageFixture fixture)
+    : SignalStoreConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+}
+
+[Collection(PostgresStorageTestGroup.Name)]
+public sealed class PostgresRevocationStoreTests(PostgresStorageFixture fixture)
+    : RevocationStoreConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+}
+
+[Collection(PostgresStorageTestGroup.Name)]
+public sealed class PostgresLeaseBackedStoreTests(PostgresStorageFixture fixture)
+    : LeaseBackedStoreConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+}
+
+[Collection(PostgresStorageTestGroup.Name)]
+public sealed class PostgresWindowRateLimiterTests(PostgresStorageFixture fixture)
+    : WindowRateLimiterConformanceTests
 {
     protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
         ValueTask.FromResult(fixture.CreateProvider(timeProvider));

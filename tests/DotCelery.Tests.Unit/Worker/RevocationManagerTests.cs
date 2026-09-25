@@ -1,7 +1,8 @@
 namespace DotCelery.Tests.Unit.Worker;
 
-using DotCelery.Backend.InMemory.Revocation;
+using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Core.Models;
+using DotCelery.Core.Storage.Stores;
 using DotCelery.Worker;
 using DotCelery.Worker.Services;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -9,7 +10,7 @@ using Microsoft.Extensions.Options;
 
 public class RevocationManagerTests : IAsyncDisposable
 {
-    private readonly InMemoryRevocationStore _revocationStore = new();
+    private readonly RevocationStore _revocationStore = new(new InMemoryStorageProvider());
     private readonly RevocationManager _manager;
 
     public RevocationManagerTests()
@@ -101,18 +102,18 @@ public class RevocationManagerTests : IAsyncDisposable
     public async Task RegisterTask_WithPendingRevocation_CancelsImmediately()
     {
         var taskId = "pending-revoked-task";
-        await _revocationStore.RevokeAsync(
-            taskId,
-            new RevokeOptions { Terminate = true, Signal = CancellationSignal.Immediate }
-        );
-
-        // Start the manager to load pending revocations
+        var options = new RevokeOptions { Terminate = true, Signal = CancellationSignal.Immediate };
         await _manager.StartAsync(CancellationToken.None);
 
-        using var taskCts = _manager.RegisterTask(taskId, CancellationToken.None);
+        // The manager subscribes in the background, so revoke until it has received the revocation
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (_manager.GetRevocationOptions(taskId)?.Terminate != true)
+        {
+            await _revocationStore.RevokeAsync(taskId, options, cts.Token);
+            await Task.Delay(20, cts.Token);
+        }
 
-        // Give it a moment to process
-        await Task.Delay(50);
+        using var taskCts = _manager.RegisterTask(taskId, CancellationToken.None);
 
         Assert.True(taskCts.IsCancellationRequested);
 

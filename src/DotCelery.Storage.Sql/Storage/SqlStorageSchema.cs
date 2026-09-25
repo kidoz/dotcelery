@@ -148,6 +148,16 @@ public static class SqlStorageSchema
                 ),
             ]
         ),
+        new SqlMigration(
+            2,
+            "Record when leases were acquired",
+            [
+                new SchemaOperation.AddColumn(
+                    LeasesTable,
+                    SqlColumn.Timestamp("acquired_at", nullable: true)
+                ),
+            ]
+        ),
     ];
 
     /// <summary>

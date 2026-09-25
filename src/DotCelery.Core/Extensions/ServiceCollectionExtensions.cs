@@ -1,6 +1,10 @@
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Serialization;
+using DotCelery.Core.Storage;
+using DotCelery.Core.Storage.Stores;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace DotCelery.Core.Extensions;
 
@@ -24,6 +28,23 @@ public static class ServiceCollectionExtensions
 
         var builder = new DotCeleryBuilder(services);
         configure(builder);
+        return services;
+    }
+
+    /// <summary>
+    /// Adds the <see cref="StoragePurgeService"/>, which deletes expired entries from the
+    /// registered <see cref="IStorageProvider"/>, unless it is already added.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <returns>The service collection.</returns>
+    public static IServiceCollection AddStoragePurge(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddOptions();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, StoragePurgeService>()
+        );
         return services;
     }
 }

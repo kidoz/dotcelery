@@ -1,5 +1,5 @@
 using DotCelery.Backend.Postgres;
-using DotCelery.Backend.Postgres.Outbox;
+using DotCelery.Backend.Postgres.DeadLetter;
 using DotCelery.Backend.Postgres.Storage;
 using DotCelery.Storage.Sql.Migrations;
 using DotCelery.Storage.Sql.Schema;
@@ -114,8 +114,11 @@ public sealed class SqlMigrationTests
         // Applied migrations must never change. If this fails, restore the migration and
         // add a new one instead.
         Assert.Equal(
-            "f9a5773811851465f9d7bd49fe170c715dd4d4be1170af5ba8f5d352e13d8dbd",
-            Assert.Single(SqlStorageSchema.Migrations).Checksum
+            [
+                "f9a5773811851465f9d7bd49fe170c715dd4d4be1170af5ba8f5d352e13d8dbd",
+                "8ee558db6e39257b74ae5ba94980378f568f5e4c0c1a3d3c7d64b5f3b18ae654",
+            ],
+            SqlStorageSchema.Migrations.Select(m => m.Checksum)
         );
     }
 
@@ -247,22 +250,22 @@ public sealed class SqlMigrationTests
     [Fact]
     public void StoreModule_UsesConfiguredSchemaAndTableNames()
     {
-        var module = PostgresOutboxMigrations.CreateModule(
-            new PostgresOutboxStoreOptions
+        var module = PostgresDeadLetterMigrations.CreateModule(
+            new PostgresDeadLetterStoreOptions
             {
                 ConnectionString = ConnectionString,
                 Schema = "jobs",
-                TableName = "my_outbox",
+                TableName = "my_dead_letters",
             }
         );
 
-        Assert.Equal("outbox/my_outbox", module.Name);
+        Assert.Equal("dead-letters/my_dead_letters", module.Name);
         Assert.Equal("jobs", module.Schema);
         Assert.Contains(
             module.Migrations.SelectMany(m => m.Operations).OfType<SchemaOperation.ExecuteSql>(),
             s =>
                 s.Statement.Contains(
-                    "CREATE TABLE IF NOT EXISTS jobs.my_outbox",
+                    "CREATE TABLE IF NOT EXISTS jobs.my_dead_letters",
                     StringComparison.Ordinal
                 )
         );

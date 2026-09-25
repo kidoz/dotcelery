@@ -1,13 +1,14 @@
 namespace DotCelery.Tests.Unit.Worker;
 
 using DotCelery.Backend.InMemory;
-using DotCelery.Backend.InMemory.Partitioning;
+using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Attributes;
 using DotCelery.Core.Filters;
 using DotCelery.Core.Models;
 using DotCelery.Core.RateLimiting;
 using DotCelery.Core.Serialization;
+using DotCelery.Core.Storage.Stores;
 using DotCelery.Worker;
 using DotCelery.Worker.Execution;
 using DotCelery.Worker.Filters;
@@ -34,7 +35,7 @@ public class RequeueAndRateLimitTests : IAsyncDisposable
     public async Task RequeueDelay_IsSetByPartitionedExecutionFilter_WhenPartitionIsLocked()
     {
         // Arrange
-        var lockStore = new InMemoryPartitionLockStore();
+        var lockStore = new PartitionLockStore(new InMemoryStorageProvider());
         var options = new PartitionOptions { RequeueDelay = TimeSpan.FromSeconds(5) };
 
         var filter = new PartitionedExecutionFilter(
@@ -85,7 +86,7 @@ public class RequeueAndRateLimitTests : IAsyncDisposable
     public async Task RequeueDelay_IsNotSet_WhenPartitionIsAvailable()
     {
         // Arrange
-        var lockStore = new InMemoryPartitionLockStore();
+        var lockStore = new PartitionLockStore(new InMemoryStorageProvider());
         var options = new PartitionOptions { RequeueDelay = TimeSpan.FromSeconds(5) };
 
         var filter = new PartitionedExecutionFilter(
@@ -128,7 +129,7 @@ public class RequeueAndRateLimitTests : IAsyncDisposable
     public async Task PartitionLock_IsReleased_OnExecuted()
     {
         // Arrange
-        var lockStore = new InMemoryPartitionLockStore();
+        var lockStore = new PartitionLockStore(new InMemoryStorageProvider());
         var options = new PartitionOptions { RequeueDelay = TimeSpan.FromSeconds(5) };
 
         var filter = new PartitionedExecutionFilter(
@@ -200,7 +201,7 @@ public class RequeueAndRateLimitTests : IAsyncDisposable
         var registry = new TaskRegistry();
         registry.Register(typeof(RateLimitedTestTask), RateLimitedTestTask.TaskName);
 
-        var rateLimiter = new InMemoryRateLimiter();
+        var rateLimiter = new WindowRateLimiter(new InMemoryStorageProvider());
         var workerOptions = Options.Create(
             new WorkerOptions { EnableRevocation = false, EnableRateLimiting = true }
         );

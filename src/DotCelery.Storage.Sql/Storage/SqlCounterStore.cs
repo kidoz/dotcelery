@@ -150,7 +150,7 @@ internal sealed class SqlCounterStore : ICounterStore
             .ConfigureAwait(false);
     }
 
-    public async ValueTask<long> GetWindowCountAsync(
+    public async ValueTask<WindowSnapshot> GetWindowAsync(
         string key,
         TimeSpan window,
         CancellationToken cancellationToken = default
@@ -160,11 +160,11 @@ internal sealed class SqlCounterStore : ICounterStore
         StorageGuard.ThrowIfNotPositive(window);
 
         return await _sql.QuerySingleAsync(
-                _statements.WindowCount,
+                _statements.WindowSnapshot,
                 p =>
                     p.Text("key", key)
                         .Timestamp("window_start", _timeProvider.GetUtcNow() - window),
-                r => r.GetInt64(0),
+                r => new WindowSnapshot(r.GetInt64(0), SqlRead.NullableTimestamp(r, 1)),
                 cancellationToken
             )
             .ConfigureAwait(false);

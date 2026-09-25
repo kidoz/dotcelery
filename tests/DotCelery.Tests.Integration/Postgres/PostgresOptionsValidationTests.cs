@@ -1,9 +1,8 @@
 using DotCelery.Backend.Postgres.DeadLetter;
-using DotCelery.Backend.Postgres.DelayedMessageStore;
 using DotCelery.Backend.Postgres.Historical;
 using DotCelery.Backend.Postgres.Metrics;
-using DotCelery.Backend.Postgres.RateLimiting;
 using DotCelery.Backend.Postgres.Sagas;
+using DotCelery.Backend.Postgres.Storage;
 
 namespace DotCelery.Tests.Integration.Postgres;
 
@@ -29,11 +28,10 @@ public sealed class PostgresOptionsValidationTests
     [Theory]
     [InlineData("schema; DROP TABLE x; --")]
     [InlineData("name with spaces")]
-    public void DelayedMessageStoreOptions_RejectsBadIdentifiers(string bad)
+    public void StorageOptions_RejectsBadIdentifiers(string bad)
     {
-        var options = new PostgresDelayedMessageStoreOptions();
+        var options = new PostgresStorageOptions();
         Assert.Throws<ArgumentException>(() => options.Schema = bad);
-        Assert.Throws<ArgumentException>(() => options.TableName = bad);
     }
 
     [Fact]
@@ -60,16 +58,6 @@ public sealed class PostgresOptionsValidationTests
     }
 
     [Fact]
-    public void RateLimiterOptions_RejectsBadIdentifiers()
-    {
-        var options = new PostgresRateLimiterOptions();
-        const string bad = "x'; DROP TABLE y; --";
-
-        Assert.Throws<ArgumentException>(() => options.Schema = bad);
-        Assert.Throws<ArgumentException>(() => options.TableName = bad);
-    }
-
-    [Fact]
     public void HistoricalDataStoreOptions_RejectsBadIdentifiers()
     {
         var options = new PostgresHistoricalDataStoreOptions();
@@ -84,11 +72,7 @@ public sealed class PostgresOptionsValidationTests
     {
         // Valid identifiers should not throw on any options class.
         var deadLetter = new PostgresDeadLetterStoreOptions { Schema = "audit", TableName = "dl" };
-        var delayed = new PostgresDelayedMessageStoreOptions
-        {
-            Schema = "audit",
-            TableName = "delayed",
-        };
+        var storage = new PostgresStorageOptions { Schema = "audit" };
         var sagas = new PostgresSagaStoreOptions
         {
             Schema = "audit",
@@ -102,7 +86,6 @@ public sealed class PostgresOptionsValidationTests
             MetricsTableName = "qm",
             RunningTasksTableName = "rt",
         };
-        var rateLimit = new PostgresRateLimiterOptions { Schema = "audit", TableName = "rl" };
         var historical = new PostgresHistoricalDataStoreOptions
         {
             Schema = "audit",
@@ -110,10 +93,9 @@ public sealed class PostgresOptionsValidationTests
         };
 
         Assert.Equal("audit", deadLetter.Schema);
-        Assert.Equal("delayed", delayed.TableName);
+        Assert.Equal("audit", storage.Schema);
         Assert.Equal("s", sagas.SagasTableName);
         Assert.Equal("rt", metrics.RunningTasksTableName);
-        Assert.Equal("rl", rateLimit.TableName);
         Assert.Equal("ms", historical.SnapshotsTableName);
     }
 }

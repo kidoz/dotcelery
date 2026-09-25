@@ -140,6 +140,7 @@ internal sealed class SqlLeaseStore : ILeaseStore
             reader.GetString(0),
             reader.GetString(1),
             reader.GetInt64(2),
-            reader.GetFieldValue<DateTimeOffset>(3)
+            reader.GetFieldValue<DateTimeOffset>(3),
+            reader.GetFieldValue<DateTimeOffset>(4)
         );
 }

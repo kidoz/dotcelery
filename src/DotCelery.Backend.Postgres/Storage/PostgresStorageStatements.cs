@@ -119,32 +119,35 @@ public sealed class PostgresStorageStatements : SqlStorageStatements
             WHERE queue = @queue AND (claimed_until IS NULL OR claimed_until <= @now)
             """;
 
-        // The same owner keeps its token while the lease is live; any new holder gets a new one
+        // The same owner keeps its token and acquisition time while the lease is live; any new
+        // holder gets new ones. acquired_at was added by a later migration, so it may be null.
         LeaseAcquire = $"""
-            INSERT INTO {leases} AS l (key, owner, token, expires_at)
-            VALUES (@key, @owner, {nextToken}, @expires_at)
+            INSERT INTO {leases} AS l (key, owner, token, acquired_at, expires_at)
+            VALUES (@key, @owner, {nextToken}, @now, @expires_at)
             ON CONFLICT (key) DO UPDATE SET
                 token = CASE WHEN l.owner = EXCLUDED.owner AND l.expires_at > @now
                     THEN l.token ELSE EXCLUDED.token END,
+                acquired_at = CASE WHEN l.owner = EXCLUDED.owner AND l.expires_at > @now
+                    THEN l.acquired_at ELSE EXCLUDED.acquired_at END,
                 owner = EXCLUDED.owner,
                 expires_at = EXCLUDED.expires_at
             WHERE l.expires_at <= @now OR l.owner = EXCLUDED.owner
-            RETURNING key, owner, token, expires_at
+            RETURNING key, owner, token, COALESCE(acquired_at, expires_at), expires_at
             """;
 
         LeaseRenew = $"""
             UPDATE {leases} SET expires_at = @expires_at
             WHERE key = @key AND token = @token AND expires_at > @now
-            RETURNING key, owner, token, expires_at
+            RETURNING key, owner, token, COALESCE(acquired_at, expires_at), expires_at
             """;
 
         LeaseRelease = $"DELETE FROM {leases} WHERE key = @key AND token = @token";
 
         LeaseGet =
-            $"SELECT key, owner, token, expires_at FROM {leases} WHERE key = @key AND expires_at > @now";
+            $"SELECT key, owner, token, COALESCE(acquired_at, expires_at), expires_at FROM {leases} WHERE key = @key AND expires_at > @now";
 
         LeaseList = $"""
-            SELECT key, owner, token, expires_at FROM {leases}
+            SELECT key, owner, token, COALESCE(acquired_at, expires_at), expires_at FROM {leases}
             WHERE starts_with(key, @prefix) AND expires_at > @now
             ORDER BY key {Ordinal}
             """;
@@ -176,8 +179,8 @@ public sealed class PostgresStorageStatements : SqlStorageStatements
 
         WindowAdd = $"INSERT INTO {windowEvents} (key, occurred_at) VALUES (@key, @now)";
 
-        WindowCount =
-            $"SELECT COUNT(*) FROM {windowEvents} WHERE key = @key AND occurred_at > @window_start";
+        WindowSnapshot =
+            $"SELECT COUNT(*), MIN(occurred_at) FROM {windowEvents} WHERE key = @key AND occurred_at > @window_start";
 
         Purge =
         [
@@ -267,7 +270,7 @@ public sealed class PostgresStorageStatements : SqlStorageStatements
     public override string WindowAdd { get; }
 
     /// <inheritdoc />
-    public override string WindowCount { get; }
+    public override string WindowSnapshot { get; }
 
     /// <inheritdoc />
     public override IReadOnlyList<string> Purge { get; }

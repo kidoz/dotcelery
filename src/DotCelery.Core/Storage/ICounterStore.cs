@@ -55,13 +55,13 @@ public interface ICounterStore
     );
 
     /// <summary>
-    /// Counts the events recorded within the last <paramref name="window"/>.
+    /// Gets the events recorded within the last <paramref name="window"/>.
     /// </summary>
     /// <param name="key">The window key.</param>
     /// <param name="window">The window length.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The number of events.</returns>
-    ValueTask<long> GetWindowCountAsync(
+    /// <returns>The number of events and the time of the oldest.</returns>
+    ValueTask<WindowSnapshot> GetWindowAsync(
         string key,
         TimeSpan window,
         CancellationToken cancellationToken = default
@@ -77,3 +77,10 @@ public interface ICounterStore
 /// When the event was not recorded, how long until the oldest event leaves the window.
 /// </param>
 public readonly record struct WindowResult(bool Added, long Count, TimeSpan? RetryAfter);
+
+/// <summary>
+/// The events of a sliding window, from <see cref="ICounterStore.GetWindowAsync"/>.
+/// </summary>
+/// <param name="Count">The number of events within the window.</param>
+/// <param name="OldestEvent">The time of the oldest event within the window, if any.</param>
+public readonly record struct WindowSnapshot(long Count, DateTimeOffset? OldestEvent);

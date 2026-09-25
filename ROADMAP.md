@@ -32,19 +32,18 @@ but do not yet behave as documented.
 ### Delivery and Reliability
 - Redis broker: pending-message reclaim takes over messages that live workers are still processing (no lease renewal), and acknowledged entries are never deleted from streams
 - RabbitMQ broker: reconnect logic competes with the client's automatic recovery and can acknowledge on a different channel than the one that delivered the message; queue arguments (priority, queue type, dead-letter exchange) are fixed
-- Delayed messages are removed from the store before they are published (Redis, PostgreSQL), and MongoDB can dispatch the same message twice
+- Delayed messages are removed from the Redis store before they are published, and MongoDB can dispatch the same message twice
 - Redis stores open a new connection on reconnect without disposing the old one
 - Without a delay store, a message with a future ETA holds the worker's consume loop for up to 5 seconds before it is requeued
 - Hard time limits are cooperative; a task that ignores its cancellation token keeps its worker slot
 
 ### Backend Correctness
-- PostgreSQL rate limiter issues `SELECT COUNT(*) ... FOR UPDATE`, which PostgreSQL rejects
 - PostgreSQL `LISTEN/NOTIFY` sends the full result as the payload; results over 8000 bytes roll back the write
 - PostgreSQL and MongoDB: the client's `Pending` row makes `AsyncResult.GetAsync` return immediately, and the `Pending` write can overwrite a result that is already stored
 - Redis dead-letter store sets a TTL on the hash that holds every entry
 - Batch completion is a read-modify-write in the Redis and in-memory stores, and the PostgreSQL and MongoDB stores never advance batch state
-- Outbox storage ignores the caller's transaction, and dispatch is not claim-safe across workers
-- Inbox and revocation entries are never cleaned up, and Redis streams grow without bound
+- Outbox storage ignores the caller's transaction, and the Redis and MongoDB outbox stores are not claim-safe across workers
+- Redis and MongoDB inbox and revocation entries are never cleaned up, and Redis streams grow without bound
 
 ### Incomplete Documented Features
 - Canvas: `Chain`, `Group`, and `Chord` define workflows, but nothing dispatches them or runs link and error callbacks
@@ -65,8 +64,8 @@ but do not yet behave as documented.
 - Dashboard: authorization before model binding, CSRF/origin checks on state-changing endpoints, and bounds on paging and bulk operations
 
 ### Test Coverage
-- No tests exercise the worker consume/ack/retry/shutdown loop, the delayed-message and outbox dispatchers, or the inbox, tenant, and overlap filters
-- The in-memory broker and stores do not model redelivery, serialization round-trips, or concurrent updates; contract tests should run against real brokers and backends
+- No tests exercise the worker consume/ack/retry/shutdown loop, the delayed-message and outbox dispatchers, or the inbox, tenant, and overlap filters (the stores they use have conformance tests)
+- The in-memory broker and the in-memory stores not yet built on the storage primitives do not model redelivery, serialization round-trips, or concurrent updates; contract tests should run against real brokers and backends
 - No integration coverage for the Redis saga, inbox, outbox, and dead-letter stores, or for RabbitMQ connection loss
 - The per-store PostgreSQL implementations' statements are not checked against the migrated schema (the storage primitives' statements are)
 - Analyzer DCEL001 reports task names that are not string literals (for example, constants) as empty
@@ -74,7 +73,7 @@ but do not yet behave as documented.
 ## Planned Features
 
 ### Storage
-- Build every store once in Core on the storage primitives (`IStorageProvider`), so a backend implements only documents, leases, queues, counters, and notifications; the primitives, the in-memory provider, and the conformance tests exist
+- Build every store once in Core on the storage primitives (`IStorageProvider`), so a backend implements only documents, leases, queues, counters, and notifications; the delayed message, outbox, inbox, signal, revocation, partition lock, execution tracking, and rate limiting stores are done, and results, batches, sagas, dead letters, metrics, and historical data remain
 - Redis and MongoDB providers of the primitives; `DotCelery.Storage.Sql` and the PostgreSQL provider exist and pass the conformance tests
 - Remove the per-store PostgreSQL, Redis, and MongoDB implementations once every store is built on the primitives
 

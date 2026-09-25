@@ -1,27 +1,30 @@
 using DotCelery.Backend.InMemory.Batches;
-using DotCelery.Backend.InMemory.DelayedMessageStore;
-using DotCelery.Backend.InMemory.Execution;
 using DotCelery.Backend.InMemory.Metrics;
-using DotCelery.Backend.InMemory.Outbox;
-using DotCelery.Backend.InMemory.Partitioning;
-using DotCelery.Backend.InMemory.Revocation;
 using DotCelery.Backend.InMemory.Sagas;
-using DotCelery.Backend.InMemory.Signals;
+using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Batches;
 using DotCelery.Core.Execution;
 using DotCelery.Core.Extensions;
 using DotCelery.Core.MultiTenancy;
 using DotCelery.Core.Partitioning;
-using DotCelery.Core.RateLimiting;
 using DotCelery.Core.Sagas;
+using DotCelery.Core.Storage;
+using DotCelery.Core.Storage.Stores;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace DotCelery.Backend.InMemory.Extensions;
 
 /// <summary>
 /// Extension methods for configuring the in-memory backend.
 /// </summary>
+/// <remarks>
+/// The delayed message, revocation, outbox, inbox, signal, partition lock, execution tracking
+/// and rate limiting stores keep their data in one <see cref="InMemoryStorageProvider"/>
+/// (see <see cref="AddInMemoryStorage"/>). Their retention and timing are configured with
+/// <see cref="StorageStoreOptions"/>.
+/// </remarks>
 public static class InMemoryBackendExtensions
 {
     /// <summary>
@@ -35,13 +38,32 @@ public static class InMemoryBackendExtensions
     }
 
     /// <summary>
+    /// Adds the in-memory storage primitives (<see cref="IStorageProvider"/>) unless a storage
+    /// provider is already registered, and the <see cref="StoragePurgeService"/> that deletes
+    /// expired entries.
+    /// </summary>
+    /// <param name="builder">The DotCelery builder.</param>
+    /// <returns>The builder.</returns>
+    public static DotCeleryBuilder AddInMemoryStorage(this DotCeleryBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.Services.TryAddSingleton<IStorageProvider>(sp => new InMemoryStorageProvider(
+            sp.GetService<TimeProvider>()
+        ));
+        builder.Services.AddStoragePurge();
+        return builder;
+    }
+
+    /// <summary>
     /// Adds the in-memory delayed message store for ETA/countdown support.
     /// </summary>
     /// <param name="builder">The DotCelery builder.</param>
     /// <returns>The builder.</returns>
     public static DotCeleryBuilder AddInMemoryDelayedMessageStore(this DotCeleryBuilder builder)
     {
-        builder.Services.AddSingleton<IDelayedMessageStore, InMemoryDelayedMessageStore>();
+        builder.AddInMemoryStorage();
+        builder.Services.AddSingleton<IDelayedMessageStore, DelayedMessageStore>();
         return builder;
     }
 
@@ -52,7 +74,8 @@ public static class InMemoryBackendExtensions
     /// <returns>The builder.</returns>
     public static DotCeleryBuilder AddInMemoryRevocationStore(this DotCeleryBuilder builder)
     {
-        builder.Services.AddSingleton<IRevocationStore, InMemoryRevocationStore>();
+        builder.AddInMemoryStorage();
+        builder.Services.AddSingleton<IRevocationStore, RevocationStore>();
         return builder;
     }
 
@@ -63,7 +86,8 @@ public static class InMemoryBackendExtensions
     /// <returns>The builder.</returns>
     public static DotCeleryBuilder AddInMemoryRateLimiter(this DotCeleryBuilder builder)
     {
-        builder.Services.AddSingleton<IRateLimiter, InMemoryRateLimiter>();
+        builder.AddInMemoryStorage();
+        builder.Services.AddSingleton<IRateLimiter, WindowRateLimiter>();
         return builder;
     }
 
@@ -99,7 +123,8 @@ public static class InMemoryBackendExtensions
     /// <returns>The builder.</returns>
     public static DotCeleryBuilder AddInMemoryOutboxStore(this DotCeleryBuilder builder)
     {
-        builder.Services.AddSingleton<IOutboxStore, InMemoryOutboxStore>();
+        builder.AddInMemoryStorage();
+        builder.Services.AddSingleton<IOutboxStore, OutboxStore>();
         return builder;
     }
 
@@ -110,7 +135,8 @@ public static class InMemoryBackendExtensions
     /// <returns>The builder.</returns>
     public static DotCeleryBuilder AddInMemoryInboxStore(this DotCeleryBuilder builder)
     {
-        builder.Services.AddSingleton<IInboxStore, InMemoryInboxStore>();
+        builder.AddInMemoryStorage();
+        builder.Services.AddSingleton<IInboxStore, InboxStore>();
         return builder;
     }
 
@@ -132,7 +158,8 @@ public static class InMemoryBackendExtensions
     /// <returns>The builder.</returns>
     public static DotCeleryBuilder AddInMemorySignalStore(this DotCeleryBuilder builder)
     {
-        builder.Services.AddSingleton<ISignalStore, InMemorySignalStore>();
+        builder.AddInMemoryStorage();
+        builder.Services.AddSingleton<ISignalStore, SignalStore>();
         return builder;
     }
 
@@ -143,7 +170,8 @@ public static class InMemoryBackendExtensions
     /// <returns>The builder.</returns>
     public static DotCeleryBuilder AddInMemoryPartitionLockStore(this DotCeleryBuilder builder)
     {
-        builder.Services.AddSingleton<IPartitionLockStore, InMemoryPartitionLockStore>();
+        builder.AddInMemoryStorage();
+        builder.Services.AddSingleton<IPartitionLockStore, PartitionLockStore>();
         return builder;
     }
 
@@ -154,7 +182,8 @@ public static class InMemoryBackendExtensions
     /// <returns>The builder.</returns>
     public static DotCeleryBuilder AddInMemoryTaskExecutionTracker(this DotCeleryBuilder builder)
     {
-        builder.Services.AddSingleton<ITaskExecutionTracker, InMemoryTaskExecutionTracker>();
+        builder.AddInMemoryStorage();
+        builder.Services.AddSingleton<ITaskExecutionTracker, TaskExecutionTracker>();
         return builder;
     }
 

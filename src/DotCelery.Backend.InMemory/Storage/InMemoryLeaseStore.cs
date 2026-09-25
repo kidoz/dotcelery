@@ -44,7 +44,7 @@ internal sealed class InMemoryLeaseStore : ILeaseStore
                 return ValueTask.FromResult<Lease?>(extended);
             }
 
-            var lease = new Lease(key, owner, ++_lastToken, now + duration);
+            var lease = new Lease(key, owner, ++_lastToken, now, now + duration);
             _leases[key] = lease;
             return ValueTask.FromResult<Lease?>(lease);
         }

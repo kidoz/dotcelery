@@ -21,6 +21,7 @@ public abstract class LeaseStoreConformanceTests : StorageConformanceTests
         Assert.NotNull(lease);
         Assert.Equal(Key("a"), lease.Key);
         Assert.Equal("owner-1", lease.Owner);
+        Assert.Equal(Start, lease.AcquiredAt);
         Assert.Equal(Start + Duration, lease.ExpiresAt);
         Assert.Equal(lease, await Leases.GetAsync(Key("a")));
     }
@@ -43,6 +44,7 @@ public abstract class LeaseStoreConformanceTests : StorageConformanceTests
 
         Assert.NotNull(second);
         Assert.Equal(first!.Token, second.Token);
+        Assert.Equal(Start, second.AcquiredAt);
         Assert.Equal(Start.AddSeconds(10) + Duration, second.ExpiresAt);
     }
 
@@ -56,6 +58,7 @@ public abstract class LeaseStoreConformanceTests : StorageConformanceTests
 
         Assert.NotNull(second);
         Assert.True(second.Token > first!.Token);
+        Assert.Equal(Start + Duration, second.AcquiredAt);
     }
 
     [Fact]
@@ -68,6 +71,7 @@ public abstract class LeaseStoreConformanceTests : StorageConformanceTests
 
         Assert.NotNull(renewed);
         Assert.Equal(lease!.Token, renewed.Token);
+        Assert.Equal(Start, renewed.AcquiredAt);
         Assert.Equal(Start.AddSeconds(10) + Duration, renewed.ExpiresAt);
     }
 

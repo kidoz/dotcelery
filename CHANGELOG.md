@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AddPostgres...` registration methods for every PostgreSQL store; each also registers the store's migrations
 - Storage primitives in `DotCelery.Core.Storage` (`IStorageProvider` with documents, leases, queues, counters, and notifications), an in-memory provider, and conformance tests that every provider runs; stores will be rebuilt on these primitives
 - PostgreSQL provider of the storage primitives (`AddPostgresStorage`), implemented once in `DotCelery.Storage.Sql` with the PostgreSQL dialect and LISTEN/NOTIFY notifications; every one of its statements is checked against the migrated schema in tests
+- The delayed message, outbox, inbox, signal, revocation, partition lock, execution tracking, and rate limiting stores are built once in `DotCelery.Core.Storage.Stores` on the storage primitives, and run the same conformance tests on the in-memory and PostgreSQL providers
+- `StorageStoreOptions` for those stores: claim timeout, outbox retries, retention, revocation polling, and a `Prefix` that keeps applications sharing storage apart
+- `StoragePurgeService` deletes expired storage entries every `StorageStoreOptions.PurgeInterval`; `AddInMemoryStorage` and `AddPostgresStorage` register it
 
 ### Changed
 - PostgreSQL stores no longer create their tables on first use; run migrations first (automatic with a generic host)
@@ -21,11 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Graceful shutdown stops taking messages first, returns prefetched messages to the broker, and closes the broker consumer only after every in-flight message is settled
 - The worker stops with an error when the broker ends the message stream unexpectedly, instead of running without a consumer
 - The Redis broker reads again immediately while messages are available; `RedisBrokerOptions.BlockTimeout` applies only after a read returns nothing
+- The in-memory and PostgreSQL registrations of those eight stores use the stores built on the storage primitives. The `AddPostgres...` methods for them take `PostgresStorageOptions`, and their data moves from per-store tables to the storage tables
+- In-memory revocation subscribers no longer receive revocations made before they subscribed, as with the other providers
 
 ### Removed
 - `AutoCreateTables` from every PostgreSQL store's options
 - The unused `DotCelery.Core.Migrations` framework and the Redis and MongoDB migration stores
 - The `DotCelery.Build.SqlValidator` tool, which did not validate any SQL in this repository
+- The per-store in-memory and PostgreSQL implementations of those eight stores and their options, and `InMemoryRateLimiter` from Core
 
 ### Fixed
 - The worker no longer drops a message when the result backend, revocation store, rate limiter, or retry publish fails; it returns the message to the broker
@@ -35,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Message signing is thread-safe; the shared `HMACSHA256` instance could produce invalid signatures under concurrent use
 - The Redis broker keeps consuming after transient errors and recreates a missing consumer group
 - The Redis broker returns buffered messages to their streams when consumption stops, adds a requeued copy before acknowledging the original, and no longer replaces its connection while reconnecting
+- Delayed messages stay in the in-memory and PostgreSQL stores until they are dispatched; a dispatcher that fails or stops mid-batch leaves them to be claimed again
+- Outbox messages and signals are claimed, so several dispatchers never handle the same one at once, and one whose dispatcher stops is delivered again after the claim timeout; outbox attempts count only failed publishes
+- The PostgreSQL rate limiter no longer fails on every call, and the rate limit window is shared by every worker using the same storage
+- Inbox and revocation entries expire, and task execution tracking and partition locks cannot be released by a task that no longer holds them
 
 ## [0.1.0] - 2026-01-12
 

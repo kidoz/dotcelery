@@ -77,7 +77,7 @@ public abstract class CounterStoreConformanceTests : StorageConformanceTests
     }
 
     [Fact]
-    public async Task GetWindowCountAsync_CountsEventsWithinTheWindow()
+    public async Task GetWindowAsync_ReturnsEventsWithinTheWindow()
     {
         await Add(10);
         Time.Advance(TimeSpan.FromSeconds(30));
@@ -86,8 +86,18 @@ public abstract class CounterStoreConformanceTests : StorageConformanceTests
         await Add(10);
         Time.Advance(TimeSpan.FromSeconds(15));
 
-        Assert.Equal(2, await Counters.GetWindowCountAsync(_key, Window));
-        Assert.Equal(1, await Counters.GetWindowCountAsync(_key, TimeSpan.FromSeconds(20)));
+        Assert.Equal(
+            new WindowSnapshot(2, Start.AddSeconds(30)),
+            await Counters.GetWindowAsync(_key, Window)
+        );
+        Assert.Equal(
+            new WindowSnapshot(1, Start.AddSeconds(45)),
+            await Counters.GetWindowAsync(_key, TimeSpan.FromSeconds(20))
+        );
+        Assert.Equal(
+            new WindowSnapshot(0, null),
+            await Counters.GetWindowAsync(Unique("counter"), Window)
+        );
     }
 
     [Fact]
@@ -104,7 +114,7 @@ public abstract class CounterStoreConformanceTests : StorageConformanceTests
         var results = await RunConcurrentlyAsync(50, async _ => await Add(10));
 
         Assert.Equal(10, results.Count(r => r.Added));
-        Assert.Equal(10, await Counters.GetWindowCountAsync(_key, Window));
+        Assert.Equal(10, (await Counters.GetWindowAsync(_key, Window)).Count);
     }
 
     private ValueTask<WindowResult> Add(int limit) =>

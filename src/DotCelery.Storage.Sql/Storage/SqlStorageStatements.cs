@@ -96,7 +96,8 @@ public abstract class SqlStorageStatements
     /// <summary>
     /// Gets a statement that acquires a lease if the key is free, expired, or already held by
     /// <c>@owner</c> (which keeps its token), and returns it. Parameters: <c>@key</c>,
-    /// <c>@owner</c>, <c>@expires_at</c>, <c>@now</c>. Columns: key, owner, token, expires_at.
+    /// <c>@owner</c>, <c>@expires_at</c>, <c>@now</c>. Columns: key, owner, token, acquired_at,
+    /// expires_at. The same owner keeps its token and acquisition time; a new holder gets new ones.
     /// </summary>
     public abstract string LeaseAcquire { get; }
 
@@ -165,10 +166,10 @@ public abstract class SqlStorageStatements
     public abstract string WindowAdd { get; }
 
     /// <summary>
-    /// Gets a query for the number of events after <c>@window_start</c>.
+    /// Gets a query for the number of events after <c>@window_start</c> and the oldest of them.
     /// Parameters: <c>@key</c>, <c>@window_start</c>.
     /// </summary>
-    public abstract string WindowCount { get; }
+    public abstract string WindowSnapshot { get; }
 
     /// <summary>
     /// Gets the statements that delete expired rows and events that have left their window.
@@ -236,7 +237,7 @@ public abstract class SqlStorageStatements
         yield return new(nameof(WindowPrune), WindowPrune);
         yield return new(nameof(WindowState), WindowState);
         yield return new(nameof(WindowAdd), WindowAdd);
-        yield return new(nameof(WindowCount), WindowCount);
+        yield return new(nameof(WindowSnapshot), WindowSnapshot);
         yield return new(nameof(HealthCheck), HealthCheck);
 
         for (var i = 0; i < Purge.Count; i++)

@@ -1,11 +1,12 @@
 namespace DotCelery.Tests.Unit.Client;
 
 using DotCelery.Backend.InMemory;
-using DotCelery.Backend.InMemory.Revocation;
+using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Broker.InMemory;
 using DotCelery.Client;
 using DotCelery.Core.Models;
 using DotCelery.Core.Serialization;
+using DotCelery.Core.Storage.Stores;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -13,7 +14,7 @@ public class CeleryClientRevocationTests : IAsyncDisposable
 {
     private readonly InMemoryBroker _broker = new();
     private readonly InMemoryResultBackend _backend = new();
-    private readonly InMemoryRevocationStore _revocationStore = new();
+    private readonly RevocationStore _revocationStore = new(new InMemoryStorageProvider());
     private readonly JsonMessageSerializer _serializer = new();
     private readonly CeleryClient _client;
 
@@ -164,11 +165,16 @@ public class CeleryClientRevocationTests : IAsyncDisposable
         await _backend.UpdateStateAsync(taskId, TaskState.Pending);
 
         var options = new RevokeOptions { Terminate = true, Signal = CancellationSignal.Immediate };
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var revocations = _revocationStore
+            .SubscribeAsync(cts.Token)
+            .GetAsyncEnumerator(cts.Token);
+        var next = revocations.MoveNextAsync();
 
         await _client.RevokeAsync(taskId, options);
 
-        var storedOptions = _revocationStore.GetOptions(taskId);
-        Assert.NotNull(storedOptions);
+        Assert.True(await next);
+        var storedOptions = revocations.Current.Options;
         Assert.True(storedOptions.Terminate);
         Assert.Equal(CancellationSignal.Immediate, storedOptions.Signal);
     }

@@ -1,22 +1,17 @@
 using DotCelery.Backend.Postgres.Batches;
 using DotCelery.Backend.Postgres.DeadLetter;
-using DotCelery.Backend.Postgres.DelayedMessageStore;
-using DotCelery.Backend.Postgres.Execution;
 using DotCelery.Backend.Postgres.Historical;
 using DotCelery.Backend.Postgres.Metrics;
-using DotCelery.Backend.Postgres.Outbox;
-using DotCelery.Backend.Postgres.Partitioning;
-using DotCelery.Backend.Postgres.RateLimiting;
-using DotCelery.Backend.Postgres.Revocation;
 using DotCelery.Backend.Postgres.Sagas;
-using DotCelery.Backend.Postgres.Signals;
 using DotCelery.Backend.Postgres.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Batches;
 using DotCelery.Core.Execution;
+using DotCelery.Core.Extensions;
 using DotCelery.Core.Partitioning;
 using DotCelery.Core.Sagas;
 using DotCelery.Core.Storage;
+using DotCelery.Core.Storage.Stores;
 using DotCelery.Storage.Sql;
 using DotCelery.Storage.Sql.Execution;
 using DotCelery.Storage.Sql.Extensions;
@@ -31,9 +26,18 @@ namespace DotCelery.Backend.Postgres.Extensions;
 /// Extension methods for registering PostgreSQL stores.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Each store registration also registers the migrations for the store's tables. Pending
 /// migrations are applied when the host starts (see <see cref="AddPostgresMigrations"/>).
 /// Stores registered another way have no tables unless their migrations are registered too.
+/// </para>
+/// <para>
+/// The delayed message, revocation, outbox, inbox, signal, partition lock, execution tracking
+/// and rate limiting stores share the storage primitives added by
+/// <see cref="AddPostgresStorage"/>, so they share one <see cref="PostgresStorageOptions"/>
+/// whichever registration configures it. Their retention and timing are configured with
+/// <see cref="StorageStoreOptions"/>.
+/// </para>
 /// </remarks>
 public static class ServiceCollectionExtensions
 {
@@ -74,8 +78,8 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Adds the PostgreSQL storage primitives (<see cref="IStorageProvider"/>) and the
-    /// migrations for their tables.
+    /// Adds the PostgreSQL storage primitives (<see cref="IStorageProvider"/>), the migrations
+    /// for their tables, and the <see cref="StoragePurgeService"/> that deletes expired rows.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Optional configuration action.</param>
@@ -108,6 +112,7 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<IOptions<PostgresStorageOptions>>().Value
             )
         );
+        services.AddStoragePurge();
 
         return services;
     }
@@ -150,12 +155,8 @@ public static class ServiceCollectionExtensions
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddPostgresOutboxStore(
         this IServiceCollection services,
-        Action<PostgresOutboxStoreOptions>? configure = null
-    ) =>
-        services.AddPostgresStore<IOutboxStore, PostgresOutboxStore, PostgresOutboxStoreOptions>(
-            configure,
-            PostgresOutboxMigrations.CreateModule
-        );
+        Action<PostgresStorageOptions>? configure = null
+    ) => services.AddPostgresStorageStore<IOutboxStore, OutboxStore>(configure);
 
     /// <summary>
     /// Adds the PostgreSQL inbox store.
@@ -165,12 +166,8 @@ public static class ServiceCollectionExtensions
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddPostgresInboxStore(
         this IServiceCollection services,
-        Action<PostgresInboxStoreOptions>? configure = null
-    ) =>
-        services.AddPostgresStore<IInboxStore, PostgresInboxStore, PostgresInboxStoreOptions>(
-            configure,
-            PostgresInboxMigrations.CreateModule
-        );
+        Action<PostgresStorageOptions>? configure = null
+    ) => services.AddPostgresStorageStore<IInboxStore, InboxStore>(configure);
 
     /// <summary>
     /// Adds the PostgreSQL dead letter store.
@@ -196,13 +193,8 @@ public static class ServiceCollectionExtensions
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddPostgresDelayedMessageStore(
         this IServiceCollection services,
-        Action<PostgresDelayedMessageStoreOptions>? configure = null
-    ) =>
-        services.AddPostgresStore<
-            IDelayedMessageStore,
-            PostgresDelayedMessageStore,
-            PostgresDelayedMessageStoreOptions
-        >(configure, PostgresDelayedMessageMigrations.CreateModule);
+        Action<PostgresStorageOptions>? configure = null
+    ) => services.AddPostgresStorageStore<IDelayedMessageStore, DelayedMessageStore>(configure);
 
     /// <summary>
     /// Adds the PostgreSQL revocation store.
@@ -212,13 +204,8 @@ public static class ServiceCollectionExtensions
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddPostgresRevocationStore(
         this IServiceCollection services,
-        Action<PostgresRevocationStoreOptions>? configure = null
-    ) =>
-        services.AddPostgresStore<
-            IRevocationStore,
-            PostgresRevocationStore,
-            PostgresRevocationStoreOptions
-        >(configure, PostgresRevocationMigrations.CreateModule);
+        Action<PostgresStorageOptions>? configure = null
+    ) => services.AddPostgresStorageStore<IRevocationStore, RevocationStore>(configure);
 
     /// <summary>
     /// Adds the PostgreSQL rate limiter.
@@ -228,12 +215,8 @@ public static class ServiceCollectionExtensions
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddPostgresRateLimiter(
         this IServiceCollection services,
-        Action<PostgresRateLimiterOptions>? configure = null
-    ) =>
-        services.AddPostgresStore<IRateLimiter, PostgresRateLimiter, PostgresRateLimiterOptions>(
-            configure,
-            PostgresRateLimiterMigrations.CreateModule
-        );
+        Action<PostgresStorageOptions>? configure = null
+    ) => services.AddPostgresStorageStore<IRateLimiter, WindowRateLimiter>(configure);
 
     /// <summary>
     /// Adds the PostgreSQL signal store.
@@ -243,12 +226,8 @@ public static class ServiceCollectionExtensions
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddPostgresSignalStore(
         this IServiceCollection services,
-        Action<PostgresSignalStoreOptions>? configure = null
-    ) =>
-        services.AddPostgresStore<ISignalStore, PostgresSignalStore, PostgresSignalStoreOptions>(
-            configure,
-            PostgresSignalMigrations.CreateModule
-        );
+        Action<PostgresStorageOptions>? configure = null
+    ) => services.AddPostgresStorageStore<ISignalStore, SignalStore>(configure);
 
     /// <summary>
     /// Adds the PostgreSQL batch store.
@@ -288,13 +267,8 @@ public static class ServiceCollectionExtensions
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddPostgresPartitionLockStore(
         this IServiceCollection services,
-        Action<PostgresPartitionLockStoreOptions>? configure = null
-    ) =>
-        services.AddPostgresStore<
-            IPartitionLockStore,
-            PostgresPartitionLockStore,
-            PostgresPartitionLockStoreOptions
-        >(configure, PostgresPartitionLockMigrations.CreateModule);
+        Action<PostgresStorageOptions>? configure = null
+    ) => services.AddPostgresStorageStore<IPartitionLockStore, PartitionLockStore>(configure);
 
     /// <summary>
     /// Adds the PostgreSQL task execution tracker.
@@ -304,13 +278,8 @@ public static class ServiceCollectionExtensions
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddPostgresTaskExecutionTracker(
         this IServiceCollection services,
-        Action<PostgresTaskExecutionTrackerOptions>? configure = null
-    ) =>
-        services.AddPostgresStore<
-            ITaskExecutionTracker,
-            PostgresTaskExecutionTracker,
-            PostgresTaskExecutionTrackerOptions
-        >(configure, PostgresTaskExecutionTrackerMigrations.CreateModule);
+        Action<PostgresStorageOptions>? configure = null
+    ) => services.AddPostgresStorageStore<ITaskExecutionTracker, TaskExecutionTracker>(configure);
 
     /// <summary>
     /// Adds the PostgreSQL queue metrics store.
@@ -342,6 +311,19 @@ public static class ServiceCollectionExtensions
             PostgresHistoricalDataStore,
             PostgresHistoricalDataStoreOptions
         >(configure, PostgresHistoricalDataMigrations.CreateModule);
+
+    private static IServiceCollection AddPostgresStorageStore<TService, TImplementation>(
+        this IServiceCollection services,
+        Action<PostgresStorageOptions>? configure
+    )
+        where TService : class
+        where TImplementation : class, TService
+    {
+        services.AddPostgresStorage(configure);
+        services.AddSingleton<TService, TImplementation>();
+
+        return services;
+    }
 
     private static IServiceCollection AddPostgresStore<TService, TImplementation, TOptions>(
         this IServiceCollection services,

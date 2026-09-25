@@ -1,19 +1,20 @@
 using DotCelery.Backend.Postgres;
 using DotCelery.Backend.Postgres.Batches;
 using DotCelery.Backend.Postgres.DeadLetter;
-using DotCelery.Backend.Postgres.DelayedMessageStore;
-using DotCelery.Backend.Postgres.Execution;
 using DotCelery.Backend.Postgres.Extensions;
 using DotCelery.Backend.Postgres.Historical;
 using DotCelery.Backend.Postgres.Metrics;
-using DotCelery.Backend.Postgres.Outbox;
-using DotCelery.Backend.Postgres.Partitioning;
-using DotCelery.Backend.Postgres.RateLimiting;
-using DotCelery.Backend.Postgres.Revocation;
 using DotCelery.Backend.Postgres.Sagas;
-using DotCelery.Backend.Postgres.Signals;
+using DotCelery.Backend.Postgres.Storage;
 using DotCelery.Core.Abstractions;
+using DotCelery.Core.Execution;
+using DotCelery.Core.Models;
+using DotCelery.Core.Partitioning;
+using DotCelery.Core.RateLimiting;
+using DotCelery.Core.Storage;
+using DotCelery.Core.Storage.Stores;
 using DotCelery.Storage.Sql.Migrations;
+using DotCelery.Storage.Sql.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -56,14 +57,16 @@ public sealed class PostgresMigrationIntegrationTests : IAsyncLifetime
     {
         var (modules, tables) = AllStores("celery_jobs");
 
+        var migrations = modules.Sum(m => m.Migrations.Count);
+
         var applied = await CreateMigrator(_dataSources, modules).MigrateAsync();
 
-        Assert.Equal(modules.Count, applied);
+        Assert.Equal(migrations, applied);
         Assert.Equal(
             tables.Append("dotcelery_migrations").Order(),
             await GetTablesAsync("celery_jobs")
         );
-        Assert.Equal(modules.Count, await CountHistoryAsync("celery_jobs"));
+        Assert.Equal(migrations, await CountHistoryAsync("celery_jobs"));
     }
 
     [Fact]
@@ -93,8 +96,9 @@ public sealed class PostgresMigrationIntegrationTests : IAsyncLifetime
                 processes.Select(p => CreateMigrator(p, modules).MigrateAsync())
             );
 
-            Assert.Equal(modules.Count, applied.Sum());
-            Assert.Equal(modules.Count, await CountHistoryAsync("public"));
+            var migrations = modules.Sum(m => m.Migrations.Count);
+            Assert.Equal(migrations, applied.Sum());
+            Assert.Equal(migrations, await CountHistoryAsync("public"));
         }
         finally
         {
@@ -160,7 +164,7 @@ public sealed class PostgresMigrationIntegrationTests : IAsyncLifetime
 
         var outbox = services.GetRequiredService<IOutboxStore>();
         Assert.Equal(0, await outbox.GetPendingCountAsync());
-        Assert.Contains("celery_outbox", await GetTablesAsync("hosted"));
+        Assert.Contains(SqlStorageSchema.QueueItemsTable, await GetTablesAsync("hosted"));
         Assert.Contains("celery_task_results", await GetTablesAsync("hosted"));
     }
 
@@ -172,6 +176,74 @@ public sealed class PostgresMigrationIntegrationTests : IAsyncLifetime
         await StartHostedServicesAsync(services);
 
         Assert.Empty(await GetTablesAsync("hosted"));
+    }
+
+    [Fact]
+    public async Task AddPostgresStores_ShareOneStorageProviderAndWork()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        Action<PostgresStorageOptions> configure = o =>
+        {
+            o.ConnectionString = _connectionString;
+            o.Schema = "shared";
+        };
+        services
+            .AddPostgresDelayedMessageStore(configure)
+            .AddPostgresRevocationStore(configure)
+            .AddPostgresRateLimiter(configure)
+            .AddPostgresOutboxStore(configure)
+            .AddPostgresInboxStore(configure)
+            .AddPostgresSignalStore(configure)
+            .AddPostgresPartitionLockStore(configure)
+            .AddPostgresTaskExecutionTracker(configure);
+        await using var provider = services.BuildServiceProvider();
+
+        await StartHostedServicesAsync(provider);
+
+        Assert.Single(provider.GetServices<IStorageProvider>());
+        Assert.Single(provider.GetServices<IHostedService>().OfType<StoragePurgeService>());
+        Assert.Single(provider.GetRequiredService<SqlMigrator>().Modules);
+        await provider
+            .GetRequiredService<IDelayedMessageStore>()
+            .AddAsync(
+                new TaskMessage
+                {
+                    Id = "task",
+                    Task = "tests.task",
+                    Args = [],
+                    ContentType = "application/json",
+                    Timestamp = DateTimeOffset.UtcNow,
+                },
+                DateTimeOffset.UtcNow.AddHours(1)
+            );
+        Assert.Equal(
+            1,
+            await provider.GetRequiredService<IDelayedMessageStore>().GetPendingCountAsync()
+        );
+        await provider.GetRequiredService<IRevocationStore>().RevokeAsync("task");
+        Assert.True(await provider.GetRequiredService<IRevocationStore>().IsRevokedAsync("task"));
+        Assert.True(
+            (
+                await provider
+                    .GetRequiredService<IRateLimiter>()
+                    .TryAcquireAsync("api", RateLimitPolicy.PerMinute(1))
+            ).IsAcquired
+        );
+        Assert.Equal(0, await provider.GetRequiredService<IOutboxStore>().GetPendingCountAsync());
+        await provider.GetRequiredService<IInboxStore>().MarkProcessedAsync("message");
+        Assert.True(await provider.GetRequiredService<IInboxStore>().IsProcessedAsync("message"));
+        Assert.Equal(0, await provider.GetRequiredService<ISignalStore>().GetPendingCountAsync());
+        Assert.True(
+            await provider
+                .GetRequiredService<IPartitionLockStore>()
+                .TryAcquireAsync("partition", "task", TimeSpan.FromMinutes(1))
+        );
+        Assert.True(
+            await provider
+                .GetRequiredService<ITaskExecutionTracker>()
+                .TryStartAsync("tests.task", "task")
+        );
     }
 
     private ServiceProvider CreateServices(bool runAtStartup)
@@ -210,37 +282,12 @@ public sealed class PostgresMigrationIntegrationTests : IAsyncLifetime
             ConnectionString = _connectionString,
             Schema = schema,
         };
-        var outbox = new PostgresOutboxStoreOptions
-        {
-            ConnectionString = _connectionString,
-            Schema = schema,
-        };
-        var inbox = new PostgresInboxStoreOptions
+        var storage = new PostgresStorageOptions
         {
             ConnectionString = _connectionString,
             Schema = schema,
         };
         var deadLetters = new PostgresDeadLetterStoreOptions
-        {
-            ConnectionString = _connectionString,
-            Schema = schema,
-        };
-        var delayed = new PostgresDelayedMessageStoreOptions
-        {
-            ConnectionString = _connectionString,
-            Schema = schema,
-        };
-        var revocations = new PostgresRevocationStoreOptions
-        {
-            ConnectionString = _connectionString,
-            Schema = schema,
-        };
-        var rateLimits = new PostgresRateLimiterOptions
-        {
-            ConnectionString = _connectionString,
-            Schema = schema,
-        };
-        var signals = new PostgresSignalStoreOptions
         {
             ConnectionString = _connectionString,
             Schema = schema,
@@ -251,16 +298,6 @@ public sealed class PostgresMigrationIntegrationTests : IAsyncLifetime
             Schema = schema,
         };
         var sagas = new PostgresSagaStoreOptions
-        {
-            ConnectionString = _connectionString,
-            Schema = schema,
-        };
-        var partitionLocks = new PostgresPartitionLockStoreOptions
-        {
-            ConnectionString = _connectionString,
-            Schema = schema,
-        };
-        var executions = new PostgresTaskExecutionTrackerOptions
         {
             ConnectionString = _connectionString,
             Schema = schema,
@@ -279,36 +316,27 @@ public sealed class PostgresMigrationIntegrationTests : IAsyncLifetime
         return (
             [
                 PostgresResultBackendMigrations.CreateModule(results),
-                PostgresOutboxMigrations.CreateModule(outbox),
-                PostgresInboxMigrations.CreateModule(inbox),
+                PostgresStorage.CreateModule(storage),
                 PostgresDeadLetterMigrations.CreateModule(deadLetters),
-                PostgresDelayedMessageMigrations.CreateModule(delayed),
-                PostgresRevocationMigrations.CreateModule(revocations),
-                PostgresRateLimiterMigrations.CreateModule(rateLimits),
-                PostgresSignalMigrations.CreateModule(signals),
                 PostgresBatchMigrations.CreateModule(batches),
                 PostgresSagaMigrations.CreateModule(sagas),
-                PostgresPartitionLockMigrations.CreateModule(partitionLocks),
-                PostgresTaskExecutionTrackerMigrations.CreateModule(executions),
                 PostgresQueueMetricsMigrations.CreateModule(metrics),
                 PostgresHistoricalDataMigrations.CreateModule(historical),
             ],
             [
                 results.TableName,
-                outbox.TableName,
-                inbox.TableName,
+                SqlStorageSchema.DocumentsTable,
+                SqlStorageSchema.LeasesTable,
+                SqlStorageSchema.QueueItemsTable,
+                SqlStorageSchema.CountersTable,
+                SqlStorageSchema.WindowKeysTable,
+                SqlStorageSchema.WindowEventsTable,
                 deadLetters.TableName,
-                delayed.TableName,
-                revocations.TableName,
-                rateLimits.TableName,
-                signals.TableName,
                 batches.BatchesTableName,
                 batches.BatchTasksTableName,
                 sagas.SagasTableName,
                 sagas.SagaStepsTableName,
                 sagas.TaskSagaTableName,
-                partitionLocks.TableName,
-                executions.TableName,
                 metrics.MetricsTableName,
                 metrics.RunningTasksTableName,
                 historical.SnapshotsTableName,

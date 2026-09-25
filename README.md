@@ -456,6 +456,18 @@ builder.Services.AddPostgresOutboxStore(options =>
 });
 ```
 
+The delayed message, revocation, outbox, inbox, signal, partition lock, execution tracking, and rate limiting stores share a few storage tables (`dotcelery_documents`, `dotcelery_leases`, `dotcelery_queue_items`, `dotcelery_counters`, and two tables for rate limit windows). Their `AddPostgres...` methods all configure the same `PostgresStorageOptions`. Retention, retries, and claim timeouts for these stores are set with `StorageStoreOptions`, whose `Prefix` keeps applications that share a database apart:
+
+```csharp
+builder.Services.Configure<StorageStoreOptions>(options =>
+{
+    options.Prefix = "billing";
+    options.InboxRetention = TimeSpan.FromDays(1);
+});
+```
+
+Expired rows are deleted every `StorageStoreOptions.PurgeInterval` (5 minutes by default).
+
 Pending migrations run while the host starts, before the worker starts, under a PostgreSQL advisory lock, so several processes can start at the same time. Applied migrations are recorded with a checksum in a `dotcelery_migrations` table in each schema. Without a generic host, resolve `SqlMigrator` and call `MigrateAsync()` before using the stores.
 
 To apply schema changes yourself, turn off `RunAtStartup` and generate a script from the same configuration. The script applies only migrations that are not recorded yet, so it can be run again after each upgrade.

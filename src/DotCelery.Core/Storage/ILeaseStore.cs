@@ -73,5 +73,14 @@ public interface ILeaseStore
 /// <param name="Key">The leased key.</param>
 /// <param name="Owner">The holder.</param>
 /// <param name="Token">The fencing token of this acquisition.</param>
+/// <param name="AcquiredAt">
+/// When the holder acquired the lease; extending or renewing it does not change this.
+/// </param>
 /// <param name="ExpiresAt">When the lease expires.</param>
-public sealed record Lease(string Key, string Owner, long Token, DateTimeOffset ExpiresAt);
+public sealed record Lease(
+    string Key,
+    string Owner,
+    long Token,
+    DateTimeOffset AcquiredAt,
+    DateTimeOffset ExpiresAt
+);

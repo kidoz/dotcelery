@@ -104,7 +104,7 @@ internal sealed class InMemoryCounterStore : ICounterStore
         }
     }
 
-    public ValueTask<long> GetWindowCountAsync(
+    public ValueTask<WindowSnapshot> GetWindowAsync(
         string key,
         TimeSpan window,
         CancellationToken cancellationToken = default
@@ -116,10 +116,12 @@ internal sealed class InMemoryCounterStore : ICounterStore
         lock (_lock)
         {
             var now = _timeProvider.GetUtcNow();
+            var inWindow = _windows.TryGetValue(key, out var events)
+                ? events.Times.Where(t => t > now - window).ToList()
+                : [];
+
             return ValueTask.FromResult(
-                _windows.TryGetValue(key, out var events)
-                    ? events.Times.LongCount(t => t > now - window)
-                    : 0L
+                new WindowSnapshot(inWindow.Count, inWindow.Count > 0 ? inWindow.Min() : null)
             );
         }
     }
