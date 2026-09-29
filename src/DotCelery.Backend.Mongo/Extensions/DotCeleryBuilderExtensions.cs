@@ -1,11 +1,11 @@
+using DotCelery.Backend.Mongo.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Extensions;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace DotCelery.Backend.Mongo.Extensions;
 
 /// <summary>
-/// Extension methods for configuring MongoDB backend with DotCeleryBuilder.
+/// Extension methods for configuring the MongoDB backend with DotCeleryBuilder.
 /// </summary>
 public static class DotCeleryBuilderExtensions
 {
@@ -17,13 +17,10 @@ public static class DotCeleryBuilderExtensions
     /// <returns>The builder for chaining.</returns>
     public static DotCeleryBuilder UseMongo(
         this DotCeleryBuilder builder,
-        Action<MongoBackendOptions>? configure = null
+        Action<MongoStorageOptions>? configure = null
     )
     {
-        if (configure is not null)
-        {
-            builder.Services.Configure(configure);
-        }
+        ArgumentNullException.ThrowIfNull(builder);
 
         // Remove any existing backend registration
         var existingBackend = builder.Services.FirstOrDefault(d =>
@@ -34,7 +31,7 @@ public static class DotCeleryBuilderExtensions
             builder.Services.Remove(existingBackend);
         }
 
-        builder.Services.AddSingleton<IResultBackend, MongoResultBackend>();
+        builder.Services.AddMongoBackend(configure);
 
         return builder;
     }
@@ -49,13 +46,11 @@ public static class DotCeleryBuilderExtensions
     public static DotCeleryBuilder UseMongo(
         this DotCeleryBuilder builder,
         string connectionString,
-        string databaseName = "celery"
-    )
-    {
-        return builder.UseMongo(options =>
+        string databaseName = "dotcelery"
+    ) =>
+        builder.UseMongo(options =>
         {
             options.ConnectionString = connectionString;
             options.DatabaseName = databaseName;
         });
-    }
 }

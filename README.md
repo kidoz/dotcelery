@@ -207,7 +207,7 @@ var chord = new Group(
 
 Coordinate long-running business processes with automatic compensation on failure.
 
-> **Status:** The DI extensions do not yet register `ISagaOrchestrator`, and the MongoDB saga store has known defects. See [ROADMAP.md](ROADMAP.md#known-gaps).
+> **Status:** The DI extensions do not yet register `ISagaOrchestrator`. See [ROADMAP.md](ROADMAP.md#known-gaps).
 
 ```csharp
 var saga = new Saga
@@ -457,6 +457,20 @@ builder.Services.AddRedisOutboxStore(options =>
 ```
 
 Expiry follows the application's clock rather than Redis key expiry, so processes that share Redis need synchronized clocks. Expired entries are deleted every `StorageStoreOptions.PurgeInterval`.
+
+## MongoDB Storage
+
+Every MongoDB store keeps its data in a few collections of one database (`dotcelery_documents`, `dotcelery_leases`, `dotcelery_queue_items`, `dotcelery_counters`, `dotcelery_windows`, and `dotcelery_sequences`). Register the result backend with `UseMongo` and each other store with its `AddMongo...` method; every registration configures the same `MongoStorageOptions` and shares one client per connection string. Indexes are created on first use.
+
+```csharp
+builder.Services.AddMongoOutboxStore(options =>
+{
+    options.ConnectionString = connectionString;
+    options.DatabaseName = "jobs";
+});
+```
+
+Stores are notified of new results and revocations through a capped collection (`dotcelery_notifications`) read with tailable cursors, which works without a replica set. Where capped collections are not available, set `UseNotifications = false`; the stores then poll. As with Redis, expiry follows the application's clock, and expired entries are deleted every `StorageStoreOptions.PurgeInterval`.
 
 ## PostgreSQL Schema
 

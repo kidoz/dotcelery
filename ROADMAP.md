@@ -32,19 +32,15 @@ but do not yet behave as documented.
 ### Delivery and Reliability
 - Redis broker: pending-message reclaim takes over messages that live workers are still processing (no lease renewal), and acknowledged entries are never deleted from streams
 - RabbitMQ broker: reconnect logic competes with the client's automatic recovery and can acknowledge on a different channel than the one that delivered the message; queue arguments (priority, queue type, dead-letter exchange) are fixed
-- MongoDB can dispatch the same delayed message twice
 - Without a delay store, a message with a future ETA holds the worker's consume loop for up to 5 seconds before it is requeued
 - Hard time limits are cooperative; a task that ignores its cancellation token keeps its worker slot
 
 ### Backend Correctness
-- MongoDB: the client's `Pending` row makes `AsyncResult.GetAsync` return immediately, and the `Pending` write can overwrite a result that is already stored
-- The MongoDB batch store never advances batch state
-- Outbox storage ignores the caller's transaction, and the MongoDB outbox store is not claim-safe across workers
-- MongoDB inbox and revocation entries are never cleaned up, and Redis broker streams grow without bound
+- Outbox and inbox storage ignore the caller's transaction
 
 ### Incomplete Documented Features
 - Canvas: `Chain`, `Group`, and `Chord` define workflows, but nothing dispatches them or runs link and error callbacks
-- Sagas: the orchestrator is not registered by the DI extensions, and the MongoDB store never marks sagas completed
+- Sagas: the orchestrator is not registered by the DI extensions
 - Batches: `OnComplete` callbacks are not dispatched, and tasks are published before the batch record exists
 - Metrics: `DotCeleryInstrumentation` defines instruments, but the client and worker never record them (tracing works)
 - Dashboard: no built-in task query, queue stats, or metrics providers; workers do not register themselves; SignalR notifications are never raised; the middleware serves the UI page for API and hub routes unless endpoints are mapped first
@@ -68,10 +64,6 @@ but do not yet behave as documented.
 
 ## Planned Features
 
-### Storage
-- MongoDB provider of the primitives; the in-memory, PostgreSQL, and Redis providers exist and pass the conformance tests
-- Remove the per-store MongoDB implementations once its provider exists; every store is built once on the storage primitives, and the in-memory, PostgreSQL, and Redis backends use them
-
 ### Brokers
 - Azure Service Bus broker
 - Amazon SQS broker
@@ -92,7 +84,7 @@ but do not yet behave as documented.
 
 ### Worker/Execution
 - Exactly-once processing: atomic inbox claim committed together with result storage
-- Connection pooling controls for brokers/backends: separate publish and consume connections with channel pooling for RabbitMQ, and shared `MongoClient` instances across stores
+- Connection pooling controls for brokers: separate publish and consume connections with channel pooling for RabbitMQ
 - Batch execution tasks (single-task processing of input batches)
 
 ### Security
