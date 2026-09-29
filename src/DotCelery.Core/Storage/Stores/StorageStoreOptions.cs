@@ -61,6 +61,18 @@ public sealed class StorageStoreOptions
     public TimeSpan ExecutionTimeout { get; set; } = TimeSpan.FromHours(1);
 
     /// <summary>
+    /// Gets or sets how long task results and states are kept when the caller does not set an
+    /// expiry. Default is 1 day.
+    /// </summary>
+    public TimeSpan ResultExpiry { get; set; } = TimeSpan.FromDays(1);
+
+    /// <summary>
+    /// Gets or sets how often a caller waiting for a task result checks for it. The storage
+    /// provider's notifications usually wake the caller sooner. Default is 1 second.
+    /// </summary>
+    public TimeSpan ResultPollInterval { get; set; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
     /// Gets or sets how often expired entries are deleted from storage. Expired entries are
     /// never returned, but they take space until they are deleted. Default is 5 minutes.
     /// </summary>

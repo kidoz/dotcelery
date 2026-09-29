@@ -231,3 +231,51 @@ public sealed partial class PostgresStorageStatementTests(PostgresStorageFixture
     [GeneratedRegex(@"@(\w+)")]
     private static partial Regex ParameterPattern();
 }
+
+[Collection(PostgresStorageTestGroup.Name)]
+public sealed class PostgresResultBackendTests(PostgresStorageFixture fixture)
+    : ResultBackendConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+}
+
+[Collection(PostgresStorageTestGroup.Name)]
+public sealed class PostgresBatchStoreTests(PostgresStorageFixture fixture)
+    : BatchStoreConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+}
+
+[Collection(PostgresStorageTestGroup.Name)]
+public sealed class PostgresSagaStoreTests(PostgresStorageFixture fixture)
+    : SagaStoreConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+}
+
+[Collection(PostgresStorageTestGroup.Name)]
+public sealed class PostgresDeadLetterStoreTests(PostgresStorageFixture fixture)
+    : DeadLetterStoreConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+}
+
+[Collection(PostgresStorageTestGroup.Name)]
+public sealed class PostgresQueueMetricsTests(PostgresStorageFixture fixture)
+    : QueueMetricsConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+}
+
+[Collection(PostgresStorageTestGroup.Name)]
+public sealed class PostgresHistoricalDataStoreTests(PostgresStorageFixture fixture)
+    : HistoricalDataStoreConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+}

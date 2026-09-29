@@ -1,6 +1,5 @@
 namespace DotCelery.Tests.Unit.Client;
 
-using DotCelery.Backend.InMemory;
 using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Broker.InMemory;
 using DotCelery.Client;
@@ -13,7 +12,7 @@ using Microsoft.Extensions.Options;
 public class CeleryClientRevocationTests : IAsyncDisposable
 {
     private readonly InMemoryBroker _broker = new();
-    private readonly InMemoryResultBackend _backend = new();
+    private readonly ResultBackend _backend = new(new InMemoryStorageProvider());
     private readonly RevocationStore _revocationStore = new(new InMemoryStorageProvider());
     private readonly JsonMessageSerializer _serializer = new();
     private readonly CeleryClient _client;

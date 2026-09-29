@@ -1,8 +1,3 @@
-using DotCelery.Backend.Postgres.Batches;
-using DotCelery.Backend.Postgres.DeadLetter;
-using DotCelery.Backend.Postgres.Historical;
-using DotCelery.Backend.Postgres.Metrics;
-using DotCelery.Backend.Postgres.Sagas;
 using DotCelery.Backend.Postgres.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Batches;
@@ -125,12 +120,8 @@ public static class ServiceCollectionExtensions
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddPostgresBackend(
         this IServiceCollection services,
-        Action<PostgresBackendOptions>? configure = null
-    ) =>
-        services.AddPostgresStore<IResultBackend, PostgresResultBackend, PostgresBackendOptions>(
-            configure,
-            PostgresResultBackendMigrations.CreateModule
-        );
+        Action<PostgresStorageOptions>? configure = null
+    ) => services.AddPostgresStorageStore<IResultBackend, ResultBackend>(configure);
 
     /// <summary>
     /// Adds the PostgreSQL result backend with a connection string.
@@ -177,13 +168,8 @@ public static class ServiceCollectionExtensions
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddPostgresDeadLetterStore(
         this IServiceCollection services,
-        Action<PostgresDeadLetterStoreOptions>? configure = null
-    ) =>
-        services.AddPostgresStore<
-            IDeadLetterStore,
-            PostgresDeadLetterStore,
-            PostgresDeadLetterStoreOptions
-        >(configure, PostgresDeadLetterMigrations.CreateModule);
+        Action<PostgresStorageOptions>? configure = null
+    ) => services.AddPostgresStorageStore<IDeadLetterStore, DeadLetterStore>(configure);
 
     /// <summary>
     /// Adds the PostgreSQL delayed message store.
@@ -237,12 +223,8 @@ public static class ServiceCollectionExtensions
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddPostgresBatchStore(
         this IServiceCollection services,
-        Action<PostgresBatchStoreOptions>? configure = null
-    ) =>
-        services.AddPostgresStore<IBatchStore, PostgresBatchStore, PostgresBatchStoreOptions>(
-            configure,
-            PostgresBatchMigrations.CreateModule
-        );
+        Action<PostgresStorageOptions>? configure = null
+    ) => services.AddPostgresStorageStore<IBatchStore, BatchStore>(configure);
 
     /// <summary>
     /// Adds the PostgreSQL saga store.
@@ -252,12 +234,8 @@ public static class ServiceCollectionExtensions
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddPostgresSagaStore(
         this IServiceCollection services,
-        Action<PostgresSagaStoreOptions>? configure = null
-    ) =>
-        services.AddPostgresStore<ISagaStore, PostgresSagaStore, PostgresSagaStoreOptions>(
-            configure,
-            PostgresSagaMigrations.CreateModule
-        );
+        Action<PostgresStorageOptions>? configure = null
+    ) => services.AddPostgresStorageStore<ISagaStore, SagaStore>(configure);
 
     /// <summary>
     /// Adds the PostgreSQL partition lock store.
@@ -289,12 +267,8 @@ public static class ServiceCollectionExtensions
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddPostgresQueueMetrics(
         this IServiceCollection services,
-        Action<PostgresQueueMetricsOptions>? configure = null
-    ) =>
-        services.AddPostgresStore<IQueueMetrics, PostgresQueueMetrics, PostgresQueueMetricsOptions>(
-            configure,
-            PostgresQueueMetricsMigrations.CreateModule
-        );
+        Action<PostgresStorageOptions>? configure = null
+    ) => services.AddPostgresStorageStore<IQueueMetrics, QueueMetrics>(configure);
 
     /// <summary>
     /// Adds the PostgreSQL historical data store.
@@ -304,13 +278,8 @@ public static class ServiceCollectionExtensions
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddPostgresHistoricalDataStore(
         this IServiceCollection services,
-        Action<PostgresHistoricalDataStoreOptions>? configure = null
-    ) =>
-        services.AddPostgresStore<
-            IHistoricalDataStore,
-            PostgresHistoricalDataStore,
-            PostgresHistoricalDataStoreOptions
-        >(configure, PostgresHistoricalDataMigrations.CreateModule);
+        Action<PostgresStorageOptions>? configure = null
+    ) => services.AddPostgresStorageStore<IHistoricalDataStore, HistoricalDataStore>(configure);
 
     private static IServiceCollection AddPostgresStorageStore<TService, TImplementation>(
         this IServiceCollection services,
@@ -321,31 +290,6 @@ public static class ServiceCollectionExtensions
     {
         services.AddPostgresStorage(configure);
         services.AddSingleton<TService, TImplementation>();
-
-        return services;
-    }
-
-    private static IServiceCollection AddPostgresStore<TService, TImplementation, TOptions>(
-        this IServiceCollection services,
-        Action<TOptions>? configure,
-        Func<TOptions, SqlMigrationModule> createModule
-    )
-        where TService : class
-        where TImplementation : class, TService
-        where TOptions : class
-    {
-        ArgumentNullException.ThrowIfNull(services);
-
-        if (configure is not null)
-        {
-            services.Configure(configure);
-        }
-
-        services.AddPostgresMigrations();
-        services.AddSingleton<TService, TImplementation>();
-        services.AddSingleton(sp =>
-            createModule(sp.GetRequiredService<IOptions<TOptions>>().Value)
-        );
 
         return services;
     }

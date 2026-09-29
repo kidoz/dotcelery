@@ -1,6 +1,5 @@
 namespace DotCelery.Tests.Unit.Worker;
 
-using DotCelery.Backend.InMemory;
 using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Attributes;
@@ -28,7 +27,7 @@ using NSubstitute;
 /// </summary>
 public class RequeueAndRateLimitTests : IAsyncDisposable
 {
-    private readonly InMemoryResultBackend _backend = new();
+    private readonly ResultBackend _backend = new(new InMemoryStorageProvider());
     private readonly JsonMessageSerializer _serializer = new();
 
     [Fact]

@@ -38,16 +38,15 @@ but do not yet behave as documented.
 - Hard time limits are cooperative; a task that ignores its cancellation token keeps its worker slot
 
 ### Backend Correctness
-- PostgreSQL `LISTEN/NOTIFY` sends the full result as the payload; results over 8000 bytes roll back the write
-- PostgreSQL and MongoDB: the client's `Pending` row makes `AsyncResult.GetAsync` return immediately, and the `Pending` write can overwrite a result that is already stored
+- MongoDB: the client's `Pending` row makes `AsyncResult.GetAsync` return immediately, and the `Pending` write can overwrite a result that is already stored
 - Redis dead-letter store sets a TTL on the hash that holds every entry
-- Batch completion is a read-modify-write in the Redis and in-memory stores, and the PostgreSQL and MongoDB stores never advance batch state
+- Batch completion is a read-modify-write in the Redis store, and the MongoDB store never advances batch state
 - Outbox storage ignores the caller's transaction, and the Redis and MongoDB outbox stores are not claim-safe across workers
 - Redis and MongoDB inbox and revocation entries are never cleaned up, and Redis streams grow without bound
 
 ### Incomplete Documented Features
 - Canvas: `Chain`, `Group`, and `Chord` define workflows, but nothing dispatches them or runs link and error callbacks
-- Sagas: the orchestrator is not registered by the DI extensions, Redis saga scripts read property names that do not match the stored JSON, and the PostgreSQL and MongoDB stores never mark sagas completed
+- Sagas: the orchestrator is not registered by the DI extensions, Redis saga scripts read property names that do not match the stored JSON, and the MongoDB store never marks sagas completed
 - Batches: `OnComplete` callbacks are not dispatched, and tasks are published before the batch record exists
 - Metrics: `DotCeleryInstrumentation` defines instruments, but the client and worker never record them (tracing works)
 - Dashboard: no built-in task query, queue stats, or metrics providers; workers do not register themselves; SignalR notifications are never raised; the middleware serves the UI page for API and hub routes unless endpoints are mapped first
@@ -65,17 +64,15 @@ but do not yet behave as documented.
 
 ### Test Coverage
 - No tests exercise the worker consume/ack/retry/shutdown loop, the delayed-message and outbox dispatchers, or the inbox, tenant, and overlap filters (the stores they use have conformance tests)
-- The in-memory broker and the in-memory stores not yet built on the storage primitives do not model redelivery, serialization round-trips, or concurrent updates; contract tests should run against real brokers and backends
+- The in-memory broker does not model redelivery or serialization round-trips; broker contract tests should run against real brokers
 - No integration coverage for the Redis saga, inbox, outbox, and dead-letter stores, or for RabbitMQ connection loss
-- The per-store PostgreSQL implementations' statements are not checked against the migrated schema (the storage primitives' statements are)
 - Analyzer DCEL001 reports task names that are not string literals (for example, constants) as empty
 
 ## Planned Features
 
 ### Storage
-- Build every store once in Core on the storage primitives (`IStorageProvider`), so a backend implements only documents, leases, queues, counters, and notifications; the delayed message, outbox, inbox, signal, revocation, partition lock, execution tracking, and rate limiting stores are done, and results, batches, sagas, dead letters, metrics, and historical data remain
 - Redis and MongoDB providers of the primitives; `DotCelery.Storage.Sql` and the PostgreSQL provider exist and pass the conformance tests
-- Remove the per-store PostgreSQL, Redis, and MongoDB implementations once every store is built on the primitives
+- Remove the per-store Redis and MongoDB implementations once those providers exist; every store is built once on the storage primitives, and the in-memory and PostgreSQL backends use them
 
 ### Brokers
 - Azure Service Bus broker

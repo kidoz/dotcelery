@@ -1,19 +1,20 @@
-using DotCelery.Backend.InMemory.Sagas;
 using DotCelery.Core.Canvas;
 using DotCelery.Core.Sagas;
+using DotCelery.Core.Storage.Stores;
 
-namespace DotCelery.Tests.Unit.Sagas;
+namespace DotCelery.Tests.Conformance.Stores;
 
 /// <summary>
-/// Tests for <see cref="InMemorySagaStore"/>.
+/// Conformance tests for <see cref="SagaStore"/>.
 /// </summary>
-public sealed class InMemorySagaStoreTests : IAsyncDisposable
+public abstract class SagaStoreConformanceTests : StoreConformanceTests
 {
-    private readonly InMemorySagaStore _store = new();
+    private SagaStore _store = null!;
 
-    public async ValueTask DisposeAsync()
+    public override async ValueTask InitializeAsync()
     {
-        await _store.DisposeAsync();
+        await base.InitializeAsync();
+        _store = new SagaStore(Provider, CreateOptions(), Time);
     }
 
     [Fact]
@@ -366,13 +367,101 @@ public sealed class InMemorySagaStoreTests : IAsyncDisposable
         Assert.Equal(2, updated.CompletedSteps);
     }
 
+    [Fact]
+    public async Task GetByStateAsync_FollowsStateChangesOldestFirst()
+    {
+        await _store.CreateAsync(CreateSaga("saga-2", 1) with { CreatedAt = Start.AddMinutes(1) });
+        await _store.CreateAsync(CreateSaga("saga-1", 1));
+        await _store.CreateAsync(CreateSaga("saga-3", 1) with { CreatedAt = Start.AddMinutes(2) });
+
+        await _store.AdvanceStepAsync("saga-3");
+
+        Assert.Equal(
+            ["saga-1", "saga-2"],
+            (await _store.GetByStateAsync(SagaState.Executing).ToListAsync()).Select(s => s.Id)
+        );
+        Assert.Equal(
+            ["saga-1"],
+            (await _store.GetByStateAsync(SagaState.Executing, limit: 1).ToListAsync()).Select(s =>
+                s.Id
+            )
+        );
+        Assert.Equal(
+            "saga-3",
+            Assert.Single(await _store.GetByStateAsync(SagaState.Completed).ToListAsync()).Id
+        );
+    }
+
+    [Fact]
+    public async Task UpdateStepStateAsync_ConcurrentSteps_KeepEveryUpdate()
+    {
+        var saga = CreateSaga("saga-1", 8);
+        await _store.CreateAsync(saga);
+
+        await RunConcurrentlyAsync(
+            saga.Steps.Count,
+            async i =>
+                await new SagaStore(Provider, CreateOptions(), Time).UpdateStepStateAsync(
+                    "saga-1",
+                    saga.Steps[i].Id,
+                    SagaStepState.Completed,
+                    taskId: $"task-{i}"
+                )
+        );
+
+        var updated = await _store.GetAsync("saga-1");
+        Assert.NotNull(updated);
+        Assert.Equal(8, updated.CompletedSteps);
+        Assert.Equal("saga-1", await _store.GetSagaIdForTaskAsync("task-7"));
+    }
+
+    [Fact]
+    public async Task UpdateStepStateAsync_StepResultAndMetadata_RoundTripAsJson()
+    {
+        await _store.CreateAsync(
+            CreateSaga("saga-1", 1) with
+            {
+                Metadata = new Dictionary<string, object> { ["tenant"] = "acme" },
+            }
+        );
+
+        await _store.UpdateStepStateAsync("saga-1", "step-0", SagaStepState.Completed, result: 42);
+        var saga = await _store.GetAsync("saga-1");
+
+        Assert.NotNull(saga);
+        Assert.Equal(42, ((System.Text.Json.JsonElement)saga.Steps[0].Result!).GetInt32());
+        Assert.Equal("acme", saga.Metadata!["tenant"].ToString());
+    }
+
+    [Fact]
+    public async Task UpdateStepStateAsync_FailedAfterACompensableStep_StartsCompensation()
+    {
+        var saga = CreateSagaWithCompensation("saga-1", 2);
+        await _store.CreateAsync(saga);
+        await _store.UpdateStepStateAsync("saga-1", "step-0", SagaStepState.Completed);
+        await _store.AdvanceStepAsync("saga-1");
+
+        var failed = await _store.UpdateStepStateAsync(
+            "saga-1",
+            "step-1",
+            SagaStepState.Failed,
+            errorMessage: "boom"
+        );
+        var compensated = await _store.MarkStepCompensatedAsync("saga-1", "step-0", success: true);
+
+        Assert.Equal(SagaState.Compensating, failed?.State);
+        Assert.Equal("boom", failed?.FailureReason);
+        Assert.Equal(SagaState.Compensated, compensated?.State);
+        Assert.Equal(Start, compensated?.CompletedAt);
+    }
+
     private static Saga CreateSaga(string id, int stepCount) =>
         new()
         {
             Id = id,
             Name = $"Test Saga {id}",
             State = SagaState.Executing,
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = Start,
             Steps = Enumerable
                 .Range(0, stepCount)
                 .Select(i => new SagaStep
@@ -391,7 +480,7 @@ public sealed class InMemorySagaStoreTests : IAsyncDisposable
             Id = id,
             Name = $"Test Saga {id}",
             State = SagaState.Executing,
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = Start,
             Steps = Enumerable
                 .Range(0, stepCount)
                 .Select(i => new SagaStep

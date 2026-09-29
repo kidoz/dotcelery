@@ -446,7 +446,7 @@ builder.Services.AddOpenTelemetry()
 
 ## PostgreSQL Schema
 
-PostgreSQL stores get their tables from versioned migrations. Register each store with its `AddPostgres...` method (`UsePostgres` for the result backend); the registration also adds the migrations for that store's tables, using the configured schema and table names.
+PostgreSQL stores get their tables from versioned migrations. Every store keeps its data in the same few storage tables (`dotcelery_documents`, `dotcelery_leases`, `dotcelery_queue_items`, `dotcelery_counters`, and two tables for rate limit windows). Register the result backend with `UsePostgres` and each other store with its `AddPostgres...` method; every registration configures the same `PostgresStorageOptions` and adds the migrations for the storage tables.
 
 ```csharp
 builder.Services.AddPostgresOutboxStore(options =>
@@ -456,12 +456,13 @@ builder.Services.AddPostgresOutboxStore(options =>
 });
 ```
 
-The delayed message, revocation, outbox, inbox, signal, partition lock, execution tracking, and rate limiting stores share a few storage tables (`dotcelery_documents`, `dotcelery_leases`, `dotcelery_queue_items`, `dotcelery_counters`, and two tables for rate limit windows). Their `AddPostgres...` methods all configure the same `PostgresStorageOptions`. Retention, retries, and claim timeouts for these stores are set with `StorageStoreOptions`, whose `Prefix` keeps applications that share a database apart:
+Retention, retries, and timeouts of the stores are set with `StorageStoreOptions`, whose `Prefix` keeps applications that share a database apart:
 
 ```csharp
 builder.Services.Configure<StorageStoreOptions>(options =>
 {
     options.Prefix = "billing";
+    options.ResultExpiry = TimeSpan.FromHours(6);
     options.InboxRetention = TimeSpan.FromDays(1);
 });
 ```

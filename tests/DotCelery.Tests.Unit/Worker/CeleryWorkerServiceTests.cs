@@ -3,11 +3,12 @@ namespace DotCelery.Tests.Unit.Worker;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
-using DotCelery.Backend.InMemory;
+using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Exceptions;
 using DotCelery.Core.Models;
 using DotCelery.Core.Serialization;
+using DotCelery.Core.Storage.Stores;
 using DotCelery.Worker;
 using DotCelery.Worker.Execution;
 using DotCelery.Worker.Filters;
@@ -364,7 +365,7 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
     /// </summary>
     private sealed class FaultyResultBackend : IResultBackend
     {
-        private readonly InMemoryResultBackend _inner = new();
+        private readonly ResultBackend _inner = new(new InMemoryStorageProvider());
 
         public bool FailStateUpdates { get; set; }
 

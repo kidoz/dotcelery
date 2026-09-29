@@ -1,20 +1,19 @@
 using DotCelery.Backend.Postgres;
-using DotCelery.Backend.Postgres.Batches;
-using DotCelery.Backend.Postgres.DeadLetter;
 using DotCelery.Backend.Postgres.Extensions;
-using DotCelery.Backend.Postgres.Historical;
-using DotCelery.Backend.Postgres.Metrics;
-using DotCelery.Backend.Postgres.Sagas;
 using DotCelery.Backend.Postgres.Storage;
 using DotCelery.Core.Abstractions;
+using DotCelery.Core.Batches;
 using DotCelery.Core.Execution;
 using DotCelery.Core.Models;
 using DotCelery.Core.Partitioning;
 using DotCelery.Core.RateLimiting;
+using DotCelery.Core.Sagas;
+using DotCelery.Core.Serialization;
 using DotCelery.Core.Storage;
 using DotCelery.Core.Storage.Stores;
 using DotCelery.Storage.Sql.Migrations;
 using DotCelery.Storage.Sql.Storage;
+using DotCelery.Tests.Conformance.Stores;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -164,8 +163,8 @@ public sealed class PostgresMigrationIntegrationTests : IAsyncLifetime
 
         var outbox = services.GetRequiredService<IOutboxStore>();
         Assert.Equal(0, await outbox.GetPendingCountAsync());
+        Assert.Null(await services.GetRequiredService<IResultBackend>().GetResultAsync("task"));
         Assert.Contains(SqlStorageSchema.QueueItemsTable, await GetTablesAsync("hosted"));
-        Assert.Contains("celery_task_results", await GetTablesAsync("hosted"));
     }
 
     [Fact]
@@ -183,12 +182,20 @@ public sealed class PostgresMigrationIntegrationTests : IAsyncLifetime
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton<IMessageBroker, RecordingBroker>();
+        services.AddSingleton<IMessageSerializer, JsonMessageSerializer>();
         Action<PostgresStorageOptions> configure = o =>
         {
             o.ConnectionString = _connectionString;
             o.Schema = "shared";
         };
         services
+            .AddPostgresBackend(configure)
+            .AddPostgresBatchStore(configure)
+            .AddPostgresSagaStore(configure)
+            .AddPostgresDeadLetterStore(configure)
+            .AddPostgresQueueMetrics(configure)
+            .AddPostgresHistoricalDataStore(configure)
             .AddPostgresDelayedMessageStore(configure)
             .AddPostgresRevocationStore(configure)
             .AddPostgresRateLimiter(configure)
@@ -244,6 +251,25 @@ public sealed class PostgresMigrationIntegrationTests : IAsyncLifetime
                 .GetRequiredService<ITaskExecutionTracker>()
                 .TryStartAsync("tests.task", "task")
         );
+        await provider
+            .GetRequiredService<IResultBackend>()
+            .UpdateStateAsync("task", TaskState.Started);
+        Assert.Equal(
+            TaskState.Started,
+            await provider.GetRequiredService<IResultBackend>().GetStateAsync("task")
+        );
+        Assert.Null(await provider.GetRequiredService<IBatchStore>().GetAsync("batch"));
+        Assert.Null(await provider.GetRequiredService<ISagaStore>().GetAsync("saga"));
+        Assert.Equal(0, await provider.GetRequiredService<IDeadLetterStore>().GetCountAsync());
+        await provider.GetRequiredService<IQueueMetrics>().RecordEnqueuedAsync("celery");
+        Assert.Equal(
+            1,
+            await provider.GetRequiredService<IQueueMetrics>().GetWaitingCountAsync("celery")
+        );
+        Assert.Equal(
+            0,
+            await provider.GetRequiredService<IHistoricalDataStore>().GetSnapshotCountAsync()
+        );
     }
 
     private ServiceProvider CreateServices(bool runAtStartup)
@@ -275,74 +301,26 @@ public sealed class PostgresMigrationIntegrationTests : IAsyncLifetime
         }
     }
 
-    private (List<SqlMigrationModule> Modules, List<string> Tables) AllStores(string schema)
-    {
-        var results = new PostgresBackendOptions
-        {
-            ConnectionString = _connectionString,
-            Schema = schema,
-        };
-        var storage = new PostgresStorageOptions
-        {
-            ConnectionString = _connectionString,
-            Schema = schema,
-        };
-        var deadLetters = new PostgresDeadLetterStoreOptions
-        {
-            ConnectionString = _connectionString,
-            Schema = schema,
-        };
-        var batches = new PostgresBatchStoreOptions
-        {
-            ConnectionString = _connectionString,
-            Schema = schema,
-        };
-        var sagas = new PostgresSagaStoreOptions
-        {
-            ConnectionString = _connectionString,
-            Schema = schema,
-        };
-        var metrics = new PostgresQueueMetricsOptions
-        {
-            ConnectionString = _connectionString,
-            Schema = schema,
-        };
-        var historical = new PostgresHistoricalDataStoreOptions
-        {
-            ConnectionString = _connectionString,
-            Schema = schema,
-        };
-
-        return (
+    private (List<SqlMigrationModule> Modules, List<string> Tables) AllStores(string schema) =>
+        (
             [
-                PostgresResultBackendMigrations.CreateModule(results),
-                PostgresStorage.CreateModule(storage),
-                PostgresDeadLetterMigrations.CreateModule(deadLetters),
-                PostgresBatchMigrations.CreateModule(batches),
-                PostgresSagaMigrations.CreateModule(sagas),
-                PostgresQueueMetricsMigrations.CreateModule(metrics),
-                PostgresHistoricalDataMigrations.CreateModule(historical),
+                PostgresStorage.CreateModule(
+                    new PostgresStorageOptions
+                    {
+                        ConnectionString = _connectionString,
+                        Schema = schema,
+                    }
+                ),
             ],
             [
-                results.TableName,
                 SqlStorageSchema.DocumentsTable,
                 SqlStorageSchema.LeasesTable,
                 SqlStorageSchema.QueueItemsTable,
                 SqlStorageSchema.CountersTable,
                 SqlStorageSchema.WindowKeysTable,
                 SqlStorageSchema.WindowEventsTable,
-                deadLetters.TableName,
-                batches.BatchesTableName,
-                batches.BatchTasksTableName,
-                sagas.SagasTableName,
-                sagas.SagaStepsTableName,
-                sagas.TaskSagaTableName,
-                metrics.MetricsTableName,
-                metrics.RunningTasksTableName,
-                historical.SnapshotsTableName,
             ]
         );
-    }
 
     private SqlMigrationModule CustomModule(params string[] statements) =>
         new(

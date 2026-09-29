@@ -1,10 +1,11 @@
-using DotCelery.Backend.InMemory;
+using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Broker.InMemory;
 using DotCelery.Client;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
 using DotCelery.Core.MultiTenancy;
 using DotCelery.Core.Serialization;
+using DotCelery.Core.Storage.Stores;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -13,7 +14,7 @@ namespace DotCelery.Tests.Unit.Client;
 public class CeleryClientTests : IAsyncDisposable
 {
     private readonly InMemoryBroker _broker = new();
-    private readonly InMemoryResultBackend _backend = new();
+    private readonly ResultBackend _backend = new(new InMemoryStorageProvider());
     private readonly JsonMessageSerializer _serializer = new();
     private readonly CeleryClient _client;
 

@@ -1,5 +1,4 @@
 using DotCelery.Backend.Postgres;
-using DotCelery.Backend.Postgres.DeadLetter;
 using DotCelery.Backend.Postgres.Storage;
 using DotCelery.Storage.Sql.Migrations;
 using DotCelery.Storage.Sql.Schema;
@@ -248,27 +247,17 @@ public sealed class SqlMigrationTests
     }
 
     [Fact]
-    public void StoreModule_UsesConfiguredSchemaAndTableNames()
+    public void StorageModule_UsesConfiguredSchema()
     {
-        var module = PostgresDeadLetterMigrations.CreateModule(
-            new PostgresDeadLetterStoreOptions
-            {
-                ConnectionString = ConnectionString,
-                Schema = "jobs",
-                TableName = "my_dead_letters",
-            }
+        var module = PostgresStorage.CreateModule(
+            new PostgresStorageOptions { ConnectionString = ConnectionString, Schema = "jobs" }
         );
 
-        Assert.Equal("dead-letters/my_dead_letters", module.Name);
+        var script = CreateMigrator(module).GenerateScript();
+
         Assert.Equal("jobs", module.Schema);
-        Assert.Contains(
-            module.Migrations.SelectMany(m => m.Operations).OfType<SchemaOperation.ExecuteSql>(),
-            s =>
-                s.Statement.Contains(
-                    "CREATE TABLE IF NOT EXISTS jobs.my_dead_letters",
-                    StringComparison.Ordinal
-                )
-        );
+        Assert.Equal(ConnectionString, module.ConnectionString);
+        Assert.Contains("\"jobs\".\"dotcelery_documents\"", script, StringComparison.Ordinal);
     }
 
     private static SqlMigration Sql(long version, string statement) =>

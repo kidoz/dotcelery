@@ -1,9 +1,10 @@
 namespace DotCelery.Tests.Unit.Worker;
 
-using DotCelery.Backend.InMemory;
+using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
 using DotCelery.Core.Serialization;
+using DotCelery.Core.Storage.Stores;
 using DotCelery.Worker;
 using DotCelery.Worker.Execution;
 using DotCelery.Worker.Filters;
@@ -15,7 +16,7 @@ using Microsoft.Extensions.Options;
 
 public class TaskExecutorTests : IAsyncDisposable
 {
-    private readonly InMemoryResultBackend _backend = new();
+    private readonly ResultBackend _backend = new(new InMemoryStorageProvider());
     private readonly JsonMessageSerializer _serializer = new();
     private readonly ServiceProvider _serviceProvider;
     private readonly TaskRegistry _registry = new();

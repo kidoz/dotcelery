@@ -1,3 +1,4 @@
+using DotCelery.Backend.Postgres.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Extensions;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,7 +18,7 @@ public static class DotCeleryBuilderExtensions
     /// <returns>The builder for chaining.</returns>
     public static DotCeleryBuilder UsePostgres(
         this DotCeleryBuilder builder,
-        Action<PostgresBackendOptions>? configure = null
+        Action<PostgresStorageOptions>? configure = null
     )
     {
         // Remove any existing backend registration

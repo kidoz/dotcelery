@@ -1,18 +1,19 @@
-using DotCelery.Backend.InMemory.Batches;
 using DotCelery.Core.Batches;
+using DotCelery.Core.Storage.Stores;
 
-namespace DotCelery.Tests.Unit.Batches;
+namespace DotCelery.Tests.Conformance.Stores;
 
 /// <summary>
-/// Tests for <see cref="InMemoryBatchStore"/>.
+/// Conformance tests for <see cref="BatchStore"/>.
 /// </summary>
-public sealed class InMemoryBatchStoreTests : IAsyncDisposable
+public abstract class BatchStoreConformanceTests : StoreConformanceTests
 {
-    private readonly InMemoryBatchStore _store = new();
+    private BatchStore _store = null!;
 
-    public async ValueTask DisposeAsync()
+    public override async ValueTask InitializeAsync()
     {
-        await _store.DisposeAsync();
+        await base.InitializeAsync();
+        _store = new BatchStore(Provider, CreateOptions(), Time);
     }
 
     [Fact]
@@ -222,6 +223,63 @@ public sealed class InMemoryBatchStoreTests : IAsyncDisposable
         Assert.Equal(2, updated.PendingCount);
     }
 
+    [Fact]
+    public async Task MarkTaskCompletedAsync_ConcurrentWorkers_CountEveryTask()
+    {
+        var taskIds = Enumerable.Range(0, 20).Select(i => $"task-{i}").ToArray();
+        await _store.CreateAsync(CreateBatch("batch-1", taskIds));
+
+        // Each store instance stands for a worker in its own process
+        await RunConcurrentlyAsync(
+            taskIds.Length,
+            async i =>
+                await new BatchStore(Provider, CreateOptions(), Time).MarkTaskCompletedAsync(
+                    "batch-1",
+                    taskIds[i]
+                )
+        );
+
+        var batch = await _store.GetAsync("batch-1");
+        Assert.NotNull(batch);
+        Assert.Equal(20, batch.CompletedCount);
+        Assert.Equal(BatchState.Completed, batch.State);
+    }
+
+    [Fact]
+    public async Task MarkTaskCompletedAsync_SameTaskTwice_CountsItOnce()
+    {
+        await _store.CreateAsync(CreateBatch("batch-1", ["task-1", "task-2"]));
+
+        await _store.MarkTaskCompletedAsync("batch-1", "task-1");
+        var batch = await _store.MarkTaskCompletedAsync("batch-1", "task-1");
+
+        Assert.NotNull(batch);
+        Assert.Equal(1, batch.CompletedCount);
+        Assert.Equal(BatchState.Processing, batch.State);
+    }
+
+    [Fact]
+    public async Task MarkTaskCompletedAsync_UnknownBatch_ReturnsNull()
+    {
+        Assert.Null(await _store.MarkTaskCompletedAsync("unknown", "task-1"));
+        Assert.Null(await _store.MarkTaskFailedAsync("unknown", "task-1"));
+    }
+
+    [Fact]
+    public async Task CancelledBatch_StaysCancelledWhenItsTasksFinish()
+    {
+        await _store.CreateAsync(CreateBatch("batch-1", ["task-1", "task-2"]));
+        Time.Advance(TimeSpan.FromMinutes(1));
+        await _store.UpdateStateAsync("batch-1", BatchState.Cancelled);
+
+        await _store.MarkTaskCompletedAsync("batch-1", "task-1");
+        var batch = await _store.MarkTaskFailedAsync("batch-1", "task-2");
+
+        Assert.NotNull(batch);
+        Assert.Equal(BatchState.Cancelled, batch.State);
+        Assert.Equal(Start.AddMinutes(1), batch.CompletedAt);
+    }
+
     private static Batch CreateBatch(string id, string[] taskIds) =>
         new()
         {
@@ -229,6 +287,6 @@ public sealed class InMemoryBatchStoreTests : IAsyncDisposable
             Name = $"Test Batch {id}",
             State = BatchState.Pending,
             TaskIds = taskIds,
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = Start,
         };
 }

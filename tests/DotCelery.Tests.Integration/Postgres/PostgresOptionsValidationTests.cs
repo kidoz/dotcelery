@@ -1,15 +1,10 @@
-using DotCelery.Backend.Postgres.DeadLetter;
-using DotCelery.Backend.Postgres.Historical;
-using DotCelery.Backend.Postgres.Metrics;
-using DotCelery.Backend.Postgres.Sagas;
 using DotCelery.Backend.Postgres.Storage;
 
 namespace DotCelery.Tests.Integration.Postgres;
 
 /// <summary>
-/// Locks in identifier validation across every Postgres options class so a
-/// configuration mistake (or hostile config source) cannot smuggle an arbitrary
-/// fragment into the schema/table identifiers used to build SQL.
+/// Locks in validation of the PostgreSQL storage options so a configuration mistake (or hostile
+/// config source) cannot smuggle an arbitrary fragment into the schema identifier used to build SQL.
 /// </summary>
 public sealed class PostgresOptionsValidationTests
 {
@@ -17,85 +12,34 @@ public sealed class PostgresOptionsValidationTests
     [InlineData("schema; DROP TABLE x; --")]
     [InlineData("\"x")]
     [InlineData("9starts_with_digit")]
-    [InlineData("")]
-    public void DeadLetterStoreOptions_RejectsBadIdentifiers(string bad)
-    {
-        var options = new PostgresDeadLetterStoreOptions();
-        Assert.Throws<ArgumentException>(() => options.Schema = bad);
-        Assert.Throws<ArgumentException>(() => options.TableName = bad);
-    }
-
-    [Theory]
-    [InlineData("schema; DROP TABLE x; --")]
     [InlineData("name with spaces")]
-    public void StorageOptions_RejectsBadIdentifiers(string bad)
+    [InlineData("")]
+    public void Schema_RejectsBadIdentifiers(string bad)
     {
         var options = new PostgresStorageOptions();
+
         Assert.Throws<ArgumentException>(() => options.Schema = bad);
     }
 
     [Fact]
-    public void SagaStoreOptions_RejectsBadIdentifiers_OnAllTableNames()
+    public void ConnectionStringAndCommandTimeout_RejectInvalidValues()
     {
-        var options = new PostgresSagaStoreOptions();
-        const string bad = "x\";DROP";
+        var options = new PostgresStorageOptions();
 
-        Assert.Throws<ArgumentException>(() => options.Schema = bad);
-        Assert.Throws<ArgumentException>(() => options.SagasTableName = bad);
-        Assert.Throws<ArgumentException>(() => options.SagaStepsTableName = bad);
-        Assert.Throws<ArgumentException>(() => options.TaskSagaTableName = bad);
+        Assert.Throws<ArgumentException>(() => options.ConnectionString = " ");
+        Assert.Throws<ArgumentOutOfRangeException>(() => options.CommandTimeout = TimeSpan.Zero);
     }
 
     [Fact]
-    public void QueueMetricsOptions_RejectsBadIdentifiers()
+    public void Options_AcceptValidValues()
     {
-        var options = new PostgresQueueMetricsOptions();
-        const string bad = "evil; --";
-
-        Assert.Throws<ArgumentException>(() => options.Schema = bad);
-        Assert.Throws<ArgumentException>(() => options.MetricsTableName = bad);
-        Assert.Throws<ArgumentException>(() => options.RunningTasksTableName = bad);
-    }
-
-    [Fact]
-    public void HistoricalDataStoreOptions_RejectsBadIdentifiers()
-    {
-        var options = new PostgresHistoricalDataStoreOptions();
-        const string bad = "x; DROP";
-
-        Assert.Throws<ArgumentException>(() => options.Schema = bad);
-        Assert.Throws<ArgumentException>(() => options.SnapshotsTableName = bad);
-    }
-
-    [Fact]
-    public void AllOptionsClasses_AcceptValidIdentifiers()
-    {
-        // Valid identifiers should not throw on any options class.
-        var deadLetter = new PostgresDeadLetterStoreOptions { Schema = "audit", TableName = "dl" };
-        var storage = new PostgresStorageOptions { Schema = "audit" };
-        var sagas = new PostgresSagaStoreOptions
+        var options = new PostgresStorageOptions
         {
-            Schema = "audit",
-            SagasTableName = "s",
-            SagaStepsTableName = "ss",
-            TaskSagaTableName = "ts",
-        };
-        var metrics = new PostgresQueueMetricsOptions
-        {
-            Schema = "audit",
-            MetricsTableName = "qm",
-            RunningTasksTableName = "rt",
-        };
-        var historical = new PostgresHistoricalDataStoreOptions
-        {
-            Schema = "audit",
-            SnapshotsTableName = "ms",
+            ConnectionString = "Host=db;Database=jobs",
+            Schema = "audit_2",
+            CommandTimeout = TimeSpan.FromSeconds(5),
         };
 
-        Assert.Equal("audit", deadLetter.Schema);
-        Assert.Equal("audit", storage.Schema);
-        Assert.Equal("s", sagas.SagasTableName);
-        Assert.Equal("rt", metrics.RunningTasksTableName);
-        Assert.Equal("ms", historical.SnapshotsTableName);
+        Assert.Equal("audit_2", options.Schema);
     }
 }

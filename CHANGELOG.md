@@ -14,8 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AddPostgres...` registration methods for every PostgreSQL store; each also registers the store's migrations
 - Storage primitives in `DotCelery.Core.Storage` (`IStorageProvider` with documents, leases, queues, counters, and notifications), an in-memory provider, and conformance tests that every provider runs; stores will be rebuilt on these primitives
 - PostgreSQL provider of the storage primitives (`AddPostgresStorage`), implemented once in `DotCelery.Storage.Sql` with the PostgreSQL dialect and LISTEN/NOTIFY notifications; every one of its statements is checked against the migrated schema in tests
-- The delayed message, outbox, inbox, signal, revocation, partition lock, execution tracking, and rate limiting stores are built once in `DotCelery.Core.Storage.Stores` on the storage primitives, and run the same conformance tests on the in-memory and PostgreSQL providers
-- `StorageStoreOptions` for those stores: claim timeout, outbox retries, retention, revocation polling, and a `Prefix` that keeps applications sharing storage apart
+- Every store (results, batches, sagas, dead letters, queue metrics, historical metrics, delayed messages, outbox, inbox, signals, revocations, partition locks, execution tracking, and rate limiting) is built once in `DotCelery.Core.Storage.Stores` on the storage primitives, and runs the same conformance tests on the in-memory and PostgreSQL providers
+- `StorageStoreOptions` for those stores: claim timeout, outbox retries, retention, result expiry, revocation and result polling, and a `Prefix` that keeps applications sharing storage apart
+- `AddInMemoryDeadLetterStore` and `AddInMemoryHistoricalDataStore`
 - `StoragePurgeService` deletes expired storage entries every `StorageStoreOptions.PurgeInterval`; `AddInMemoryStorage` and `AddPostgresStorage` register it
 
 ### Changed
@@ -24,14 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Graceful shutdown stops taking messages first, returns prefetched messages to the broker, and closes the broker consumer only after every in-flight message is settled
 - The worker stops with an error when the broker ends the message stream unexpectedly, instead of running without a consumer
 - The Redis broker reads again immediately while messages are available; `RedisBrokerOptions.BlockTimeout` applies only after a read returns nothing
-- The in-memory and PostgreSQL registrations of those eight stores use the stores built on the storage primitives. The `AddPostgres...` methods for them take `PostgresStorageOptions`, and their data moves from per-store tables to the storage tables
+- The in-memory and PostgreSQL registrations of every store use the stores built on the storage primitives. `UsePostgres` and every `AddPostgres...` method take `PostgresStorageOptions`, and data moves from per-store tables to the storage tables
+- Waiting for a result returns only a final result (success, failure, revoked, or rejected); a stored retry no longer ends the wait
+- Task state updates never replace a final state, and the metadata passed with a state update is not stored
+- Snapshots of historical metrics with the same timestamp but different task names are both kept
 - In-memory revocation subscribers no longer receive revocations made before they subscribed, as with the other providers
 
 ### Removed
 - `AutoCreateTables` from every PostgreSQL store's options
 - The unused `DotCelery.Core.Migrations` framework and the Redis and MongoDB migration stores
 - The `DotCelery.Build.SqlValidator` tool, which did not validate any SQL in this repository
-- The per-store in-memory and PostgreSQL implementations of those eight stores and their options, and `InMemoryRateLimiter` from Core
+- The per-store in-memory and PostgreSQL implementations and their options, including `PostgresBackendOptions`, and `InMemoryRateLimiter` from Core
 
 ### Fixed
 - The worker no longer drops a message when the result backend, revocation store, rate limiter, or retry publish fails; it returns the message to the broker
@@ -45,6 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Outbox messages and signals are claimed, so several dispatchers never handle the same one at once, and one whose dispatcher stops is delivered again after the claim timeout; outbox attempts count only failed publishes
 - The PostgreSQL rate limiter no longer fails on every call, and the rate limit window is shared by every worker using the same storage
 - Inbox and revocation entries expire, and task execution tracking and partition locks cannot be released by a task that no longer holds them
+- PostgreSQL results larger than 8000 bytes are stored; result notifications carry only the task ID
+- The client's `Pending` state no longer makes waiting for a result return before the task finishes, and no longer overwrites a result that is already stored
+- Batch completion is atomic, so tasks finishing together are all counted; the PostgreSQL store now finishes batches, and a cancelled batch stays cancelled
+- PostgreSQL sagas are marked completed and compensated
+- Requeueing a dead letter whose original message cannot be read keeps the dead letter instead of dropping it
+- A task whose worker stopped counts as running in the queue metrics only until the execution timeout
 
 ## [0.1.0] - 2026-01-12
 

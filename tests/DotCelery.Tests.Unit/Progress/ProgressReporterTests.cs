@@ -1,7 +1,8 @@
-using DotCelery.Backend.InMemory;
+using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Core.Models;
 using DotCelery.Core.Progress;
 using DotCelery.Core.Signals;
+using DotCelery.Core.Storage.Stores;
 using DotCelery.Worker.Progress;
 
 namespace DotCelery.Tests.Unit.Progress;
@@ -11,7 +12,7 @@ namespace DotCelery.Tests.Unit.Progress;
 /// </summary>
 public sealed class ProgressReporterTests : IAsyncDisposable
 {
-    private readonly InMemoryResultBackend _backend = new();
+    private readonly ResultBackend _backend = new(new InMemoryStorageProvider());
     private readonly TestSignalDispatcher _signalDispatcher = new();
 
     public async ValueTask DisposeAsync()

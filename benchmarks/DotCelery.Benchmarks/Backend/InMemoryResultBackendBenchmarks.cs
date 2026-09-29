@@ -1,16 +1,17 @@
 using BenchmarkDotNet.Attributes;
-using DotCelery.Backend.InMemory;
+using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Core.Models;
+using DotCelery.Core.Storage.Stores;
 
 namespace DotCelery.Benchmarks.Backend;
 
 /// <summary>
-/// Benchmarks for in-memory result backend operations.
+/// Benchmarks for result backend operations on the in-memory storage provider.
 /// </summary>
 [MemoryDiagnoser]
 public class InMemoryResultBackendBenchmarks
 {
-    private InMemoryResultBackend _backend = null!;
+    private ResultBackend _backend = null!;
     private TaskResult _successResult = null!;
     private TaskResult _failureResult = null!;
     private string _existingTaskId = null!;
@@ -18,7 +19,7 @@ public class InMemoryResultBackendBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _backend = new InMemoryResultBackend();
+        _backend = new ResultBackend(new InMemoryStorageProvider());
 
         _successResult = new TaskResult
         {
@@ -111,12 +112,12 @@ public class InMemoryResultBackendBenchmarks
 [MemoryDiagnoser]
 public class ResultWaitingBenchmarks
 {
-    private InMemoryResultBackend _backend = null!;
+    private ResultBackend _backend = null!;
 
     [GlobalSetup]
     public void Setup()
     {
-        _backend = new InMemoryResultBackend();
+        _backend = new ResultBackend(new InMemoryStorageProvider());
     }
 
     [GlobalCleanup]

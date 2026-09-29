@@ -76,3 +76,39 @@ public sealed class InMemoryWindowRateLimiterTests : WindowRateLimiterConformanc
     protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
         ValueTask.FromResult<IStorageProvider>(new InMemoryStorageProvider(timeProvider));
 }
+
+public sealed class InMemoryResultBackendTests : ResultBackendConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult<IStorageProvider>(new InMemoryStorageProvider(timeProvider));
+}
+
+public sealed class InMemoryBatchStoreTests : BatchStoreConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult<IStorageProvider>(new InMemoryStorageProvider(timeProvider));
+}
+
+public sealed class InMemorySagaStoreTests : SagaStoreConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult<IStorageProvider>(new InMemoryStorageProvider(timeProvider));
+}
+
+public sealed class InMemoryDeadLetterStoreTests : DeadLetterStoreConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult<IStorageProvider>(new InMemoryStorageProvider(timeProvider));
+}
+
+public sealed class InMemoryQueueMetricsTests : QueueMetricsConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult<IStorageProvider>(new InMemoryStorageProvider(timeProvider));
+}
+
+public sealed class InMemoryHistoricalDataStoreTests : HistoricalDataStoreConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult<IStorageProvider>(new InMemoryStorageProvider(timeProvider));
+}

@@ -1,5 +1,4 @@
 using DotCelery.Backend.InMemory.Extensions;
-using DotCelery.Backend.InMemory.Historical;
 using DotCelery.Broker.InMemory.Extensions;
 using DotCelery.Client.Extensions;
 using DotCelery.Core.Abstractions;
@@ -20,6 +19,7 @@ builder.Services.AddDotCelery(celery =>
         .UseInMemoryBroker()
         .UseInMemoryBackend()
         .AddInMemoryHighPriorityFeatures() // delayed store, revocation, rate limiter
+        .AddInMemoryHistoricalDataStore() // powers the /metrics/historical endpoints
         .AddTask<EmailTask>()
         .AddTask<CalculationTask>()
         .AddTask<FlakyTask>()
@@ -33,10 +33,7 @@ builder.Services.AddDotCelery(celery =>
         .AddDelayedMessageDispatcher()
 );
 
-// 2. Optional: historical metrics backing store powers the /metrics/historical endpoints.
-builder.Services.AddSingleton<IHistoricalDataStore, InMemoryHistoricalDataStore>();
-
-// 3. Mount the dashboard. Default prefix is "/celery".
+// 2. Mount the dashboard. Default prefix is "/celery".
 builder.Services.AddDotCeleryDashboard(o =>
 {
     o.Title = "DotCelery Demo Dashboard";
@@ -50,7 +47,7 @@ builder.Services.AddDotCeleryDashboard(o =>
     o.RequireAuthorization = false;
 });
 
-// 4. Hosted services that make the dashboard interesting:
+// 3. Hosted services that make the dashboard interesting:
 //    - register the in-process worker so the Workers panel is populated
 //    - keep enqueueing tasks so the Recent Tasks panel keeps moving
 builder.Services.AddHostedService<WorkerHeartbeatService>();

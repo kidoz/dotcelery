@@ -180,7 +180,7 @@ public sealed record DocumentWriteOptions
     public string? IndexKey { get; init; }
 
     /// <summary>
-    /// Gets the time that queries sort and filter by.
+    /// Gets the time that queries sort and filter by. Providers may round it to the microsecond.
     /// </summary>
     public DateTimeOffset? SortKey { get; init; }
 }

@@ -1,6 +1,3 @@
-using DotCelery.Backend.InMemory.Batches;
-using DotCelery.Backend.InMemory.Metrics;
-using DotCelery.Backend.InMemory.Sagas;
 using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Batches;
@@ -20,9 +17,8 @@ namespace DotCelery.Backend.InMemory.Extensions;
 /// Extension methods for configuring the in-memory backend.
 /// </summary>
 /// <remarks>
-/// The delayed message, revocation, outbox, inbox, signal, partition lock, execution tracking
-/// and rate limiting stores keep their data in one <see cref="InMemoryStorageProvider"/>
-/// (see <see cref="AddInMemoryStorage"/>). Their retention and timing are configured with
+/// Every store keeps its data in one <see cref="InMemoryStorageProvider"/> (see
+/// <see cref="AddInMemoryStorage"/>). Retention and timing are configured with
 /// <see cref="StorageStoreOptions"/>.
 /// </remarks>
 public static class InMemoryBackendExtensions
@@ -34,7 +30,8 @@ public static class InMemoryBackendExtensions
     /// <returns>The builder.</returns>
     public static DotCeleryBuilder UseInMemoryBackend(this DotCeleryBuilder builder)
     {
-        return builder.UseBackend<InMemoryResultBackend>();
+        builder.AddInMemoryStorage();
+        return builder.UseBackend<ResultBackend>();
     }
 
     /// <summary>
@@ -98,7 +95,8 @@ public static class InMemoryBackendExtensions
     /// <returns>The builder.</returns>
     public static DotCeleryBuilder AddInMemoryBatchStore(this DotCeleryBuilder builder)
     {
-        builder.Services.AddSingleton<IBatchStore, InMemoryBatchStore>();
+        builder.AddInMemoryStorage();
+        builder.Services.AddSingleton<IBatchStore, BatchStore>();
         return builder;
     }
 
@@ -147,7 +145,8 @@ public static class InMemoryBackendExtensions
     /// <returns>The builder.</returns>
     public static DotCeleryBuilder AddInMemorySagaStore(this DotCeleryBuilder builder)
     {
-        builder.Services.AddSingleton<ISagaStore, InMemorySagaStore>();
+        builder.AddInMemoryStorage();
+        builder.Services.AddSingleton<ISagaStore, SagaStore>();
         return builder;
     }
 
@@ -188,13 +187,38 @@ public static class InMemoryBackendExtensions
     }
 
     /// <summary>
+    /// Adds the in-memory dead letter store.
+    /// </summary>
+    /// <param name="builder">The DotCelery builder.</param>
+    /// <returns>The builder.</returns>
+    public static DotCeleryBuilder AddInMemoryDeadLetterStore(this DotCeleryBuilder builder)
+    {
+        builder.AddInMemoryStorage();
+        builder.Services.AddSingleton<IDeadLetterStore, DeadLetterStore>();
+        return builder;
+    }
+
+    /// <summary>
+    /// Adds the in-memory historical metrics store for the dashboard.
+    /// </summary>
+    /// <param name="builder">The DotCelery builder.</param>
+    /// <returns>The builder.</returns>
+    public static DotCeleryBuilder AddInMemoryHistoricalDataStore(this DotCeleryBuilder builder)
+    {
+        builder.AddInMemoryStorage();
+        builder.Services.AddSingleton<IHistoricalDataStore, HistoricalDataStore>();
+        return builder;
+    }
+
+    /// <summary>
     /// Adds the in-memory queue metrics for monitoring.
     /// </summary>
     /// <param name="builder">The DotCelery builder.</param>
     /// <returns>The builder.</returns>
     public static DotCeleryBuilder AddInMemoryQueueMetrics(this DotCeleryBuilder builder)
     {
-        builder.Services.AddSingleton<IQueueMetrics, InMemoryQueueMetrics>();
+        builder.AddInMemoryStorage();
+        builder.Services.AddSingleton<IQueueMetrics, QueueMetrics>();
         return builder;
     }
 

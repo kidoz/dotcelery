@@ -1,10 +1,10 @@
-using DotCelery.Backend.InMemory;
-using DotCelery.Backend.InMemory.Sagas;
+using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Broker.InMemory;
 using DotCelery.Core.Canvas;
 using DotCelery.Core.Sagas;
 using DotCelery.Core.Serialization;
 using DotCelery.Core.Signals;
+using DotCelery.Core.Storage.Stores;
 using DotCelery.Worker.Sagas;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -16,9 +16,9 @@ namespace DotCelery.Tests.Unit.Sagas;
 /// </summary>
 public sealed class SagaCompletionHandlerTests : IAsyncDisposable
 {
-    private readonly InMemorySagaStore _sagaStore = new();
+    private readonly SagaStore _sagaStore = new(new InMemoryStorageProvider());
     private readonly InMemoryBroker _broker = new();
-    private readonly InMemoryResultBackend _backend = new();
+    private readonly ResultBackend _backend = new(new InMemoryStorageProvider());
     private readonly JsonMessageSerializer _serializer = new();
     private readonly TestSignalDispatcher _signalDispatcher = new();
     private readonly SagaOrchestrator _orchestrator;
