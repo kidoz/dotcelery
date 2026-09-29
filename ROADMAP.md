@@ -13,7 +13,7 @@ but do not yet behave as documented.
 - RabbitMQ publisher confirms and mandatory routing
 
 ### Serialization
-- Source-generated JSON contexts for core message types (`DotCeleryJsonContext`, `RedisBackendJsonContext`)
+- Source-generated JSON contexts for core message types (`DotCeleryJsonContext`)
 - Opt-in deserialization type allowlist (`JsonMessageSerializerOptions.EnforceDeserializationTypeAllowlist`)
 
 ### Security
@@ -32,21 +32,19 @@ but do not yet behave as documented.
 ### Delivery and Reliability
 - Redis broker: pending-message reclaim takes over messages that live workers are still processing (no lease renewal), and acknowledged entries are never deleted from streams
 - RabbitMQ broker: reconnect logic competes with the client's automatic recovery and can acknowledge on a different channel than the one that delivered the message; queue arguments (priority, queue type, dead-letter exchange) are fixed
-- Delayed messages are removed from the Redis store before they are published, and MongoDB can dispatch the same message twice
-- Redis stores open a new connection on reconnect without disposing the old one
+- MongoDB can dispatch the same delayed message twice
 - Without a delay store, a message with a future ETA holds the worker's consume loop for up to 5 seconds before it is requeued
 - Hard time limits are cooperative; a task that ignores its cancellation token keeps its worker slot
 
 ### Backend Correctness
 - MongoDB: the client's `Pending` row makes `AsyncResult.GetAsync` return immediately, and the `Pending` write can overwrite a result that is already stored
-- Redis dead-letter store sets a TTL on the hash that holds every entry
-- Batch completion is a read-modify-write in the Redis store, and the MongoDB store never advances batch state
-- Outbox storage ignores the caller's transaction, and the Redis and MongoDB outbox stores are not claim-safe across workers
-- Redis and MongoDB inbox and revocation entries are never cleaned up, and Redis streams grow without bound
+- The MongoDB batch store never advances batch state
+- Outbox storage ignores the caller's transaction, and the MongoDB outbox store is not claim-safe across workers
+- MongoDB inbox and revocation entries are never cleaned up, and Redis broker streams grow without bound
 
 ### Incomplete Documented Features
 - Canvas: `Chain`, `Group`, and `Chord` define workflows, but nothing dispatches them or runs link and error callbacks
-- Sagas: the orchestrator is not registered by the DI extensions, Redis saga scripts read property names that do not match the stored JSON, and the MongoDB store never marks sagas completed
+- Sagas: the orchestrator is not registered by the DI extensions, and the MongoDB store never marks sagas completed
 - Batches: `OnComplete` callbacks are not dispatched, and tasks are published before the batch record exists
 - Metrics: `DotCeleryInstrumentation` defines instruments, but the client and worker never record them (tracing works)
 - Dashboard: no built-in task query, queue stats, or metrics providers; workers do not register themselves; SignalR notifications are never raised; the middleware serves the UI page for API and hub routes unless endpoints are mapped first
@@ -65,14 +63,14 @@ but do not yet behave as documented.
 ### Test Coverage
 - No tests exercise the worker consume/ack/retry/shutdown loop, the delayed-message and outbox dispatchers, or the inbox, tenant, and overlap filters (the stores they use have conformance tests)
 - The in-memory broker does not model redelivery or serialization round-trips; broker contract tests should run against real brokers
-- No integration coverage for the Redis saga, inbox, outbox, and dead-letter stores, or for RabbitMQ connection loss
+- No integration coverage for RabbitMQ connection loss
 - Analyzer DCEL001 reports task names that are not string literals (for example, constants) as empty
 
 ## Planned Features
 
 ### Storage
-- Redis and MongoDB providers of the primitives; `DotCelery.Storage.Sql` and the PostgreSQL provider exist and pass the conformance tests
-- Remove the per-store Redis and MongoDB implementations once those providers exist; every store is built once on the storage primitives, and the in-memory and PostgreSQL backends use them
+- MongoDB provider of the primitives; the in-memory, PostgreSQL, and Redis providers exist and pass the conformance tests
+- Remove the per-store MongoDB implementations once its provider exists; every store is built once on the storage primitives, and the in-memory, PostgreSQL, and Redis backends use them
 
 ### Brokers
 - Azure Service Bus broker
@@ -83,7 +81,7 @@ but do not yet behave as documented.
 - SQL Server backend as a dialect of `DotCelery.Storage.Sql`
 
 ### Serialization
-- Pluggable serializers (MessagePack/Protobuf); brokers currently hard-code the JSON envelope, and Redis saga scripts decode JSON server-side
+- Pluggable serializers (MessagePack/Protobuf); brokers currently hard-code the JSON envelope
 - Message compression
 - Verified AOT and trimming compatibility (`IsAotCompatible`, no reflection-based task invocation)
 
@@ -94,7 +92,7 @@ but do not yet behave as documented.
 
 ### Worker/Execution
 - Exactly-once processing: atomic inbox claim committed together with result storage
-- Connection pooling controls for brokers/backends: shared connections across Redis stores, separate publish and consume connections with channel pooling for RabbitMQ, and shared `MongoClient` instances across stores
+- Connection pooling controls for brokers/backends: separate publish and consume connections with channel pooling for RabbitMQ, and shared `MongoClient` instances across stores
 - Batch execution tasks (single-task processing of input batches)
 
 ### Security

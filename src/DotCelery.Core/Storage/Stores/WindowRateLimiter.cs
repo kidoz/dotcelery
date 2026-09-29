@@ -1,3 +1,4 @@
+using System.Globalization;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.RateLimiting;
 using Microsoft.Extensions.Options;
@@ -9,7 +10,8 @@ namespace DotCelery.Core.Storage.Stores;
 /// every process that uses the same storage.
 /// </summary>
 /// <remarks>
-/// Every policy is applied as a sliding window; <see cref="RateLimitPolicy.Algorithm"/> is not used.
+/// Every policy is applied as a sliding window; <see cref="RateLimitPolicy.Algorithm"/> is not
+/// used. Different policies on the same resource are counted separately.
 /// </remarks>
 public sealed class WindowRateLimiter : IRateLimiter
 {
@@ -46,7 +48,7 @@ public sealed class WindowRateLimiter : IRateLimiter
 
         var result = await _counters
             .TryAddToWindowAsync(
-                _keyPrefix + resourceKey,
+                WindowKey(resourceKey, policy),
                 policy.Limit,
                 policy.Window,
                 cancellationToken
@@ -69,7 +71,7 @@ public sealed class WindowRateLimiter : IRateLimiter
         ArgumentNullException.ThrowIfNull(policy);
 
         var window = await _counters
-            .GetWindowAsync(_keyPrefix + resourceKey, policy.Window, cancellationToken)
+            .GetWindowAsync(WindowKey(resourceKey, policy), policy.Window, cancellationToken)
             .ConfigureAwait(false);
 
         return window.Count < policy.Limit || window.OldestEvent is null
@@ -87,7 +89,7 @@ public sealed class WindowRateLimiter : IRateLimiter
         ArgumentNullException.ThrowIfNull(policy);
 
         var window = await _counters
-            .GetWindowAsync(_keyPrefix + resourceKey, policy.Window, cancellationToken)
+            .GetWindowAsync(WindowKey(resourceKey, policy), policy.Window, cancellationToken)
             .ConfigureAwait(false);
         var now = _timeProvider.GetUtcNow();
 
@@ -101,4 +103,12 @@ public sealed class WindowRateLimiter : IRateLimiter
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    // Each policy on a resource has its own window. Escaping keeps resource keys that
+    // contain '/' unambiguous.
+    private string WindowKey(string resourceKey, RateLimitPolicy policy) =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"{_keyPrefix}{Uri.EscapeDataString(resourceKey)}/{policy.Limit}/{policy.Window.Ticks}"
+        );
 }

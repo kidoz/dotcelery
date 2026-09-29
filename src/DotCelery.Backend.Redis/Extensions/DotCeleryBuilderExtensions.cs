@@ -1,14 +1,11 @@
-using DotCelery.Backend.Redis.Services;
+using DotCelery.Backend.Redis.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Extensions;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
 
 namespace DotCelery.Backend.Redis.Extensions;
 
 /// <summary>
-/// Extension methods for configuring Redis backend with DotCeleryBuilder.
+/// Extension methods for configuring the Redis backend with DotCeleryBuilder.
 /// </summary>
 public static class DotCeleryBuilderExtensions
 {
@@ -20,13 +17,10 @@ public static class DotCeleryBuilderExtensions
     /// <returns>The builder for chaining.</returns>
     public static DotCeleryBuilder UseRedis(
         this DotCeleryBuilder builder,
-        Action<RedisBackendOptions>? configure = null
+        Action<RedisStorageOptions>? configure = null
     )
     {
-        if (configure is not null)
-        {
-            builder.Services.Configure(configure);
-        }
+        ArgumentNullException.ThrowIfNull(builder);
 
         // Remove any existing backend registration
         var existingBackend = builder.Services.FirstOrDefault(d =>
@@ -37,10 +31,7 @@ public static class DotCeleryBuilderExtensions
             builder.Services.Remove(existingBackend);
         }
 
-        builder.Services.AddSingleton<IResultBackend, RedisResultBackend>();
-        builder.Services.TryAddEnumerable(
-            ServiceDescriptor.Singleton<IHostedService, RedisBackendInsecureDefaultsCheck>()
-        );
+        builder.Services.AddRedisBackend(configure);
 
         return builder;
     }
@@ -51,11 +42,8 @@ public static class DotCeleryBuilderExtensions
     /// <param name="builder">The DotCelery builder.</param>
     /// <param name="connectionString">The Redis connection string.</param>
     /// <returns>The builder for chaining.</returns>
-    public static DotCeleryBuilder UseRedis(this DotCeleryBuilder builder, string connectionString)
-    {
-        return builder.UseRedis(options =>
-        {
-            options.ConnectionString = connectionString;
-        });
-    }
+    public static DotCeleryBuilder UseRedis(
+        this DotCeleryBuilder builder,
+        string connectionString
+    ) => builder.UseRedis(options => options.ConnectionString = connectionString);
 }

@@ -1,3 +1,4 @@
+using DotCelery.Backend.Redis.Storage;
 using DotCelery.Core.Security;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -10,7 +11,7 @@ namespace DotCelery.Backend.Redis.Services;
 /// development connection string in a non-development host environment.
 /// </summary>
 internal sealed class RedisBackendInsecureDefaultsCheck(
-    IOptions<RedisBackendOptions> options,
+    IOptions<RedisStorageOptions> options,
     IHostEnvironment environment,
     ILogger<RedisBackendInsecureDefaultsCheck> logger
 ) : IHostedService
@@ -20,9 +21,9 @@ internal sealed class RedisBackendInsecureDefaultsCheck(
         InsecureDefaultsGuard.WarnIfDevelopmentDefault(
             logger,
             environment,
-            componentName: "Redis result backend",
+            componentName: "Redis storage",
             configuredValue: options.Value.ConnectionString,
-            developmentDefault: RedisBackendOptions.DevelopmentDefaultConnectionString
+            developmentDefault: RedisStorageOptions.DevelopmentDefaultConnectionString
         );
         return Task.CompletedTask;
     }

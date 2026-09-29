@@ -60,6 +60,33 @@ public abstract class WindowRateLimiterConformanceTests : StoreConformanceTests
     }
 
     [Fact]
+    public async Task TryAcquireAsync_PoliciesOnTheSameResource_AreIndependent()
+    {
+        var limiter = CreateLimiter();
+        var perSecond = RateLimitPolicy.PerSecond(2);
+        for (var i = 0; i < 2; i++)
+        {
+            await limiter.TryAcquireAsync("api", perSecond);
+        }
+
+        Assert.False((await limiter.TryAcquireAsync("api", perSecond)).IsAcquired);
+        Assert.True((await limiter.TryAcquireAsync("api", Policy)).IsAcquired);
+        Assert.Equal(1, (await limiter.GetUsageAsync("api", Policy)).Used);
+    }
+
+    [Fact]
+    public async Task TryAcquireAsync_ResourceKeysWithSeparators_AreDistinct()
+    {
+        var limiter = CreateLimiter();
+        for (var i = 0; i < 3; i++)
+        {
+            await limiter.TryAcquireAsync("api/3", Policy);
+        }
+
+        Assert.True((await limiter.TryAcquireAsync("api", Policy)).IsAcquired);
+    }
+
+    [Fact]
     public async Task TryAcquireAsync_ConcurrentWorkers_NeverExceedTheLimit()
     {
         var leases = await RunConcurrentlyAsync(

@@ -48,8 +48,7 @@ builder.Services.AddDotCelery(celery =>
         celery.UseRedis(options =>
         {
             options.ConnectionString = redisConnectionString;
-            options.KeyPrefix = "dotcelery:example:result:";
-            options.StateKeyPrefix = "dotcelery:example:state:";
+            options.KeyPrefix = "dotcelery:example:";
         });
     }
     else

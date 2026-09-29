@@ -207,7 +207,7 @@ var chord = new Group(
 
 Coordinate long-running business processes with automatic compensation on failure.
 
-> **Status:** The DI extensions do not yet register `ISagaOrchestrator`, and the Redis, PostgreSQL, and MongoDB saga stores have known defects. See [ROADMAP.md](ROADMAP.md#known-gaps).
+> **Status:** The DI extensions do not yet register `ISagaOrchestrator`, and the MongoDB saga store has known defects. See [ROADMAP.md](ROADMAP.md#known-gaps).
 
 ```csharp
 var saga = new Saga
@@ -443,6 +443,20 @@ builder.Services.AddOpenTelemetry()
 | `dotcelery.tasks.duration` | Task execution duration (ms) |
 | `dotcelery.tasks.queue_time` | Time tasks spend in queue before processing (ms) |
 | `dotcelery.tasks.in_progress` | Tasks currently being processed |
+
+## Redis Storage
+
+Every Redis store keeps its data under one key prefix. Register the result backend with `UseRedis` and each other store with its `AddRedis...` method; every registration configures the same `RedisStorageOptions` and shares one connection per connection string.
+
+```csharp
+builder.Services.AddRedisOutboxStore(options =>
+{
+    options.ConnectionString = connectionString;
+    options.KeyPrefix = "billing:";
+});
+```
+
+Expiry follows the application's clock rather than Redis key expiry, so processes that share Redis need synchronized clocks. Expired entries are deleted every `StorageStoreOptions.PurgeInterval`.
 
 ## PostgreSQL Schema
 

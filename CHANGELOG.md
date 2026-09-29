@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Every store (results, batches, sagas, dead letters, queue metrics, historical metrics, delayed messages, outbox, inbox, signals, revocations, partition locks, execution tracking, and rate limiting) is built once in `DotCelery.Core.Storage.Stores` on the storage primitives, and runs the same conformance tests on the in-memory and PostgreSQL providers
 - `StorageStoreOptions` for those stores: claim timeout, outbox retries, retention, result expiry, revocation and result polling, and a `Prefix` that keeps applications sharing storage apart
 - `AddInMemoryDeadLetterStore` and `AddInMemoryHistoricalDataStore`
+- Redis provider of the storage primitives (`AddRedisStorage`, `RedisStorageOptions`): each operation is a Lua script on keys that share one hash tag, expiry follows the application clock, notifications use pub/sub, and every store shares one connection per connection string
+- `AddRedis...` registration methods for every store
 - `StoragePurgeService` deletes expired storage entries every `StorageStoreOptions.PurgeInterval`; `AddInMemoryStorage` and `AddPostgresStorage` register it
 
 ### Changed
@@ -26,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The worker stops with an error when the broker ends the message stream unexpectedly, instead of running without a consumer
 - The Redis broker reads again immediately while messages are available; `RedisBrokerOptions.BlockTimeout` applies only after a read returns nothing
 - The in-memory and PostgreSQL registrations of every store use the stores built on the storage primitives. `UsePostgres` and every `AddPostgres...` method take `PostgresStorageOptions`, and data moves from per-store tables to the storage tables
+- The Redis result backend and stores use the stores built on the storage primitives. `UseRedis` and every `AddRedis...` method take `RedisStorageOptions`, and data moves to new keys under `RedisStorageOptions.KeyPrefix`
 - Waiting for a result returns only a final result (success, failure, revoked, or rejected); a stored retry no longer ends the wait
 - Task state updates never replace a final state, and the metadata passed with a state update is not stored
 - Snapshots of historical metrics with the same timestamp but different task names are both kept
@@ -36,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The unused `DotCelery.Core.Migrations` framework and the Redis and MongoDB migration stores
 - The `DotCelery.Build.SqlValidator` tool, which did not validate any SQL in this repository
 - The per-store in-memory and PostgreSQL implementations and their options, including `PostgresBackendOptions`, and `InMemoryRateLimiter` from Core
+- The per-store Redis implementations and their options, including `RedisBackendOptions`, and `RedisBackendJsonContext`
 
 ### Fixed
 - The worker no longer drops a message when the result backend, revocation store, rate limiter, or retry publish fails; it returns the message to the broker
@@ -55,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PostgreSQL sagas are marked completed and compensated
 - Requeueing a dead letter whose original message cannot be read keeps the dead letter instead of dropping it
 - A task whose worker stopped counts as running in the queue metrics only until the execution timeout
+- Redis: delayed messages stay stored until they are dispatched, outbox messages are claimed, dead letters expire one by one instead of together, saga updates no longer read mismatched property names, batch completion is atomic, and stores no longer open a new connection on every reconnect
 
 ## [0.1.0] - 2026-01-12
 
