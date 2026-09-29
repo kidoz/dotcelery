@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 jobs:
-  # Testcontainers provisions Redis, Postgres, RabbitMQ, and Mongo on the
+  # Testcontainers provisions Redis, Postgres, SQL Server, RabbitMQ, and Mongo on the
   # runner's Docker daemon; no manual service startup is needed.
   integration:
     runs-on: ubuntu-latest

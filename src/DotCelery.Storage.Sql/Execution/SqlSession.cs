@@ -22,23 +22,35 @@ public interface ISqlDataSourceProvider
 /// </summary>
 public sealed class SqlExecutor
 {
+    private const int MaxAttempts = 3;
+
     private readonly DbDataSource _dataSource;
     private readonly TimeSpan _commandTimeout;
+    private readonly Func<DbException, bool> _isTransient;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SqlExecutor"/> class.
     /// </summary>
-    /// <param name="dataSource">The data source.</param>
-    /// <param name="commandTimeout">The timeout for each statement.</param>
-    public SqlExecutor(DbDataSource dataSource, TimeSpan commandTimeout)
+    /// <param name="dataSource">The data source of the database.</param>
+    /// <param name="commandTimeout">How long a command may run.</param>
+    /// <param name="isTransient">
+    /// Identifies errors after which the whole operation can safely run again, such as a
+    /// deadlock that rolled it back. Such operations are retried a few times.
+    /// </param>
+    public SqlExecutor(
+        DbDataSource dataSource,
+        TimeSpan commandTimeout,
+        Func<DbException, bool>? isTransient = null
+    )
     {
         ArgumentNullException.ThrowIfNull(dataSource);
         _dataSource = dataSource;
         _commandTimeout = commandTimeout;
+        _isTransient = isTransient ?? (_ => false);
     }
 
     /// <summary>
-    /// Opens a session on one connection, for work that spans several statements.
+    /// Opens a session on a new connection.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The session; dispose it to close the connection.</returns>
@@ -51,82 +63,105 @@ public sealed class SqlExecutor
     }
 
     /// <summary>
-    /// Runs a statement and returns the number of affected rows.
+    /// Executes a statement on its own connection.
     /// </summary>
     /// <param name="sql">The statement.</param>
-    /// <param name="bind">Binds the statement parameters.</param>
+    /// <param name="bind">Binds the parameters.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The number of affected rows.</returns>
-    public async Task<int> ExecuteAsync(
+    public Task<int> ExecuteAsync(
         string sql,
         Action<SqlParameters>? bind,
         CancellationToken cancellationToken
-    )
-    {
-        await using var session = await OpenSessionAsync(cancellationToken).ConfigureAwait(false);
-        return await session.ExecuteAsync(sql, bind, cancellationToken).ConfigureAwait(false);
-    }
+    ) => RunAsync(session => session.ExecuteAsync(sql, bind, cancellationToken), cancellationToken);
 
     /// <summary>
-    /// Runs a query and maps its first row.
+    /// Runs a query on its own connection and maps its first row.
     /// </summary>
     /// <typeparam name="T">The mapped type.</typeparam>
     /// <param name="sql">The query.</param>
-    /// <param name="bind">Binds the query parameters.</param>
+    /// <param name="bind">Binds the parameters.</param>
     /// <param name="map">Maps the row.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The mapped row, or the default value if the query returned no rows.</returns>
-    public async Task<T?> QuerySingleAsync<T>(
+    /// <returns>The mapped row, or the default value if there is none.</returns>
+    public Task<T?> QuerySingleAsync<T>(
         string sql,
         Action<SqlParameters>? bind,
         Func<DbDataReader, T> map,
         CancellationToken cancellationToken
-    )
-    {
-        await using var session = await OpenSessionAsync(cancellationToken).ConfigureAwait(false);
-        return await session
-            .QuerySingleAsync(sql, bind, map, cancellationToken)
-            .ConfigureAwait(false);
-    }
+    ) =>
+        RunAsync(
+            session => session.QuerySingleAsync(sql, bind, map, cancellationToken),
+            cancellationToken
+        );
 
     /// <summary>
-    /// Runs a query and maps every row.
+    /// Runs a query on its own connection and maps every row.
     /// </summary>
     /// <typeparam name="T">The mapped type.</typeparam>
     /// <param name="sql">The query.</param>
-    /// <param name="bind">Binds the query parameters.</param>
-    /// <param name="map">Maps each row.</param>
+    /// <param name="bind">Binds the parameters.</param>
+    /// <param name="map">Maps a row.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The mapped rows.</returns>
-    public async Task<List<T>> QueryAsync<T>(
+    public Task<List<T>> QueryAsync<T>(
         string sql,
         Action<SqlParameters>? bind,
         Func<DbDataReader, T> map,
         CancellationToken cancellationToken
-    )
-    {
-        await using var session = await OpenSessionAsync(cancellationToken).ConfigureAwait(false);
-        return await session.QueryAsync(sql, bind, map, cancellationToken).ConfigureAwait(false);
-    }
+    ) =>
+        RunAsync(
+            session => session.QueryAsync(sql, bind, map, cancellationToken),
+            cancellationToken
+        );
 
     /// <summary>
-    /// Runs work in a transaction that commits when the work completes.
+    /// Runs work in a read-committed transaction on its own connection, and commits it.
     /// </summary>
     /// <typeparam name="T">The result type.</typeparam>
-    /// <param name="work">The work, given a session bound to the transaction.</param>
+    /// <param name="work">The work, which may run again if a transient error rolls it back.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The result of the work.</returns>
-    public async Task<T> InTransactionAsync<T>(
+    public Task<T> InTransactionAsync<T>(
         Func<SqlSession, Task<T>> work,
         CancellationToken cancellationToken
     )
     {
         ArgumentNullException.ThrowIfNull(work);
 
-        await using var session = await OpenSessionAsync(cancellationToken).ConfigureAwait(false);
-        return await session
-            .InTransactionAsync(() => work(session), cancellationToken)
-            .ConfigureAwait(false);
+        return RunAsync(
+            session => session.InTransactionAsync(() => work(session), cancellationToken),
+            cancellationToken
+        );
+    }
+
+    private async Task<T> RunAsync<T>(
+        Func<SqlSession, Task<T>> operation,
+        CancellationToken cancellationToken
+    )
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await using var session = await OpenSessionAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                return await operation(session).ConfigureAwait(false);
+            }
+            // Some drivers report a cancelled command as a database error
+            catch (DbException ex) when (cancellationToken.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(ex.Message, ex, cancellationToken);
+            }
+            catch (DbException ex) when (attempt < MaxAttempts && _isTransient(ex))
+            {
+                await Task.Delay(
+                        TimeSpan.FromMilliseconds(Random.Shared.Next(5, 20) * attempt),
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            }
+        }
     }
 }
 

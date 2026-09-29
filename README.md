@@ -11,7 +11,7 @@ A distributed task queue for .NET 10, inspired by Python's [Celery](https://docs
 ### Core Features
 - **Distributed Task Execution** - Execute tasks asynchronously across multiple workers
 - **Multiple Brokers** - RabbitMQ, Redis Streams, In-Memory (Azure Service Bus, Amazon SQS planned)
-- **Result Backends** - Redis, PostgreSQL, MongoDB, In-Memory (SQL Server planned)
+- **Result Backends** - Redis, PostgreSQL, SQL Server, MongoDB, In-Memory
 - **Canvas Workflows** - Chain, Group, and Chord primitives for describing workflows (not yet executed by workers)
 - **Beat Scheduler** - Periodic task scheduling with cron and interval support
 - **OpenTelemetry** - Built-in distributed tracing (metric instruments are defined but not yet recorded)
@@ -508,6 +508,20 @@ builder.Services.AddPostgresMigrations(options => options.RunAtStartup = false);
 var script = host.Services.GetRequiredService<SqlMigrator>().GenerateScript();
 ```
 
+## SQL Server Storage
+
+SQL Server stores use the same storage tables and versioned migrations as PostgreSQL, in the `dbo` schema by default. Register the result backend with `UseSqlServer` and each other store with its `AddSqlServer...` method; every registration configures the same `SqlServerStorageOptions`.
+
+```csharp
+builder.Services.AddSqlServerOutboxStore(options =>
+{
+    options.ConnectionString = connectionString;
+    options.Schema = "celery";
+});
+```
+
+Migrations run at startup under an application lock (`sp_getapplock`), and `AddSqlServerMigrations(options => options.RunAtStartup = false)` with `SqlMigrator.GenerateScript()` produces a script to apply by hand, as with PostgreSQL. Text columns use a binary collation, so keys are case-sensitive whatever the database collation. SQL Server has no simple publish/subscribe, so result waits and revocations poll every `StorageStoreOptions.ResultPollInterval` and `RevocationPollInterval`. An application uses one SQL database type for its stores: PostgreSQL or SQL Server.
+
 ## Project Structure
 
 ```
@@ -525,6 +539,7 @@ dotcelery/
 │   ├── DotCelery.Backend.InMemory/  # In-memory backend (testing)
 │   ├── DotCelery.Backend.Redis/     # Redis backend
 │   ├── DotCelery.Backend.Postgres/  # PostgreSQL backend
+│   ├── DotCelery.Backend.SqlServer/ # SQL Server backend
 │   ├── DotCelery.Backend.Mongo/     # MongoDB backend
 │   ├── DotCelery.Storage.Sql/       # SQL schema model, migrations, and storage primitives
 │   ├── DotCelery.Telemetry/         # OpenTelemetry instrumentation
@@ -556,6 +571,7 @@ dotcelery/
 |---------|---------|
 | Redis | 6.0+ |
 | PostgreSQL | 12+ |
+| SQL Server | 2016+ (or Azure SQL Database) |
 | MongoDB | 5.0+ |
 
 ## Testing
@@ -571,7 +587,7 @@ dotnet test tests/DotCelery.Tests.Unit
 dotnet test tests/DotCelery.Tests.Integration
 ```
 
-Integration tests use [Testcontainers](https://testcontainers.com/) to spin up RabbitMQ, Redis, PostgreSQL, and MongoDB containers automatically.
+Integration tests use [Testcontainers](https://testcontainers.com/) to spin up RabbitMQ, Redis, PostgreSQL, SQL Server, and MongoDB containers automatically. SQL Server images are x86-64 only, so on ARM machines Docker must emulate them (Docker Desktop: "Use Rosetta for x86_64/amd64 emulation").
 
 ## Contributing
 

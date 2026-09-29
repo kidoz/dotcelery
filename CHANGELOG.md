@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AddRedis...` registration methods for every store
 - MongoDB provider of the storage primitives (`AddMongoStorage`, `MongoStorageOptions`): conditional updates and unique indexes for versions, leases, claims, and counters, pipeline updates for rate limit windows, and notifications through a capped collection read with tailable cursors, so no replica set is needed; every store shares one client per connection string
 - `AddMongo...` registration methods for every store
+- SQL Server backend (`DotCelery.Backend.SqlServer`): a dialect of `DotCelery.Storage.Sql` with the same storage tables and migrations as PostgreSQL, `UseSqlServer` and `AddSqlServer...` registration methods for every store, and migrations under `sp_getapplock`; every statement is checked against the migrated schema in tests. It has no notifications, so stores poll
+- `SqlExecutor` retries an operation a dialect reports as safely retryable, such as a SQL Server deadlock victim, and reports a command cancelled by the caller as `OperationCanceledException` for every driver
 - `StoragePurgeService` deletes expired storage entries every `StorageStoreOptions.PurgeInterval`; `AddInMemoryStorage` and `AddPostgresStorage` register it
 
 ### Changed

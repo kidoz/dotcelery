@@ -14,6 +14,7 @@
     <ProjectReference Include="..\..\src\DotCelery.Broker.Redis\DotCelery.Broker.Redis.csproj" />
     <ProjectReference Include="..\..\src\DotCelery.Backend.Redis\DotCelery.Backend.Redis.csproj" />
     <ProjectReference Include="..\..\src\DotCelery.Backend.Postgres\DotCelery.Backend.Postgres.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Backend.SqlServer\DotCelery.Backend.SqlServer.csproj" />
     <ProjectReference Include="..\..\src\DotCelery.Backend.Mongo\DotCelery.Backend.Mongo.csproj" />
     <ProjectReference Include="..\DotCelery.Tests.Conformance\DotCelery.Tests.Conformance.csproj" />
   </ItemGroup>
@@ -27,6 +28,7 @@
     <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.12" />
     <PackageReference Include="Testcontainers.MongoDb" Version="4.15.0" />
+    <PackageReference Include="Testcontainers.MsSql" Version="4.15.0" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.15.0" />
     <PackageReference Include="Testcontainers.RabbitMq" Version="4.15.0" />
     <PackageReference Include="Testcontainers.Redis" Version="4.15.0" />

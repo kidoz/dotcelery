@@ -1,12 +1,16 @@
 # Roadmap
 
 This document tracks shipped features, known gaps in them, and planned work.
-Status and scope may change as the project evolves. Last reviewed: 2026-09-24.
+Status and scope may change as the project evolves. Last reviewed: 2026-09-29.
 
 Known gaps take priority over new features: several capabilities are exposed in the public API
 but do not yet behave as documented.
 
 ## Completed Features
+
+### Storage
+- Every store is built once on the storage primitives (documents, leases, queues, counters, and notifications) and runs the same conformance tests on the in-memory, PostgreSQL, SQL Server, Redis, and MongoDB providers
+- Versioned SQL migrations defined as schema operations, applied at startup under a database lock or exported as a script, with PostgreSQL and SQL Server dialects
 
 ### Brokers
 - Redis broker (Redis Streams with consumer groups)
@@ -68,9 +72,6 @@ but do not yet behave as documented.
 - Azure Service Bus broker
 - Amazon SQS broker
 - Broker contract extensions these require: lease renewal for long-running tasks, native delayed delivery, explicit dead-letter versus discard, and capability flags (priority, ordering, maximum message size)
-
-### Backends
-- SQL Server backend as a dialect of `DotCelery.Storage.Sql`
 
 ### Serialization
 - Pluggable serializers (MessagePack/Protobuf); brokers currently hard-code the JSON envelope
