@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using DotCelery.Broker.RabbitMQ;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
@@ -31,6 +32,9 @@ public class RabbitMQBrokerIntegrationTests : IAsyncLifetime
             {
                 ConnectionString = _container.GetConnectionString(),
                 PrefetchCount = 1,
+                ConnectionRetryCount = 1,
+                ConnectionRetryDelay = TimeSpan.FromSeconds(1),
+                ReconnectDelay = TimeSpan.FromSeconds(1),
             }
         );
 
@@ -168,6 +172,82 @@ public class RabbitMQBrokerIntegrationTests : IAsyncLifetime
 
         Assert.NotNull(second);
         Assert.Equal(firstId, second.Message.Id);
+    }
+
+    [Fact]
+    public async Task ConsumeAsync_AfterTheConnectionIsLost_PausesAndKeepsConsuming()
+    {
+        var queue = "recovery-queue";
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var received = Channel.CreateUnbounded<BrokerMessage>();
+
+        // One consumer for the whole test, as a worker has: it must survive the connection loss
+        var consuming = Task.Run(
+            async () =>
+            {
+                try
+                {
+                    await foreach (var message in _broker!.ConsumeAsync([queue], cts.Token))
+                    {
+                        await received.Writer.WriteAsync(message, cts.Token).ConfigureAwait(false);
+                        await _broker.AckAsync(message, cts.Token).ConfigureAwait(false);
+                    }
+                }
+                catch (OperationCanceledException) when (cts.IsCancellationRequested)
+                {
+                    // Expected when the test ends
+                }
+            },
+            cts.Token
+        );
+
+        var before = await PublishUntilReceivedAsync(queue, received.Reader, cts.Token);
+
+        // Lose the connection under the running consumer, as a broker restart or a network
+        // reset does. The container keeps its port, so the broker can reconnect to it.
+        var closed = await _container.ExecAsync([
+            "rabbitmqctl",
+            "close_all_connections",
+            "lost by test",
+        ]);
+        Assert.Equal(0, closed.ExitCode);
+
+        var after = await PublishUntilReceivedAsync(queue, received.Reader, cts.Token);
+
+        Assert.NotEqual(before.Message.Id, after.Message.Id);
+
+        await cts.CancelAsync();
+        await consuming;
+    }
+
+    private async Task<BrokerMessage> PublishUntilReceivedAsync(
+        string queue,
+        ChannelReader<BrokerMessage> reader,
+        CancellationToken cancellationToken
+    )
+    {
+        while (true)
+        {
+            try
+            {
+                await _broker!
+                    .PublishAsync(CreateTestMessage() with { Queue = queue }, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                // The broker is not reachable yet; publish again on the next round
+            }
+
+            var read = reader.ReadAsync(cancellationToken).AsTask();
+            if (
+                await Task.WhenAny(read, Task.Delay(TimeSpan.FromSeconds(2), cancellationToken))
+                == read
+            )
+            {
+                return await read;
+            }
+        }
     }
 
     [Fact]

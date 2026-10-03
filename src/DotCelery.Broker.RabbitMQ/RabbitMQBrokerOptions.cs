@@ -58,6 +58,12 @@ public sealed class RabbitMQBrokerOptions
     public TimeSpan Heartbeat { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
+    /// Gets or sets how long the broker waits before rebuilding its channel and consumers after
+    /// the consume channel or its connection is lost.
+    /// </summary>
+    public TimeSpan ReconnectDelay { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// Gets or sets whether publisher confirmations are enabled.
     /// When enabled, publish calls fail if the broker nacks or returns the message.
     /// </summary>

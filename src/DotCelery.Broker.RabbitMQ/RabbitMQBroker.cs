@@ -27,8 +27,9 @@ public sealed class RabbitMQBroker : IMessageBroker
     private readonly IMessageSecurityValidator? _messageSecurityValidator;
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly SemaphoreSlim _publishChannelLock = new(1, 1);
-    private readonly SemaphoreSlim _consumeChannelLock = new(1, 1);
-    private readonly ConcurrentDictionary<ulong, BrokerMessage> _unackedMessages = new();
+
+    // The channel a message arrived on, so it is settled on that channel and no other
+    private readonly ConcurrentDictionary<BrokerMessage, ConsumerChannel> _deliveries = new();
 
     // AOT-friendly type info for TaskMessage serialization
     private static JsonTypeInfo<TaskMessage> TaskMessageTypeInfo =>
@@ -36,7 +37,6 @@ public sealed class RabbitMQBroker : IMessageBroker
 
     private IConnection? _connection;
     private IChannel? _publishChannel;
-    private IChannel? _consumeChannel;
     private bool _disposed;
 
     /// <summary>
@@ -137,6 +137,12 @@ public sealed class RabbitMQBroker : IMessageBroker
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The loop owns its channel and rebuilds it, and its consumers, after the channel or its
+    /// connection is lost, so the stream pauses across a broker restart instead of ending.
+    /// Anything the lost channel had delivered is requeued by the broker and delivered again on
+    /// the new channel.
+    /// </remarks>
     public async IAsyncEnumerable<BrokerMessage> ConsumeAsync(
         IReadOnlyList<string> queues,
         [EnumeratorCancellation] CancellationToken cancellationToken = default
@@ -145,7 +151,142 @@ public sealed class RabbitMQBroker : IMessageBroker
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(queues);
 
-        var channel = await GetConsumeChannelAsync(cancellationToken).ConfigureAwait(false);
+        // Create a channel to buffer messages
+        var messageChannel = Channel.CreateBounded<BrokerMessage>(
+            new BoundedChannelOptions(100)
+            {
+                FullMode = BoundedChannelFullMode.Wait,
+                SingleReader = true,
+                SingleWriter = false,
+            }
+        );
+
+        using var consumingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var consuming = ConsumeUntilLostAsync(queues, messageChannel.Writer, consumingCts.Token);
+
+        try
+        {
+            await foreach (
+                var message in messageChannel
+                    .Reader.ReadAllAsync(cancellationToken)
+                    .ConfigureAwait(false)
+            )
+            {
+                yield return message;
+            }
+        }
+        finally
+        {
+            await consumingCts.CancelAsync().ConfigureAwait(false);
+
+            try
+            {
+                await consuming.ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Error while stopping the consumer");
+            }
+
+            messageChannel.Writer.TryComplete();
+        }
+    }
+
+    // Consumes until cancelled, rebuilding the channel and the consumers whenever the channel or
+    // its connection is lost
+    private async Task ConsumeUntilLostAsync(
+        IReadOnlyList<string> queues,
+        ChannelWriter<BrokerMessage> writer,
+        CancellationToken cancellationToken
+    )
+    {
+        while (!cancellationToken.IsCancellationRequested && !_disposed)
+        {
+            ConsumerChannel? consumerChannel = null;
+            IConnection? connection = null;
+            AsyncEventHandler<ShutdownEventArgs>? onShutdown = null;
+
+            try
+            {
+                connection = await GetConnectionAsync(cancellationToken).ConfigureAwait(false);
+                consumerChannel = new ConsumerChannel(
+                    await connection
+                        .CreateChannelAsync(cancellationToken: cancellationToken)
+                        .ConfigureAwait(false)
+                );
+
+                var lost = new TaskCompletionSource(
+                    TaskCreationOptions.RunContinuationsAsynchronously
+                );
+                onShutdown = (_, _) =>
+                {
+                    lost.TrySetResult();
+                    return Task.CompletedTask;
+                };
+                connection.ConnectionShutdownAsync += onShutdown;
+                consumerChannel.Channel.ChannelShutdownAsync += onShutdown;
+
+                await StartConsumersAsync(consumerChannel, queues, writer, cancellationToken)
+                    .ConfigureAwait(false);
+
+                await lost.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    _logger.LogWarning(
+                        "The consume channel or its connection closed; reconnecting"
+                    );
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "The consumer stopped; reconnecting");
+            }
+            finally
+            {
+                if (consumerChannel is not null)
+                {
+                    ForgetDeliveries(consumerChannel);
+
+                    try
+                    {
+                        consumerChannel.Channel.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Error disposing the consume channel");
+                    }
+                }
+
+                if (connection is not null && onShutdown is not null)
+                {
+                    connection.ConnectionShutdownAsync -= onShutdown;
+                }
+            }
+
+            try
+            {
+                await Task.Delay(_options.ReconnectDelay, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+    }
+
+    private async Task StartConsumersAsync(
+        ConsumerChannel consumerChannel,
+        IReadOnlyList<string> queues,
+        ChannelWriter<BrokerMessage> writer,
+        CancellationToken cancellationToken
+    )
+    {
+        var channel = consumerChannel.Channel;
 
         // Set prefetch
         await channel
@@ -167,17 +308,6 @@ public sealed class RabbitMQBroker : IMessageBroker
             }
         }
 
-        // Create a channel to buffer messages
-        var messageChannel = Channel.CreateBounded<BrokerMessage>(
-            new BoundedChannelOptions(100)
-            {
-                FullMode = BoundedChannelFullMode.Wait,
-                SingleReader = true,
-                SingleWriter = false,
-            }
-        );
-
-        // Set up consumers for each queue
         var consumer = new AsyncEventingBasicConsumer(channel);
         consumer.ReceivedAsync += async (_, ea) =>
         {
@@ -222,11 +352,10 @@ public sealed class RabbitMQBroker : IMessageBroker
                     Signature = signature,
                 };
 
-                _unackedMessages[ea.DeliveryTag] = brokerMessage;
+                consumerChannel.Track(ea.DeliveryTag, brokerMessage);
+                _deliveries[brokerMessage] = consumerChannel;
 
-                await messageChannel
-                    .Writer.WriteAsync(brokerMessage, cancellationToken)
-                    .ConfigureAwait(false);
+                await writer.WriteAsync(brokerMessage, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -255,7 +384,6 @@ public sealed class RabbitMQBroker : IMessageBroker
         };
 
         // Start consuming from all queues
-        var consumerTags = new List<string>();
         foreach (var queue in queues)
         {
             var tag = await channel
@@ -266,68 +394,21 @@ public sealed class RabbitMQBroker : IMessageBroker
                     cancellationToken: cancellationToken
                 )
                 .ConfigureAwait(false);
-            consumerTags.Add(tag);
             _logger.LogInformation(
                 "Started consuming from queue {Queue} with tag {ConsumerTag}",
                 queue,
                 tag
             );
         }
+    }
 
-        try
+    // The deliveries of a channel that is gone can no longer be settled: the broker requeued
+    // them, and they are delivered again on a new channel with new tags
+    private void ForgetDeliveries(ConsumerChannel consumerChannel)
+    {
+        foreach (var message in consumerChannel.ForgetInFlight())
         {
-            await foreach (
-                var message in messageChannel
-                    .Reader.ReadAllAsync(cancellationToken)
-                    .ConfigureAwait(false)
-            )
-            {
-                yield return message;
-            }
-        }
-        finally
-        {
-            // Cancel consumers on cleanup
-            foreach (var tag in consumerTags)
-            {
-                try
-                {
-                    await channel
-                        .BasicCancelAsync(
-                            tag,
-                            noWait: false,
-                            cancellationToken: CancellationToken.None
-                        )
-                        .ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Error cancelling consumer {ConsumerTag}", tag);
-                }
-            }
-
-            // Reject any unacknowledged messages with requeue so they can be
-            // consumed by other consumers
-            foreach (var kvp in _unackedMessages)
-            {
-                try
-                {
-                    await channel
-                        .BasicRejectAsync(kvp.Key, requeue: true, CancellationToken.None)
-                        .ConfigureAwait(false);
-                    _unackedMessages.TryRemove(kvp.Key, out _);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(
-                        ex,
-                        "Error rejecting unacknowledged message {DeliveryTag}",
-                        kvp.Key
-                    );
-                }
-            }
-
-            messageChannel.Writer.Complete();
+            _deliveries.TryRemove(message, out _);
         }
     }
 
@@ -345,11 +426,8 @@ public sealed class RabbitMQBroker : IMessageBroker
             throw new ArgumentException("Invalid delivery tag", nameof(message));
         }
 
-        var channel = await GetConsumeChannelAsync(cancellationToken).ConfigureAwait(false);
-        await channel
-            .BasicAckAsync(deliveryTag, multiple: false, cancellationToken)
-            .ConfigureAwait(false);
-        _unackedMessages.TryRemove(deliveryTag, out _);
+        var consumerChannel = RequireDeliveringChannel(message, "acknowledged");
+        await consumerChannel.AckAsync(deliveryTag, cancellationToken).ConfigureAwait(false);
 
         _logger.LogDebug("Acknowledged message {MessageId}", message.Message.Id);
     }
@@ -369,11 +447,10 @@ public sealed class RabbitMQBroker : IMessageBroker
             throw new ArgumentException("Invalid delivery tag", nameof(message));
         }
 
-        var channel = await GetConsumeChannelAsync(cancellationToken).ConfigureAwait(false);
-        await channel
-            .BasicRejectAsync(deliveryTag, requeue: requeue, cancellationToken)
+        var consumerChannel = RequireDeliveringChannel(message, "rejected");
+        await consumerChannel
+            .RejectAsync(deliveryTag, requeue, cancellationToken)
             .ConfigureAwait(false);
-        _unackedMessages.TryRemove(deliveryTag, out _);
 
         _logger.LogDebug(
             "Rejected message {MessageId} (requeue: {Requeue})",
@@ -419,12 +496,6 @@ public sealed class RabbitMQBroker : IMessageBroker
                 _publishChannel.Dispose();
             }
 
-            if (_consumeChannel is not null)
-            {
-                await _consumeChannel.CloseAsync().ConfigureAwait(false);
-                _consumeChannel.Dispose();
-            }
-
             if (_connection is not null)
             {
                 await _connection.CloseAsync().ConfigureAwait(false);
@@ -438,15 +509,19 @@ public sealed class RabbitMQBroker : IMessageBroker
 
         _connectionLock.Dispose();
         _publishChannelLock.Dispose();
-        _consumeChannelLock.Dispose();
-        _unackedMessages.Clear();
+        _deliveries.Clear();
 
         _logger.LogInformation("RabbitMQ broker disposed");
     }
 
+    /// <remarks>
+    /// A closed connection is never reused: the broker connects again, and the consumer rebuilds
+    /// its channel and consumers on the new connection. Automatic recovery stays off so that
+    /// reconnecting has a single owner.
+    /// </remarks>
     private async Task<IConnection> GetConnectionAsync(CancellationToken cancellationToken)
     {
-        if (_connection?.IsOpen == true)
+        if (_connection is { IsOpen: true })
         {
             return _connection;
         }
@@ -454,9 +529,23 @@ public sealed class RabbitMQBroker : IMessageBroker
         await _connectionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_connection?.IsOpen == true)
+            if (_connection is { IsOpen: true })
             {
                 return _connection;
+            }
+
+            if (_connection is not null)
+            {
+                try
+                {
+                    _connection.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Error disposing a closed RabbitMQ connection");
+                }
+
+                _connection = null;
             }
 
             var factory = new ConnectionFactory
@@ -464,6 +553,7 @@ public sealed class RabbitMQBroker : IMessageBroker
                 Uri = new Uri(_options.ConnectionString),
                 ClientProvidedName = _options.ConnectionName,
                 RequestedHeartbeat = _options.Heartbeat,
+                AutomaticRecoveryEnabled = false,
             };
 
             for (var attempt = 1; attempt <= _options.ConnectionRetryCount; attempt++)
@@ -473,8 +563,7 @@ public sealed class RabbitMQBroker : IMessageBroker
                     _connection = await factory
                         .CreateConnectionAsync(cancellationToken)
                         .ConfigureAwait(false);
-                    _logger.LogInformation("Connected to RabbitMQ");
-                    return _connection;
+                    break;
                 }
                 catch (Exception ex) when (attempt < _options.ConnectionRetryCount)
                 {
@@ -490,15 +579,32 @@ public sealed class RabbitMQBroker : IMessageBroker
             }
 
             // Final attempt - let exception propagate
-            _connection = await factory
+            _connection ??= await factory
                 .CreateConnectionAsync(cancellationToken)
                 .ConfigureAwait(false);
+
+            _logger.LogInformation("Connected to RabbitMQ");
             return _connection;
         }
         finally
         {
             _connectionLock.Release();
         }
+    }
+
+    // A message is settled only on the channel that delivered it: delivery tags are
+    // channel-local, so another channel's tag of the same value means another message
+    private ConsumerChannel RequireDeliveringChannel(BrokerMessage message, string action)
+    {
+        if (!_deliveries.TryRemove(message, out var consumerChannel))
+        {
+            throw new InvalidOperationException(
+                $"Message {message.Message.Id} cannot be {action}: it was settled already, or its "
+                    + "channel was lost and the broker requeued it for redelivery."
+            );
+        }
+
+        return consumerChannel;
     }
 
     private async Task<IChannel> GetPublishChannelAsync(CancellationToken cancellationToken)
@@ -521,43 +627,17 @@ public sealed class RabbitMQBroker : IMessageBroker
                 publisherConfirmationsEnabled: _options.EnablePublisherConfirms,
                 publisherConfirmationTrackingEnabled: _options.EnablePublisherConfirms
             );
+            var replaced = _publishChannel;
             _publishChannel = await connection
                 .CreateChannelAsync(channelOptions, cancellationToken)
                 .ConfigureAwait(false);
+            replaced?.Dispose();
 
             return _publishChannel;
         }
         finally
         {
             _publishChannelLock.Release();
-        }
-    }
-
-    private async Task<IChannel> GetConsumeChannelAsync(CancellationToken cancellationToken)
-    {
-        if (_consumeChannel?.IsOpen == true)
-        {
-            return _consumeChannel;
-        }
-
-        await _consumeChannelLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (_consumeChannel?.IsOpen == true)
-            {
-                return _consumeChannel;
-            }
-
-            var connection = await GetConnectionAsync(cancellationToken).ConfigureAwait(false);
-            _consumeChannel = await connection
-                .CreateChannelAsync(cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
-
-            return _consumeChannel;
-        }
-        finally
-        {
-            _consumeChannelLock.Release();
         }
     }
 

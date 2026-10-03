@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ITransactionalStorage`: a provider can write store records in a transaction the caller owns. `OutboxStore.StoreAsync` and `InboxStore.MarkProcessedAsync` write in the caller's transaction when one is given, so the record commits or rolls back with the caller's other changes; a provider that cannot write in the given transaction refuses the record instead of storing it outside the transaction. The PostgreSQL and SQL Server providers implement it
 - `IRevocationStore.GetRevocationsAsync` returns revoked tasks with their options and revocation time, so workers can restore them at startup
 - `ITransactionalStorage.RunInTransactionAsync` runs store writes in a transaction the storage starts, commits, and rolls back, and `OutcomeRecorder` uses it to store a task result and mark the message processed in the inbox together. `TaskExecutor` records every outcome through it, so with inbox deduplication and a result backend and inbox store that share a transactional storage (PostgreSQL or SQL Server), a message is marked processed exactly when its result is stored: a worker that stops after the transaction commits does not run the task again, and one that stops before leaves nothing behind
+- `RabbitMQBrokerOptions.ReconnectDelay` sets how long the broker waits before rebuilding its channel and consumers after the connection is lost
 
 ### Changed
 - PostgreSQL stores no longer create their tables on first use; run migrations first (automatic with a generic host)
@@ -60,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A failed acknowledgement no longer stops a worker processing loop
 - Message signing is thread-safe; the shared `HMACSHA256` instance could produce invalid signatures under concurrent use
 - The Redis broker keeps consuming after transient errors and recreates a missing consumer group
+- The RabbitMQ broker acknowledges and rejects a message only on the channel that delivered it, and refuses to settle a message whose channel was lost instead of using another channel, whose tags mean other messages. It owns reconnection rather than competing with the client's automatic recovery: a consume loop rebuilds its channel and consumers after the connection is lost, so the stream pauses across a broker restart instead of ending, and a closed connection is replaced only when the broker connects again
 - The Redis broker returns buffered messages to their streams when consumption stops, adds a requeued copy before acknowledging the original, and no longer replaces its connection while reconnecting
 - Delayed messages stay in the in-memory and PostgreSQL stores until they are dispatched; a dispatcher that fails or stops mid-batch leaves them to be claimed again
 - Outbox messages and signals are claimed, so several dispatchers never handle the same one at once, and one whose dispatcher stops is delivered again after the claim timeout; outbox attempts count only failed publishes
