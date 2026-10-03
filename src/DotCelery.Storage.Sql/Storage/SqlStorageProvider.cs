@@ -1,3 +1,4 @@
+using System.Data.Common;
 using DotCelery.Core.Storage;
 using DotCelery.Storage.Sql.Execution;
 
@@ -7,7 +8,7 @@ namespace DotCelery.Storage.Sql.Storage;
 /// The storage primitives on a SQL database, implemented once over the statements of a
 /// dialect. The tables are created by the migrations in <see cref="SqlStorageSchema"/>.
 /// </summary>
-public sealed class SqlStorageProvider : IStorageProvider
+public sealed class SqlStorageProvider : IStorageProvider, ITransactionalStorage
 {
     private readonly SqlStorageStatements _statements;
     private readonly SqlExecutor _sql;
@@ -62,6 +63,33 @@ public sealed class SqlStorageProvider : IStorageProvider
 
     /// <inheritdoc />
     public INotificationChannel? Notifications { get; }
+
+    /// <inheritdoc />
+    public bool CanWriteIn(object transaction) =>
+        transaction is DbTransaction { Connection: not null };
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The statements run on the transaction's connection and the caller commits or rolls back.
+    /// A failing statement does not retry, so a deadlock reaches the caller's transaction for it
+    /// to roll back.
+    /// </remarks>
+    public ValueTask WriteInAsync(
+        object transaction,
+        Func<CancellationToken, ValueTask> work,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (transaction is not DbTransaction { Connection: not null } dbTransaction)
+        {
+            throw new ArgumentException(
+                "The transaction must be a database transaction with an open connection.",
+                nameof(transaction)
+            );
+        }
+
+        return _sql.InCallerTransactionAsync(dbTransaction, work, cancellationToken);
+    }
 
     /// <inheritdoc />
     public async ValueTask<long> PurgeExpiredAsync(CancellationToken cancellationToken = default)

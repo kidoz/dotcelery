@@ -8,13 +8,15 @@ namespace DotCelery.Core.Storage.Stores;
 /// </summary>
 /// <remarks>
 /// Processed messages are remembered for <see cref="StorageStoreOptions.InboxRetention"/>.
-/// Records are not written in the caller's database transaction; the <c>transaction</c>
-/// argument of <see cref="MarkProcessedAsync"/> is ignored.
+/// A record written with the caller's transaction is written in that transaction, so the
+/// message counts as processed only if the caller commits. Providers that cannot write in a
+/// caller's transaction refuse the record rather than store it outside the transaction.
 /// </remarks>
 public sealed class InboxStore : IInboxStore
 {
     private readonly string _collection;
 
+    private readonly IStorageProvider _storage;
     private readonly IDocumentStore _documents;
     private readonly StorageStoreOptions _options;
     private readonly TimeProvider _timeProvider;
@@ -32,6 +34,7 @@ public sealed class InboxStore : IInboxStore
     )
     {
         ArgumentNullException.ThrowIfNull(storage);
+        _storage = storage;
         _documents = storage.Documents;
         _options = options?.Value ?? new StorageStoreOptions();
         _collection = _options.Name("inbox");
@@ -53,18 +56,21 @@ public sealed class InboxStore : IInboxStore
         CancellationToken cancellationToken = default
     )
     {
-        await _documents
-            .UpsertAsync(
-                _collection,
-                messageId,
-                ReadOnlyMemory<byte>.Empty,
-                new DocumentWriteOptions
-                {
-                    TimeToLive = _options.InboxRetention,
-                    SortKey = _timeProvider.GetUtcNow(),
-                },
-                cancellationToken
-            )
+        var options = new DocumentWriteOptions
+        {
+            TimeToLive = _options.InboxRetention,
+            SortKey = _timeProvider.GetUtcNow(),
+        };
+
+        if (transaction is null)
+        {
+            await UpsertAsync(messageId, options, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var transactional = StorageTransactions.Resolve(_storage, transaction);
+        await transactional
+            .WriteInAsync(transaction, ct => UpsertAsync(messageId, options, ct), cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -85,4 +91,21 @@ public sealed class InboxStore : IInboxStore
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    private async ValueTask UpsertAsync(
+        string messageId,
+        DocumentWriteOptions options,
+        CancellationToken cancellationToken
+    )
+    {
+        await _documents
+            .UpsertAsync(
+                _collection,
+                messageId,
+                ReadOnlyMemory<byte>.Empty,
+                options,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+    }
 }

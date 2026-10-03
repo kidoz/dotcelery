@@ -18,10 +18,15 @@ public interface IInboxStore : IAsyncDisposable
     );
 
     /// <summary>
-    /// Marks a message as processed (within a transaction if supported).
+    /// Marks a message as processed, in the caller's transaction when one is given.
     /// </summary>
     /// <param name="messageId">The message ID.</param>
-    /// <param name="transaction">Optional transaction to participate in.</param>
+    /// <param name="transaction">
+    /// The transaction to write in, such as the application's <c>DbTransaction</c>, so the
+    /// record commits or rolls back together with the caller's other changes. A provider that
+    /// cannot write in the given transaction refuses the record. When not set, the record is
+    /// written on its own.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     ValueTask MarkProcessedAsync(
         string messageId,

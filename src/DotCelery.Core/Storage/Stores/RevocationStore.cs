@@ -107,17 +107,22 @@ public sealed class RevocationStore : IRevocationStore
             is not null;
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<string> GetRevokedTaskIdsAsync(
+    public async IAsyncEnumerable<RevocationEvent> GetRevocationsAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default
     )
     {
         await foreach (
             var document in _documents
-                .QueryAsync(_collection, DocumentFilter.All, cancellationToken: cancellationToken)
+                .QueryAsync(
+                    _collection,
+                    DocumentFilter.All,
+                    DotCeleryJsonContext.Default.RevokeOptions,
+                    cancellationToken: cancellationToken
+                )
                 .ConfigureAwait(false)
         )
         {
-            yield return document.Id;
+            yield return ToEvent(document);
         }
     }
 

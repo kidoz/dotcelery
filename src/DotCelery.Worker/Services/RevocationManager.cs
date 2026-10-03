@@ -169,13 +169,13 @@ public sealed class RevocationManager : BackgroundService
         {
             var count = 0;
             await foreach (
-                var taskId in _revocationStore
-                    .GetRevokedTaskIdsAsync(cancellationToken)
+                var revocation in _revocationStore
+                    .GetRevocationsAsync(cancellationToken)
                     .ConfigureAwait(false)
             )
             {
                 // Store as pending - will be applied when task starts
-                _pendingRevocations.TryAdd(taskId, RevokeOptions.Default);
+                _pendingRevocations[revocation.TaskId] = revocation.Options;
                 count++;
             }
 

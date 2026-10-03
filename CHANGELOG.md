@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SQL Server backend (`DotCelery.Backend.SqlServer`): a dialect of `DotCelery.Storage.Sql` with the same storage tables and migrations as PostgreSQL, `UseSqlServer` and `AddSqlServer...` registration methods for every store, and migrations under `sp_getapplock`; every statement is checked against the migrated schema in tests. It has no notifications, so stores poll
 - `SqlExecutor` retries an operation a dialect reports as safely retryable, such as a SQL Server deadlock victim, and reports a command cancelled by the caller as `OperationCanceledException` for every driver
 - `StoragePurgeService` deletes expired storage entries every `StorageStoreOptions.PurgeInterval`; `AddInMemoryStorage` and `AddPostgresStorage` register it
+- `ITransactionalStorage`: a provider can write store records in a transaction the caller owns. `OutboxStore.StoreAsync` and `InboxStore.MarkProcessedAsync` write in the caller's transaction when one is given, so the record commits or rolls back with the caller's other changes; a provider that cannot write in the given transaction refuses the record instead of storing it outside the transaction. The PostgreSQL and SQL Server providers implement it
+- `IRevocationStore.GetRevocationsAsync` returns revoked tasks with their options and revocation time, so workers can restore them at startup
 
 ### Changed
 - PostgreSQL stores no longer create their tables on first use; run migrations first (automatic with a generic host)
@@ -38,11 +40,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Task state updates never replace a final state, and the metadata passed with a state update is not stored
 - Snapshots of historical metrics with the same timestamp but different task names are both kept
 - In-memory revocation subscribers no longer receive revocations made before they subscribed, as with the other providers
+- `RevocationManager` restores the options of revocations that exist when a worker starts, instead of default options
 
 ### Removed
 - `AutoCreateTables` from every PostgreSQL store's options
 - The unused `DotCelery.Core.Migrations` framework and the Redis and MongoDB migration stores
 - The `DotCelery.Build.SqlValidator` tool, which did not validate any SQL in this repository
+- `IRevocationStore.GetRevokedTaskIdsAsync`, replaced by `GetRevocationsAsync`, which also returns each revocation's options and time
 - The per-store in-memory and PostgreSQL implementations and their options, including `PostgresBackendOptions`, and `InMemoryRateLimiter` from Core
 - The per-store Redis implementations and their options, including `RedisBackendOptions`, and `RedisBackendJsonContext`
 - The per-store MongoDB implementations and their options, including `MongoBackendOptions`
@@ -59,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Outbox messages and signals are claimed, so several dispatchers never handle the same one at once, and one whose dispatcher stops is delivered again after the claim timeout; outbox attempts count only failed publishes
 - The PostgreSQL rate limiter no longer fails on every call, and the rate limit window is shared by every worker using the same storage
 - Inbox and revocation entries expire, and task execution tracking and partition locks cannot be released by a task that no longer holds them
+- Inbox deduplication marks a message as processed after a successful execution, so `UseInboxDeduplication()` no longer lets redelivered messages run again; the filter logs a warning when deduplication is enabled without an inbox store registered
 - PostgreSQL results larger than 8000 bytes are stored; result notifications carry only the task ID
 - The client's `Pending` state no longer makes waiting for a result return before the task finishes, and no longer overwrites a result that is already stored
 - Batch completion is atomic, so tasks finishing together are all counted; the PostgreSQL store now finishes batches, and a cancelled batch stays cancelled

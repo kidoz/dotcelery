@@ -121,6 +121,28 @@ public class RevocationManagerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Startup_LoadsExistingRevocationsWithTheirOptions()
+    {
+        await _revocationStore.RevokeAsync("revoked-before-startup", RevokeOptions.WithTermination);
+
+        await _manager.StartAsync(CancellationToken.None);
+
+        // The manager loads revocations in the background
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (_manager.GetRevocationOptions("revoked-before-startup") is null)
+        {
+            await Task.Delay(20, cts.Token);
+        }
+
+        Assert.True(_manager.GetRevocationOptions("revoked-before-startup")!.Terminate);
+
+        using var taskCts = _manager.RegisterTask("revoked-before-startup", CancellationToken.None);
+        Assert.True(taskCts.IsCancellationRequested);
+
+        await _manager.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
     public void GetRevocationOptions_NonExistentTask_ReturnsNull()
     {
         var options = _manager.GetRevocationOptions("non-existent");

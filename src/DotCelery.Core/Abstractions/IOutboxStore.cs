@@ -10,10 +10,14 @@ namespace DotCelery.Core.Abstractions;
 public interface IOutboxStore : IAsyncDisposable
 {
     /// <summary>
-    /// Stores a message in the outbox within the current transaction.
+    /// Stores a message in the outbox, in the caller's transaction when one is given.
     /// </summary>
     /// <param name="message">The message to store.</param>
-    /// <param name="transaction">The database transaction to participate in (optional).</param>
+    /// <param name="transaction">
+    /// The transaction to write in, such as the application's <c>DbTransaction</c>, so the
+    /// message is dispatched only if the transaction commits. A provider that cannot write in
+    /// the given transaction refuses the message. When not set, the message is stored on its own.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     ValueTask StoreAsync(
         OutboxMessage message,

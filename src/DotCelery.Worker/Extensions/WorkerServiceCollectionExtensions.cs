@@ -491,14 +491,14 @@ public static class WorkerServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Enables inbox-based message deduplication for the worker.
-    /// Messages that have already been processed will be skipped to provide
-    /// at-most-once processing semantics.
+    /// Enables inbox-based message deduplication for the worker. A message that has already
+    /// been processed successfully is skipped when it is delivered again.
     /// </summary>
     /// <param name="builder">The DotCelery builder.</param>
     /// <returns>The builder.</returns>
     /// <remarks>
-    /// Requires an IInboxStore implementation to be registered (e.g., UseInbox&lt;T&gt;).
+    /// Requires an IInboxStore implementation to be registered (e.g., UseInbox&lt;T&gt;);
+    /// without one the filter logs a warning and does nothing.
     /// </remarks>
     public static DotCeleryBuilder UseInboxDeduplication(this DotCeleryBuilder builder)
     {

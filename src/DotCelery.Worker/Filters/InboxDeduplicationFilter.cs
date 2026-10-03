@@ -15,10 +15,10 @@ namespace DotCelery.Worker.Filters;
 /// before other filters, preventing duplicate processing of already-handled messages.
 /// </para>
 /// <para>
-/// Note: For true exactly-once semantics, the inbox store, task execution, and result
-/// storage should ideally be in a single transaction. This implementation provides
-/// at-most-once semantics for the inbox check and marks messages processed after
-/// successful execution.
+/// A message is marked as processed after it runs successfully, so a redelivery of a message
+/// that failed is executed again. For exactly-once semantics the inbox record, the task's
+/// effects, and the result must commit together; pass the database transaction to
+/// <see cref="IInboxStore.MarkProcessedAsync"/> from the task itself for that.
 /// </para>
 /// </remarks>
 public sealed class InboxDeduplicationFilter : ITaskFilter
@@ -36,6 +36,14 @@ public sealed class InboxDeduplicationFilter : ITaskFilter
     {
         _inboxStore = inboxStore;
         _logger = logger;
+
+        if (inboxStore is null)
+        {
+            _logger.LogWarning(
+                "Inbox deduplication is enabled but no IInboxStore is registered, so redelivered "
+                    + "messages are processed again. Register an inbox store, for example with UseInbox<T>()."
+            );
+        }
     }
 
     /// <summary>
@@ -96,8 +104,13 @@ public sealed class InboxDeduplicationFilter : ITaskFilter
             return;
         }
 
-        // Only mark as processed if execution was successful
-        if (context.TaskResult?.State == TaskState.Success)
+        // Mark as processed only after a successful execution. The executor leaves TaskResult
+        // unset unless a filter set it, so success is the absence of an exception.
+        var succeeded =
+            context.TaskResult?.State == TaskState.Success
+            || (context.TaskResult is null && context.Exception is null);
+
+        if (succeeded)
         {
             try
             {

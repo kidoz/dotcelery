@@ -1,10 +1,14 @@
 using System.Text.RegularExpressions;
 using DotCelery.Backend.Postgres;
 using DotCelery.Backend.Postgres.Storage;
+using DotCelery.Core.Models;
+using DotCelery.Core.Outbox;
 using DotCelery.Core.Storage;
+using DotCelery.Core.Storage.Stores;
 using DotCelery.Storage.Sql.Storage;
 using DotCelery.Tests.Conformance.Storage;
 using DotCelery.Tests.Conformance.Stores;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using NpgsqlTypes;
 using Testcontainers.PostgreSql;
@@ -278,4 +282,99 @@ public sealed class PostgresHistoricalDataStoreTests(PostgresStorageFixture fixt
 {
     protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
         ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+}
+
+/// <summary>
+/// Checks that the outbox and inbox join a transaction the caller owns.
+/// </summary>
+[Collection(PostgresStorageTestGroup.Name)]
+public sealed class PostgresTransactionalStorageTests(PostgresStorageFixture fixture)
+{
+    private readonly StorageStoreOptions _storeOptions = new()
+    {
+        Prefix = $"txn-{Guid.NewGuid():N}",
+    };
+
+    [Fact]
+    public async Task OutboxMessage_StoredInTheCallersTransaction_IsVisibleOnlyAfterItCommits()
+    {
+        var outbox = CreateOutbox(fixture.CreateProvider(TimeProvider.System));
+
+        await using (var connection = await fixture.DataSource.OpenConnectionAsync())
+        await using (var transaction = await connection.BeginTransactionAsync())
+        {
+            await outbox.StoreAsync(CreateMessage("committed"), transaction);
+
+            // The uncommitted message is invisible to every other connection
+            Assert.Equal(
+                0,
+                await CreateOutbox(fixture.CreateProvider(TimeProvider.System))
+                    .GetPendingCountAsync()
+            );
+
+            await transaction.CommitAsync();
+        }
+
+        Assert.Equal(1, await outbox.GetPendingCountAsync());
+    }
+
+    [Fact]
+    public async Task OutboxMessage_StoredInTheCallersTransaction_IsDiscardedWhenItRollsBack()
+    {
+        var outbox = CreateOutbox(fixture.CreateProvider(TimeProvider.System));
+
+        await using (var connection = await fixture.DataSource.OpenConnectionAsync())
+        await using (var transaction = await connection.BeginTransactionAsync())
+        {
+            await outbox.StoreAsync(CreateMessage("rolled-back"), transaction);
+            await transaction.RollbackAsync();
+        }
+
+        Assert.Equal(0, await outbox.GetPendingCountAsync());
+    }
+
+    [Fact]
+    public async Task InboxRecord_MarkedInTheCallersTransaction_FollowsItsOutcome()
+    {
+        var inbox = new InboxStore(
+            fixture.CreateProvider(TimeProvider.System),
+            Options.Create(_storeOptions)
+        );
+
+        await using (var connection = await fixture.DataSource.OpenConnectionAsync())
+        await using (var transaction = await connection.BeginTransactionAsync())
+        {
+            await inbox.MarkProcessedAsync("rolled-back", transaction);
+            await transaction.RollbackAsync();
+        }
+
+        Assert.False(await inbox.IsProcessedAsync("rolled-back"));
+
+        await using (var connection = await fixture.DataSource.OpenConnectionAsync())
+        await using (var transaction = await connection.BeginTransactionAsync())
+        {
+            await inbox.MarkProcessedAsync("committed", transaction);
+            await transaction.CommitAsync();
+        }
+
+        Assert.True(await inbox.IsProcessedAsync("committed"));
+    }
+
+    private OutboxStore CreateOutbox(IStorageProvider provider) =>
+        new(provider, Options.Create(_storeOptions));
+
+    private static OutboxMessage CreateMessage(string id) =>
+        new()
+        {
+            Id = id,
+            TaskMessage = new TaskMessage
+            {
+                Id = id,
+                Task = "tests.task",
+                Args = [1, 2, 3],
+                ContentType = "application/json",
+                Timestamp = DateTimeOffset.UtcNow,
+            },
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
 }

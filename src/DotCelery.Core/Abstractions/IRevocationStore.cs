@@ -41,11 +41,14 @@ public interface IRevocationStore : IAsyncDisposable
     ValueTask<bool> IsRevokedAsync(string taskId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Gets all revoked task IDs. Useful for worker startup synchronization.
+    /// Gets all revoked tasks with their options and revocation time. Useful for worker startup
+    /// synchronization.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Async enumerable of revoked task IDs.</returns>
-    IAsyncEnumerable<string> GetRevokedTaskIdsAsync(CancellationToken cancellationToken = default);
+    /// <returns>Async enumerable of revocations.</returns>
+    IAsyncEnumerable<RevocationEvent> GetRevocationsAsync(
+        CancellationToken cancellationToken = default
+    );
 
     /// <summary>
     /// Removes old revocations to free up storage.

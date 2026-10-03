@@ -27,6 +27,7 @@ public sealed class SqlExecutor
     private readonly DbDataSource _dataSource;
     private readonly TimeSpan _commandTimeout;
     private readonly Func<DbException, bool> _isTransient;
+    private readonly AsyncLocal<DbTransaction?> _callerTransaction = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SqlExecutor"/> class.
@@ -50,16 +51,60 @@ public sealed class SqlExecutor
     }
 
     /// <summary>
-    /// Opens a session on a new connection.
+    /// Opens a session on a new connection, or on the caller's connection and transaction while
+    /// <see cref="InCallerTransactionAsync"/> is running.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The session; dispose it to close the connection.</returns>
+    /// <returns>The session; dispose it to close a connection it owns.</returns>
     public async Task<SqlSession> OpenSessionAsync(CancellationToken cancellationToken)
     {
+        if (_callerTransaction.Value is { } transaction)
+        {
+            if (transaction.Connection is not { } callerConnection)
+            {
+                throw new InvalidOperationException("The caller's transaction has completed.");
+            }
+
+            return SqlSession.InTransaction(callerConnection, _commandTimeout, transaction);
+        }
+
         var connection = await _dataSource
             .OpenConnectionAsync(cancellationToken)
             .ConfigureAwait(false);
         return new SqlSession(connection, _commandTimeout);
+    }
+
+    /// <summary>
+    /// Runs work with every statement of this executor written in the given transaction, which
+    /// the caller owns and commits or rolls back.
+    /// </summary>
+    /// <param name="transaction">The caller's transaction.</param>
+    /// <param name="work">The work to run in the transaction.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <remarks>
+    /// A failing statement does not retry inside the transaction: a deadlock leaves the
+    /// caller's transaction to roll back and run again, as the caller decides.
+    /// </remarks>
+    public async ValueTask InCallerTransactionAsync(
+        DbTransaction transaction,
+        Func<CancellationToken, ValueTask> work,
+        CancellationToken cancellationToken
+    )
+    {
+        ArgumentNullException.ThrowIfNull(transaction);
+        ArgumentNullException.ThrowIfNull(work);
+
+        var previous = _callerTransaction.Value;
+        _callerTransaction.Value = transaction;
+
+        try
+        {
+            await work(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _callerTransaction.Value = previous;
+        }
     }
 
     /// <summary>
@@ -153,7 +198,8 @@ public sealed class SqlExecutor
             {
                 throw new OperationCanceledException(ex.Message, ex, cancellationToken);
             }
-            catch (DbException ex) when (attempt < MaxAttempts && _isTransient(ex))
+            catch (DbException ex)
+                when (attempt < MaxAttempts && _callerTransaction.Value is null && _isTransient(ex))
             {
                 await Task.Delay(
                         TimeSpan.FromMilliseconds(Random.Shared.Next(5, 20) * attempt),
@@ -172,13 +218,35 @@ public sealed class SqlSession : IAsyncDisposable
 {
     private readonly DbConnection _connection;
     private readonly TimeSpan _commandTimeout;
+    private readonly bool _ownsConnection;
     private DbTransaction? _transaction;
+    private bool _ownsTransaction;
 
     internal SqlSession(DbConnection connection, TimeSpan commandTimeout)
+        : this(connection, commandTimeout, transaction: null, ownsConnection: true) { }
+
+    private SqlSession(
+        DbConnection connection,
+        TimeSpan commandTimeout,
+        DbTransaction? transaction,
+        bool ownsConnection
+    )
     {
         _connection = connection;
         _commandTimeout = commandTimeout;
+        _transaction = transaction;
+        _ownsConnection = ownsConnection;
     }
+
+    /// <summary>
+    /// Opens a session over the caller's open connection that writes in the caller's
+    /// transaction. Disposing it leaves the connection and the transaction open.
+    /// </summary>
+    internal static SqlSession InTransaction(
+        DbConnection connection,
+        TimeSpan commandTimeout,
+        DbTransaction transaction
+    ) => new(connection, commandTimeout, transaction, ownsConnection: false);
 
     /// <summary>
     /// Runs work in a transaction that commits when the work completes and rolls back if it fails.
@@ -187,6 +255,10 @@ public sealed class SqlSession : IAsyncDisposable
     /// <param name="work">The work; statements of this session run in the transaction.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The result of the work.</returns>
+    /// <remarks>
+    /// Work inside a transaction the caller owns joins that transaction instead of starting
+    /// another, and does not commit it.
+    /// </remarks>
     public async Task<T> InTransactionAsync<T>(
         Func<Task<T>> work,
         CancellationToken cancellationToken
@@ -195,6 +267,11 @@ public sealed class SqlSession : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(work);
         if (_transaction is not null)
         {
+            if (!_ownsTransaction)
+            {
+                return await work().ConfigureAwait(false);
+            }
+
             throw new InvalidOperationException("The session is already in a transaction.");
         }
 
@@ -202,6 +279,7 @@ public sealed class SqlSession : IAsyncDisposable
             .BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken)
             .ConfigureAwait(false);
         _transaction = transaction;
+        _ownsTransaction = true;
 
         try
         {
@@ -212,6 +290,7 @@ public sealed class SqlSession : IAsyncDisposable
         finally
         {
             _transaction = null;
+            _ownsTransaction = false;
         }
     }
 
@@ -293,7 +372,8 @@ public sealed class SqlSession : IAsyncDisposable
     }
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync() => _connection.DisposeAsync();
+    public ValueTask DisposeAsync() =>
+        _ownsConnection ? _connection.DisposeAsync() : ValueTask.CompletedTask;
 
     private DbCommand CreateCommand(string sql, Action<SqlParameters>? bind)
     {

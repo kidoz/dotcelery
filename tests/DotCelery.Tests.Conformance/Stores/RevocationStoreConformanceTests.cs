@@ -134,14 +134,40 @@ public abstract class RevocationStoreConformanceTests : StoreConformanceTests
         return subscription.Current.TaskId;
     }
 
+    [Fact]
+    public async Task GetRevocationsAsync_ReturnsRevocationsWithTheirOptions()
+    {
+        var store = CreateStore();
+        await store.RevokeAsync("a", RevokeOptions.WithTermination);
+        await store.RevokeAsync("b");
+
+        var revocations = await ListRevocationsAsync(store);
+
+        var terminated = Assert.Single(revocations, r => r.TaskId == "a");
+        Assert.True(terminated.Options.Terminate);
+        Assert.Equal(Start, terminated.Timestamp);
+        Assert.False(Assert.Single(revocations, r => r.TaskId == "b").Options.Terminate);
+    }
+
     private static async Task<List<string>> ListAsync(RevocationStore store)
     {
         var taskIds = new List<string>();
-        await foreach (var taskId in store.GetRevokedTaskIdsAsync())
+        await foreach (var revocation in store.GetRevocationsAsync())
         {
-            taskIds.Add(taskId);
+            taskIds.Add(revocation.TaskId);
         }
 
         return taskIds;
+    }
+
+    private static async Task<List<RevocationEvent>> ListRevocationsAsync(RevocationStore store)
+    {
+        var revocations = new List<RevocationEvent>();
+        await foreach (var revocation in store.GetRevocationsAsync())
+        {
+            revocations.Add(revocation);
+        }
+
+        return revocations;
     }
 }

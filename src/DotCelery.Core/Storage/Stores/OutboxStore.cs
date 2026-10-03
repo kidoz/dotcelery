@@ -22,14 +22,17 @@ namespace DotCelery.Core.Storage.Stores;
 /// <see cref="StorageStoreOptions.OutboxFailedRetention"/>. Dispatched messages are removed at once.
 /// </para>
 /// <para>
-/// Messages are not written in the caller's database transaction; the <c>transaction</c>
-/// argument of <see cref="StoreAsync"/> is ignored.
+/// A message stored with the caller's transaction is written in that transaction, so it is
+/// dispatched only if the caller commits and never if the caller rolls back. Providers that
+/// cannot write in a caller's transaction refuse the message rather than store it outside the
+/// transaction. Without a transaction the message is stored on its own.
 /// </para>
 /// </remarks>
 public sealed class OutboxStore : IOutboxStore
 {
     private readonly string _queue;
     private readonly string _failedCollection;
+    private readonly IStorageProvider _storage;
     private readonly IQueueStore _queues;
     private readonly IDocumentStore _documents;
     private readonly StorageStoreOptions _options;
@@ -49,6 +52,7 @@ public sealed class OutboxStore : IOutboxStore
     )
     {
         ArgumentNullException.ThrowIfNull(storage);
+        _storage = storage;
         _queues = storage.Queues;
         _documents = storage.Documents;
         _options = options?.Value ?? new StorageStoreOptions();
@@ -66,14 +70,18 @@ public sealed class OutboxStore : IOutboxStore
     {
         ArgumentNullException.ThrowIfNull(message);
 
-        await EnqueueAsync(
-                message with
-                {
-                    Status = OutboxMessageStatus.Pending,
-                },
-                _timeProvider.GetUtcNow(),
-                cancellationToken
-            )
+        var pending = message with { Status = OutboxMessageStatus.Pending };
+        var dueAt = _timeProvider.GetUtcNow();
+
+        if (transaction is null)
+        {
+            await EnqueueAsync(pending, dueAt, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var transactional = StorageTransactions.Resolve(_storage, transaction);
+        await transactional
+            .WriteInAsync(transaction, ct => EnqueueAsync(pending, dueAt, ct), cancellationToken)
             .ConfigureAwait(false);
     }
 

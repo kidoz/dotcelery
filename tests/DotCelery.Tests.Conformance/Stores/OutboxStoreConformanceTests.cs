@@ -174,6 +174,31 @@ public abstract class OutboxStoreConformanceTests : StoreConformanceTests
         Assert.True(await inbox.IsProcessedAsync("new"));
     }
 
+    [Fact]
+    public async Task StoreAsync_WithATransactionTheStorageCannotWriteIn_IsRefused()
+    {
+        var store = CreateStore();
+
+        await Assert.ThrowsAsync<NotSupportedException>(async () =>
+            await store.StoreAsync(CreateOutboxMessage("a"), new object())
+        );
+
+        Assert.Equal(0, await store.GetPendingCountAsync());
+    }
+
+    [Fact]
+    public async Task Inbox_MarkProcessedAsync_WithATransactionTheStorageCannotWriteIn_IsRefused()
+    {
+        var inbox = CreateInbox();
+
+        await Assert.ThrowsAsync<NotSupportedException>(async () =>
+            await inbox.MarkProcessedAsync("a", new object())
+        );
+
+        Assert.False(await inbox.IsProcessedAsync("a"));
+        Assert.Equal(0, await inbox.GetCountAsync());
+    }
+
     private OutboxMessage CreateOutboxMessage(string id) =>
         new()
         {

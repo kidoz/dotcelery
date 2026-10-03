@@ -522,6 +522,23 @@ builder.Services.AddSqlServerOutboxStore(options =>
 
 Migrations run at startup under an application lock (`sp_getapplock`), and `AddSqlServerMigrations(options => options.RunAtStartup = false)` with `SqlMigrator.GenerateScript()` produces a script to apply by hand, as with PostgreSQL. Text columns use a binary collation, so keys are case-sensitive whatever the database collation. SQL Server has no simple publish/subscribe, so result waits and revocations poll every `StorageStoreOptions.ResultPollInterval` and `RevocationPollInterval`. An application uses one SQL database type for its stores: PostgreSQL or SQL Server.
 
+### Transactional Outbox and Inbox
+
+The PostgreSQL and SQL Server providers can write an outbox message or inbox record in the application's own database transaction, so it commits or rolls back together with the business change:
+
+```csharp
+await using var transaction = await db.Database.BeginTransactionAsync();
+await db.SaveChangesAsync();
+
+await outbox.StoreAsync(
+    new OutboxMessage { Id = Guid.NewGuid().ToString("N"), TaskMessage = message, CreatedAt = DateTimeOffset.UtcNow },
+    transaction.GetDbTransaction());
+
+await transaction.CommitAsync();
+```
+
+The record is written on the transaction's connection and is dispatched or counted as processed only if the transaction commits. A provider that cannot write in the caller's transaction (in-memory, Redis, MongoDB) refuses the record with `NotSupportedException` instead of storing it outside the transaction.
+
 ## Project Structure
 
 ```

@@ -39,16 +39,12 @@ but do not yet behave as documented.
 - Without a delay store, a message with a future ETA holds the worker's consume loop for up to 5 seconds before it is requeued
 - Hard time limits are cooperative; a task that ignores its cancellation token keeps its worker slot
 
-### Backend Correctness
-- Outbox and inbox storage ignore the caller's transaction
-
 ### Incomplete Documented Features
 - Canvas: `Chain`, `Group`, and `Chord` define workflows, but nothing dispatches them or runs link and error callbacks
 - Sagas: the orchestrator is not registered by the DI extensions
 - Batches: `OnComplete` callbacks are not dispatched, and tasks are published before the batch record exists
 - Metrics: `DotCeleryInstrumentation` defines instruments, but the client and worker never record them (tracing works)
 - Dashboard: no built-in task query, queue stats, or metrics providers; workers do not register themselves; SignalR notifications are never raised; the middleware serves the UI page for API and hub routes unless endpoints are mapped first
-- Inbox deduplication: `UseInboxDeduplication()` never marks messages as processed, so duplicates still run
 - Beat: schedules without a previous run use a moving baseline (intervals over one day never fire, cron entries fire on startup), there is no leader election across instances, and `PersistState`/`StatePath` are unused
 - Circuit breaker: `UseCircuitBreaker()` registers a factory that nothing uses
 - Tenant context set by `TenantContextFilter` is not visible during task execution
@@ -61,7 +57,7 @@ but do not yet behave as documented.
 - Dashboard: authorization before model binding, CSRF/origin checks on state-changing endpoints, and bounds on paging and bulk operations
 
 ### Test Coverage
-- No tests exercise the worker consume/ack/retry/shutdown loop, the delayed-message and outbox dispatchers, or the inbox, tenant, and overlap filters (the stores they use have conformance tests)
+- No tests exercise the worker consume/ack/retry/shutdown loop, the delayed-message and outbox dispatchers, or the tenant and overlap filters (the stores they use have conformance tests)
 - The in-memory broker does not model redelivery or serialization round-trips; broker contract tests should run against real brokers
 - No integration coverage for RabbitMQ connection loss
 - Analyzer DCEL001 reports task names that are not string literals (for example, constants) as empty
@@ -84,7 +80,9 @@ but do not yet behave as documented.
 - Extension members for fluent task signatures (after Canvas execution ships)
 
 ### Worker/Execution
-- Exactly-once processing: atomic inbox claim committed together with result storage
+- Exactly-once processing: the worker commits the inbox claim together with the result in one
+  transaction (the stores can already write in the caller's transaction; the worker does not use
+  one yet)
 - Connection pooling controls for brokers: separate publish and consume connections with channel pooling for RabbitMQ
 - Batch execution tasks (single-task processing of input batches)
 
