@@ -25,11 +25,12 @@ namespace DotCelery.Core.Storage.Stores;
 /// <see cref="StorageStoreOptions.ResultPollInterval"/>.
 /// </para>
 /// </remarks>
-public sealed class ResultBackend : IResultBackend
+public sealed class ResultBackend : IResultBackend, IStorageBackedStore
 {
     private static readonly JsonTypeInfo<TaskRecord> RecordTypeInfo =
         StoreJson.TypeInfo<TaskRecord>();
 
+    private readonly IStorageProvider _storage;
     private readonly IDocumentStore _documents;
     private readonly INotificationChannel? _notifications;
     private readonly StorageStoreOptions _options;
@@ -58,6 +59,7 @@ public sealed class ResultBackend : IResultBackend
     )
     {
         ArgumentNullException.ThrowIfNull(storage);
+        _storage = storage;
         _documents = storage.Documents;
         _notifications = storage.Notifications;
         _options = options?.Value ?? new StorageStoreOptions();
@@ -65,6 +67,9 @@ public sealed class ResultBackend : IResultBackend
         _logger = logger ?? NullLogger<ResultBackend>.Instance;
         _collection = _options.Name("results");
     }
+
+    /// <inheritdoc />
+    public IStorageProvider Storage => _storage;
 
     /// <inheritdoc />
     public async ValueTask StoreResultAsync(

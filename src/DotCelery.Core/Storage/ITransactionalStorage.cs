@@ -33,4 +33,18 @@ public interface ITransactionalStorage
         Func<CancellationToken, ValueTask> work,
         CancellationToken cancellationToken = default
     );
+
+    /// <summary>
+    /// Runs work in a transaction this storage starts, commits when the work completes, and
+    /// rolls back when the work fails. Store writes made by the work run in the transaction.
+    /// </summary>
+    /// <param name="work">
+    /// The work to run in the transaction. It can run again when a failure is safely retryable,
+    /// so it must be safe to repeat.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    ValueTask RunInTransactionAsync(
+        Func<CancellationToken, ValueTask> work,
+        CancellationToken cancellationToken = default
+    );
 }

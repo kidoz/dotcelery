@@ -15,10 +15,11 @@ namespace DotCelery.Worker.Filters;
 /// before other filters, preventing duplicate processing of already-handled messages.
 /// </para>
 /// <para>
-/// A message is marked as processed after it runs successfully, so a redelivery of a message
-/// that failed is executed again. For exactly-once semantics the inbox record, the task's
-/// effects, and the result must commit together; pass the database transaction to
-/// <see cref="IInboxStore.MarkProcessedAsync"/> from the task itself for that.
+/// The filter only skips duplicates. A successful message is marked as processed by the
+/// executor's outcome recording (<see cref="DotCelery.Core.Storage.Stores.OutcomeRecorder"/>),
+/// which stores the result and the record in one storage transaction when the stores can share
+/// one, and after the result otherwise. A message that fails is not marked, so it is executed
+/// again when it is redelivered.
 /// </para>
 /// </remarks>
 public sealed class InboxDeduplicationFilter : ITaskFilter
@@ -94,45 +95,12 @@ public sealed class InboxDeduplicationFilter : ITaskFilter
     }
 
     /// <inheritdoc />
-    public async ValueTask OnExecutedAsync(
+    /// <remarks>
+    /// Nothing to do: the message is marked as processed by the executor once the outcome is
+    /// stored, in the same transaction when the result backend and the inbox store can share one.
+    /// </remarks>
+    public ValueTask OnExecutedAsync(
         TaskExecutedContext context,
         CancellationToken cancellationToken
-    )
-    {
-        if (_inboxStore is null)
-        {
-            return;
-        }
-
-        // Mark as processed only after a successful execution. The executor leaves TaskResult
-        // unset unless a filter set it, so success is the absence of an exception.
-        var succeeded =
-            context.TaskResult?.State == TaskState.Success
-            || (context.TaskResult is null && context.Exception is null);
-
-        if (succeeded)
-        {
-            try
-            {
-                await _inboxStore
-                    .MarkProcessedAsync(context.TaskId, transaction: null, cancellationToken)
-                    .ConfigureAwait(false);
-
-                _logger.LogDebug(
-                    "Marked message {MessageId} as processed in inbox",
-                    context.TaskId
-                );
-            }
-            catch (Exception ex)
-            {
-                // Log but don't fail - the task was already executed successfully
-                // A duplicate might slip through, but we prefer at-least-once over at-most-once
-                _logger.LogWarning(
-                    ex,
-                    "Failed to mark message {MessageId} as processed in inbox",
-                    context.TaskId
-                );
-            }
-        }
-    }
+    ) => ValueTask.CompletedTask;
 }

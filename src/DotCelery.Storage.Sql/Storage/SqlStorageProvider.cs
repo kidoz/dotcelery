@@ -92,6 +92,16 @@ public sealed class SqlStorageProvider : IStorageProvider, ITransactionalStorage
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The transaction runs on its own connection. A deadlock or another retryable failure rolls
+    /// it back and runs the work again, so the work must be safe to repeat.
+    /// </remarks>
+    public ValueTask RunInTransactionAsync(
+        Func<CancellationToken, ValueTask> work,
+        CancellationToken cancellationToken = default
+    ) => _sql.RunInTransactionAsync(work, cancellationToken);
+
+    /// <inheritdoc />
     public async ValueTask<long> PurgeExpiredAsync(CancellationToken cancellationToken = default)
     {
         var now = _timeProvider.GetUtcNow();

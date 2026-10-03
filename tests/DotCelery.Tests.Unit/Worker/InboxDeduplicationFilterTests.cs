@@ -49,52 +49,13 @@ public sealed class InboxDeduplicationFilterTests
         Assert.Equal(true, context.SkipResult.Metadata!["deduplicated"]);
     }
 
+    // Marking is the executor's outcome recording, not the filter's
     [Fact]
-    public async Task OnExecutedAsync_AfterSuccessfulExecution_MarksTheMessageProcessed()
+    public async Task OnExecutedAsync_DoesNotMarkTheMessage()
     {
         await _filter.OnExecutedAsync(Executed("a"), CancellationToken.None);
 
-        // Another store instance stands for the next worker process
-        Assert.True(await new InboxStore(_storage).IsProcessedAsync("a"));
-    }
-
-    [Fact]
-    public async Task OnExecutedAsync_AfterAFailedExecution_LeavesTheMessageUnprocessed()
-    {
-        var context = Executed("a");
-        context.Exception = new InvalidOperationException("boom");
-
-        await _filter.OnExecutedAsync(context, CancellationToken.None);
-
         Assert.False(await _inbox.IsProcessedAsync("a"));
-    }
-
-    [Fact]
-    public async Task OnExecutedAsync_AfterAFilterSetAFailedResult_LeavesTheMessageUnprocessed()
-    {
-        var context = Executed("a");
-        context.TaskResult = new TaskResult
-        {
-            TaskId = "a",
-            State = TaskState.Failure,
-            CompletedAt = DateTimeOffset.UtcNow,
-            Duration = TimeSpan.FromMilliseconds(1),
-        };
-
-        await _filter.OnExecutedAsync(context, CancellationToken.None);
-
-        Assert.False(await _inbox.IsProcessedAsync("a"));
-    }
-
-    [Fact]
-    public async Task OnExecutedAsync_WhenTheStoreFails_DoesNotThrow()
-    {
-        var filter = new InboxDeduplicationFilter(
-            NullLogger<InboxDeduplicationFilter>.Instance,
-            new FailingInboxStore()
-        );
-
-        await filter.OnExecutedAsync(Executed("a"), CancellationToken.None);
     }
 
     [Fact]
@@ -144,30 +105,6 @@ public sealed class InboxDeduplicationFilterTests
             ContentType = "application/json",
             Timestamp = DateTimeOffset.UtcNow,
         };
-
-    private sealed class FailingInboxStore : IInboxStore
-    {
-        public ValueTask<bool> IsProcessedAsync(
-            string messageId,
-            CancellationToken cancellationToken = default
-        ) => ValueTask.FromResult(false);
-
-        public ValueTask MarkProcessedAsync(
-            string messageId,
-            object? transaction = null,
-            CancellationToken cancellationToken = default
-        ) => throw new InvalidOperationException("Storage unavailable");
-
-        public ValueTask<long> GetCountAsync(CancellationToken cancellationToken = default) =>
-            ValueTask.FromResult(0L);
-
-        public ValueTask<long> CleanupAsync(
-            TimeSpan olderThan,
-            CancellationToken cancellationToken = default
-        ) => ValueTask.FromResult(0L);
-
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-    }
 
     private sealed class EmptyServiceProvider : IServiceProvider
     {

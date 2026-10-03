@@ -108,6 +108,85 @@ public sealed class SqlExecutor
     }
 
     /// <summary>
+    /// Runs work in a transaction this executor starts and commits, rolling it back when the
+    /// work fails. Every statement of this executor made by the work runs in the transaction.
+    /// </summary>
+    /// <param name="work">
+    /// The work to run in the transaction. It can run again when a failure is safely retryable,
+    /// so it must be safe to repeat.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <remarks>
+    /// Work already inside a transaction someone else owns runs in that transaction instead,
+    /// and its outcome stays theirs to decide.
+    /// </remarks>
+    public ValueTask RunInTransactionAsync(
+        Func<CancellationToken, ValueTask> work,
+        CancellationToken cancellationToken
+    )
+    {
+        ArgumentNullException.ThrowIfNull(work);
+
+        return _callerTransaction.Value is not null
+            ? work(cancellationToken)
+            : RunOwnedTransactionAsync(work, cancellationToken);
+    }
+
+    private async ValueTask RunOwnedTransactionAsync(
+        Func<CancellationToken, ValueTask> work,
+        CancellationToken cancellationToken
+    )
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await RunOnceInTransactionAsync(work, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            // Some drivers report a cancelled command as a database error
+            catch (DbException ex) when (cancellationToken.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(ex.Message, ex, cancellationToken);
+            }
+            catch (DbException ex) when (attempt < MaxAttempts && _isTransient(ex))
+            {
+                await Task.Delay(
+                        TimeSpan.FromMilliseconds(Random.Shared.Next(5, 20) * attempt),
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            }
+        }
+    }
+
+    private async ValueTask RunOnceInTransactionAsync(
+        Func<CancellationToken, ValueTask> work,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var connection = await _dataSource
+            .OpenConnectionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        await using var transaction = await connection
+            .BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken)
+            .ConfigureAwait(false);
+
+        var previous = _callerTransaction.Value;
+        _callerTransaction.Value = transaction;
+
+        try
+        {
+            await work(cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _callerTransaction.Value = previous;
+        }
+    }
+
+    /// <summary>
     /// Executes a statement on its own connection.
     /// </summary>
     /// <param name="sql">The statement.</param>

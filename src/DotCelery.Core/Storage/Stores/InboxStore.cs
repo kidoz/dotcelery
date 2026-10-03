@@ -12,7 +12,7 @@ namespace DotCelery.Core.Storage.Stores;
 /// message counts as processed only if the caller commits. Providers that cannot write in a
 /// caller's transaction refuse the record rather than store it outside the transaction.
 /// </remarks>
-public sealed class InboxStore : IInboxStore
+public sealed class InboxStore : IInboxStore, IStorageBackedStore
 {
     private readonly string _collection;
 
@@ -40,6 +40,9 @@ public sealed class InboxStore : IInboxStore
         _collection = _options.Name("inbox");
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
+
+    /// <inheritdoc />
+    public IStorageProvider Storage => _storage;
 
     /// <inheritdoc />
     public async ValueTask<bool> IsProcessedAsync(

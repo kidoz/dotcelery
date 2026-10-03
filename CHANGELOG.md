@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `StoragePurgeService` deletes expired storage entries every `StorageStoreOptions.PurgeInterval`; `AddInMemoryStorage` and `AddPostgresStorage` register it
 - `ITransactionalStorage`: a provider can write store records in a transaction the caller owns. `OutboxStore.StoreAsync` and `InboxStore.MarkProcessedAsync` write in the caller's transaction when one is given, so the record commits or rolls back with the caller's other changes; a provider that cannot write in the given transaction refuses the record instead of storing it outside the transaction. The PostgreSQL and SQL Server providers implement it
 - `IRevocationStore.GetRevocationsAsync` returns revoked tasks with their options and revocation time, so workers can restore them at startup
+- `ITransactionalStorage.RunInTransactionAsync` runs store writes in a transaction the storage starts, commits, and rolls back, and `OutcomeRecorder` uses it to store a task result and mark the message processed in the inbox together. `TaskExecutor` records every outcome through it, so with inbox deduplication and a result backend and inbox store that share a transactional storage (PostgreSQL or SQL Server), a message is marked processed exactly when its result is stored: a worker that stops after the transaction commits does not run the task again, and one that stops before leaves nothing behind
 
 ### Changed
 - PostgreSQL stores no longer create their tables on first use; run migrations first (automatic with a generic host)
@@ -41,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Snapshots of historical metrics with the same timestamp but different task names are both kept
 - In-memory revocation subscribers no longer receive revocations made before they subscribed, as with the other providers
 - `RevocationManager` restores the options of revocations that exist when a worker starts, instead of default options
+- The worker stores a successful task's result and its inbox record in one storage transaction when the stores share a transactional provider, and stores the result before the record otherwise, so a failure between them leaves the message to be processed again instead of marked without a result. A failure to write the record is no longer logged and ignored: the message is returned to the broker
 
 ### Removed
 - `AutoCreateTables` from every PostgreSQL store's options
@@ -63,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Outbox messages and signals are claimed, so several dispatchers never handle the same one at once, and one whose dispatcher stops is delivered again after the claim timeout; outbox attempts count only failed publishes
 - The PostgreSQL rate limiter no longer fails on every call, and the rate limit window is shared by every worker using the same storage
 - Inbox and revocation entries expire, and task execution tracking and partition locks cannot be released by a task that no longer holds them
-- Inbox deduplication marks a message as processed after a successful execution, so `UseInboxDeduplication()` no longer lets redelivered messages run again; the filter logs a warning when deduplication is enabled without an inbox store registered
+- Inbox deduplication marks a message as processed once its result is stored, so `UseInboxDeduplication()` no longer lets redelivered messages run again; the filter only skips duplicates and logs a warning when deduplication is enabled without an inbox store registered
 - PostgreSQL results larger than 8000 bytes are stored; result notifications carry only the task ID
 - The client's `Pending` state no longer makes waiting for a result return before the task finishes, and no longer overwrites a result that is already stored
 - Batch completion is atomic, so tasks finishing together are all counted; the PostgreSQL store now finishes batches, and a cancelled batch stays cancelled

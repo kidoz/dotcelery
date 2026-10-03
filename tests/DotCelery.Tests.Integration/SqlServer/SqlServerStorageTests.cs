@@ -724,8 +724,115 @@ public sealed class SqlServerTransactionalStorageTests(SqlServerStorageFixture f
         Assert.True(await inbox.IsProcessedAsync("committed"));
     }
 
+    [Fact]
+    public async Task RunInTransactionAsync_WhenTheWorkSucceeds_CommitsEveryWrite()
+    {
+        var provider = fixture.CreateProvider(TimeProvider.System);
+        var documents = provider.Documents;
+        var collection = $"{_storeOptions.Prefix}.txn-commit";
+
+        await ((ITransactionalStorage)provider).RunInTransactionAsync(async token =>
+            await documents.UpsertAsync(
+                collection,
+                "a",
+                ReadOnlyMemory<byte>.Empty,
+                cancellationToken: token
+            )
+        );
+
+        Assert.NotNull(await documents.GetAsync(collection, "a"));
+    }
+
+    [Fact]
+    public async Task RunInTransactionAsync_WhenTheWorkFails_RollsBackEveryWrite()
+    {
+        var provider = fixture.CreateProvider(TimeProvider.System);
+        var documents = provider.Documents;
+        var collection = $"{_storeOptions.Prefix}.txn-rollback";
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await ((ITransactionalStorage)provider).RunInTransactionAsync(async token =>
+            {
+                await documents.UpsertAsync(
+                    collection,
+                    "a",
+                    ReadOnlyMemory<byte>.Empty,
+                    cancellationToken: token
+                );
+                throw new InvalidOperationException("The work failed");
+            })
+        );
+
+        Assert.Null(await documents.GetAsync(collection, "a"));
+    }
+
+    [Fact]
+    public async Task OutcomeRecording_StoresTheResultAndTheInboxRecordTogether()
+    {
+        var provider = fixture.CreateProvider(TimeProvider.System);
+        var results = new ResultBackend(provider, Options.Create(_storeOptions));
+        var inbox = new InboxStore(provider, Options.Create(_storeOptions));
+        var recorder = OutcomeRecorder.Create(results, inbox)!;
+
+        await recorder.RecordAsync(Success("recorded"));
+
+        Assert.Equal(TaskState.Success, (await results.GetResultAsync("recorded"))!.State);
+        Assert.True(await inbox.IsProcessedAsync("recorded"));
+    }
+
+    [Fact]
+    public async Task OutcomeRecording_WhenTheInboxWriteFails_LeavesNoResult()
+    {
+        var provider = fixture.CreateProvider(TimeProvider.System);
+        var results = new ResultBackend(provider, Options.Create(_storeOptions));
+        var recorder = OutcomeRecorder.Create(results, new FailingInboxStore(provider))!;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await recorder.RecordAsync(Success("rolled-back"))
+        );
+
+        Assert.Null(await results.GetResultAsync("rolled-back"));
+    }
+
+    private static TaskResult Success(string taskId) =>
+        new()
+        {
+            TaskId = taskId,
+            State = TaskState.Success,
+            CompletedAt = DateTimeOffset.UtcNow,
+            Duration = TimeSpan.FromMilliseconds(1),
+        };
+
     private OutboxStore CreateOutbox(IStorageProvider provider) =>
         new(provider, Options.Create(_storeOptions));
+
+    private sealed class FailingInboxStore(IStorageProvider storage)
+        : IInboxStore,
+            IStorageBackedStore
+    {
+        public IStorageProvider Storage { get; } = storage;
+
+        public ValueTask<bool> IsProcessedAsync(
+            string messageId,
+            CancellationToken cancellationToken = default
+        ) => ValueTask.FromResult(false);
+
+        public ValueTask MarkProcessedAsync(
+            string messageId,
+            object? transaction = null,
+            CancellationToken cancellationToken = default
+        ) => throw new InvalidOperationException("The inbox store is unavailable");
+
+        public ValueTask<long> GetCountAsync(CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(0L);
+
+        public ValueTask<long> CleanupAsync(
+            TimeSpan olderThan,
+            CancellationToken cancellationToken = default
+        ) => ValueTask.FromResult(0L);
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
 
     private async Task<DbConnection> OpenConnectionAsync() =>
         await fixture

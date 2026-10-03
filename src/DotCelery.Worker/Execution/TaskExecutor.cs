@@ -5,6 +5,7 @@ using DotCelery.Core.Filters;
 using DotCelery.Core.Instrumentation;
 using DotCelery.Core.Models;
 using DotCelery.Core.Signals;
+using DotCelery.Core.Storage.Stores;
 using DotCelery.Core.TimeLimits;
 using DotCelery.Worker.Filters;
 using DotCelery.Worker.Registry;
@@ -30,6 +31,7 @@ public sealed class TaskExecutor
     private readonly TimeLimitEnforcer? _timeLimitEnforcer;
     private readonly IRateLimiter? _rateLimiter;
     private readonly CompiledTaskInvoker _taskInvoker;
+    private readonly OutcomeRecorder? _outcomes;
     private readonly WorkerOptions _options;
     private readonly ILogger<TaskExecutor> _logger;
 
@@ -47,7 +49,8 @@ public sealed class TaskExecutor
         ILogger<TaskExecutor> logger,
         ITaskSignalDispatcher? signalDispatcher = null,
         IRateLimiter? rateLimiter = null,
-        TimeLimitEnforcer? timeLimitEnforcer = null
+        TimeLimitEnforcer? timeLimitEnforcer = null,
+        IInboxStore? inboxStore = null
     )
     {
         _registry = registry;
@@ -60,6 +63,7 @@ public sealed class TaskExecutor
         _timeLimitEnforcer = timeLimitEnforcer;
         _rateLimiter = rateLimiter;
         _taskInvoker = new CompiledTaskInvoker();
+        _outcomes = OutcomeRecorder.Create(resultBackend, inboxStore);
         _options = options.Value;
         _logger = logger;
     }
@@ -264,11 +268,7 @@ public sealed class TaskExecutor
                         or TaskState.Failure
                 )
                 {
-                    await _resultBackend
-                        .StoreResultAsync(
-                            filterProvidedResult,
-                            cancellationToken: cancellationToken
-                        )
+                    await RecordOutcomeAsync(filterProvidedResult, cancellationToken)
                         .ConfigureAwait(false);
                 }
 
@@ -293,9 +293,7 @@ public sealed class TaskExecutor
                 Worker = workerName,
             };
 
-            await _resultBackend
-                .StoreResultAsync(taskResult, cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
+            await RecordOutcomeAsync(taskResult, cancellationToken).ConfigureAwait(false);
 
             _logger.LogInformation(
                 "Task {TaskId} completed successfully in {Duration}ms",
@@ -384,9 +382,7 @@ public sealed class TaskExecutor
                 RetryAfter = ex.Countdown,
             };
 
-            await _resultBackend
-                .StoreResultAsync(taskResult, cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
+            await RecordOutcomeAsync(taskResult, cancellationToken).ConfigureAwait(false);
 
             // Dispatch retry signals
             await _signalDispatcher
@@ -437,9 +433,7 @@ public sealed class TaskExecutor
                 Worker = workerName,
             };
 
-            await _resultBackend
-                .StoreResultAsync(taskResult, cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
+            await RecordOutcomeAsync(taskResult, cancellationToken).ConfigureAwait(false);
 
             // Dispatch rejected signals
             await _signalDispatcher
@@ -488,9 +482,7 @@ public sealed class TaskExecutor
                 Worker = workerName,
             };
 
-            await _resultBackend
-                .StoreResultAsync(taskResult, cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
+            await RecordOutcomeAsync(taskResult, cancellationToken).ConfigureAwait(false);
 
             // Dispatch failure signals
             await _signalDispatcher
@@ -531,6 +523,13 @@ public sealed class TaskExecutor
             _revocationManager.UnregisterTask(message.Id);
         }
     }
+
+    // The recorder stores the outcome and marks a successful message as processed in one
+    // storage transaction when the result backend and the inbox store can share one.
+    private ValueTask RecordOutcomeAsync(TaskResult result, CancellationToken cancellationToken) =>
+        _outcomes is null
+            ? _resultBackend.StoreResultAsync(result, cancellationToken: cancellationToken)
+            : _outcomes.RecordAsync(result, cancellationToken);
 
     private async Task<TaskResult?> CheckRateLimitAsync(
         TaskMessage message,
@@ -595,9 +594,7 @@ public sealed class TaskExecutor
             Worker = workerName,
         };
 
-        await _resultBackend
-            .StoreResultAsync(taskResult, cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
+        await RecordOutcomeAsync(taskResult, cancellationToken).ConfigureAwait(false);
 
         // Dispatch revoked signals
         await _signalDispatcher

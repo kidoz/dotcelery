@@ -16,7 +16,8 @@ using Microsoft.Extensions.Options;
 
 public class TaskExecutorTests : IAsyncDisposable
 {
-    private readonly ResultBackend _backend = new(new InMemoryStorageProvider());
+    private readonly InMemoryStorageProvider _storage = new();
+    private readonly ResultBackend _backend;
     private readonly JsonMessageSerializer _serializer = new();
     private readonly ServiceProvider _serviceProvider;
     private readonly TaskRegistry _registry = new();
@@ -26,10 +27,13 @@ public class TaskExecutorTests : IAsyncDisposable
 
     public TaskExecutorTests()
     {
+        _backend = new ResultBackend(_storage);
+
         var services = new ServiceCollection();
         services.AddTransient<TestTaskWithInput>();
         services.AddTransient<TestTaskNoInput>();
         services.AddTransient<TestTaskReturnsNull>();
+        services.AddTransient<ThrowingTask>();
 
         _serviceProvider = services.BuildServiceProvider();
 
@@ -159,6 +163,42 @@ public class TaskExecutorTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task ExecuteAsync_SuccessfulTask_WithAnInboxStore_MarksTheMessageProcessed()
+    {
+        var inbox = new InboxStore(_storage);
+        var executor = CreateExecutor(_registry, inboxStore: inbox);
+        var message = CreateBrokerMessage(
+            "marked-task",
+            TestTaskWithInput.TaskName,
+            new TestInput { Value = 1 }
+        );
+
+        var result = await executor.ExecuteAsync(message, "worker-1", CancellationToken.None);
+
+        Assert.Equal(TaskState.Success, result.State);
+        Assert.True(await inbox.IsProcessedAsync("marked-task"));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_FailedTask_WithAnInboxStore_LeavesTheMessageUnprocessed()
+    {
+        var registry = new TaskRegistry();
+        registry.Register(typeof(ThrowingTask), ThrowingTask.TaskName);
+        var inbox = new InboxStore(_storage);
+        var executor = CreateExecutor(registry, inboxStore: inbox);
+        var message = CreateBrokerMessage(
+            "failed-task",
+            ThrowingTask.TaskName,
+            new TestInput { Value = 1 }
+        );
+
+        var result = await executor.ExecuteAsync(message, "worker-1", CancellationToken.None);
+
+        Assert.Equal(TaskState.Failure, result.State);
+        Assert.False(await inbox.IsProcessedAsync("failed-task"));
+    }
+
+    [Fact]
     public async Task ExecuteAsync_StoresResultInBackend()
     {
         var taskId = "stored-task";
@@ -174,6 +214,21 @@ public class TaskExecutorTests : IAsyncDisposable
         Assert.NotNull(storedResult);
         Assert.Equal(TaskState.Success, storedResult.State);
     }
+
+    private TaskExecutor CreateExecutor(TaskRegistry registry, IInboxStore? inboxStore = null) =>
+        new(
+            registry,
+            _serviceProvider,
+            _serializer,
+            _backend,
+            _revocationManager,
+            _filterPipeline,
+            Options.Create(
+                new WorkerOptions { EnableRevocation = false, EnableRateLimiting = false }
+            ),
+            NullLogger<TaskExecutor>.Instance,
+            inboxStore: inboxStore
+        );
 
     private BrokerMessage CreateBrokerMessage(string taskId, string taskName, object? input)
     {

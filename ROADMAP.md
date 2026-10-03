@@ -80,9 +80,6 @@ but do not yet behave as documented.
 - Extension members for fluent task signatures (after Canvas execution ships)
 
 ### Worker/Execution
-- Exactly-once processing: the worker commits the inbox claim together with the result in one
-  transaction (the stores can already write in the caller's transaction; the worker does not use
-  one yet)
 - Connection pooling controls for brokers: separate publish and consume connections with channel pooling for RabbitMQ
 - Batch execution tasks (single-task processing of input batches)
 
