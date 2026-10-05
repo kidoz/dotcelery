@@ -17,22 +17,27 @@ public sealed class BeatOptions
     public TimeSpan MaxJitter { get; set; } = TimeSpan.Zero;
 
     /// <summary>
-    /// Gets or sets whether to persist schedule state.
+    /// Gets or sets whether to remember when each entry last ran, so a restart resumes the
+    /// schedule instead of starting it over.
     /// </summary>
     public bool PersistState { get; set; }
 
     /// <summary>
-    /// Gets or sets the state persistence path.
+    /// Gets or sets the state persistence path. Defaults to
+    /// <c>{SchedulerName}.state.json</c> in the current directory.
     /// </summary>
     public string? StatePath { get; set; }
 
     /// <summary>
-    /// Gets or sets the scheduler name for identification.
+    /// Gets or sets the scheduler name for identification. Schedulers that share the
+    /// configured storage elect one of themselves per name.
     /// </summary>
     public string SchedulerName { get; set; } = "celery-beat";
 
     /// <summary>
-    /// Gets or sets whether to run missed tasks on startup.
+    /// Gets or sets whether to run a schedule entry once at startup when it was missed while
+    /// the scheduler was stopped. When off, missed runs are skipped and the entry continues
+    /// from the next interval or cron occurrence.
     /// </summary>
     public bool RunMissedOnStartup { get; set; }
 }

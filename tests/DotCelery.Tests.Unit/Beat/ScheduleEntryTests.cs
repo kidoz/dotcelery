@@ -195,7 +195,7 @@ public class ScheduleEntryTests
     }
 
     [Fact]
-    public void ShouldRun_NoLastRunTime_ReturnsTrue()
+    public void ShouldRun_IntervalEntryWithoutARun_WaitsForItsInterval()
     {
         var entry = new ScheduleEntry
         {
@@ -203,7 +203,58 @@ public class ScheduleEntryTests
             Task = new Signature { TaskName = "test.task" },
             Interval = TimeSpan.FromMinutes(5),
         };
+        var now = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
 
-        Assert.True(entry.ShouldRun(DateTimeOffset.UtcNow));
+        // A new entry used to be due at startup, whatever its interval
+        Assert.False(entry.ShouldRun(now));
+        Assert.False(entry.ShouldRun(now.AddHours(1)));
+    }
+
+    [Fact]
+    public void ShouldRun_IntervalEntryLongerThanADay_IsDueAfterTheInterval()
+    {
+        var start = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        var entry = new ScheduleEntry
+        {
+            Name = "test-entry",
+            Task = new Signature { TaskName = "test.task" },
+            Interval = TimeSpan.FromDays(2),
+            LastRunTime = start,
+        };
+
+        // A baseline that moves with the clock used to keep this entry from ever being due
+        Assert.False(entry.ShouldRun(start.AddDays(1)));
+        Assert.True(entry.ShouldRun(start.AddDays(2)));
+    }
+
+    [Fact]
+    public void ShouldRun_CronEntryWithoutARun_WaitsForItsFirstOccurrence()
+    {
+        var entry = new ScheduleEntry
+        {
+            Name = "test-entry",
+            Task = new Signature { TaskName = "test.task" },
+            Cron = "0 0 * * *",
+        };
+        var now = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+
+        // A new cron entry used to be due at startup, because its baseline was a day back
+        Assert.False(entry.ShouldRun(now));
+        Assert.False(entry.ShouldRun(now.AddHours(11)));
+    }
+
+    [Fact]
+    public void ShouldRun_CronEntry_IsDueAtItsNextOccurrence()
+    {
+        var entry = new ScheduleEntry
+        {
+            Name = "test-entry",
+            Task = new Signature { TaskName = "test.task" },
+            Cron = "0 0 * * *",
+            LastRunTime = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+        };
+
+        Assert.False(entry.ShouldRun(new DateTimeOffset(2026, 1, 1, 23, 0, 0, TimeSpan.Zero)));
+        Assert.True(entry.ShouldRun(new DateTimeOffset(2026, 1, 2, 0, 0, 0, TimeSpan.Zero)));
     }
 }

@@ -83,6 +83,10 @@ public sealed class ScheduleEntry
     /// </summary>
     /// <param name="now">The current time.</param>
     /// <returns>True if the entry should run.</returns>
+    /// <remarks>
+    /// An entry that has not run yet is not due: the scheduler anchors it when it starts, so an
+    /// interval entry runs one interval later and a cron entry runs at its next occurrence.
+    /// </remarks>
     public bool ShouldRun(DateTimeOffset now)
     {
         if (!Enabled)
@@ -90,7 +94,7 @@ public sealed class ScheduleEntry
             return false;
         }
 
-        var nextRun = GetNextRunTime(LastRunTime ?? now.AddDays(-1));
+        var nextRun = GetNextRunTime(LastRunTime ?? now);
         return nextRun.HasValue && nextRun.Value <= now;
     }
 }

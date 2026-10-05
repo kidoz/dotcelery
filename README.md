@@ -325,6 +325,8 @@ builder.Services.AddBeatScheduler(schedule =>
 });
 ```
 
+An entry first runs one interval, or at its next cron occurrence, after the scheduler starts. `BeatOptions.PersistState` with `StatePath` carries the last run times across restarts, so a restarted scheduler resumes each schedule; `RunMissedOnStartup` decides whether a run missed while the scheduler was stopped is run once at startup or skipped. When a storage provider is registered, the schedulers that share it elect one of themselves per `SchedulerName`, and only that one runs the schedule; without storage every scheduler runs it.
+
 ## Task Configuration
 
 ### Using Attributes

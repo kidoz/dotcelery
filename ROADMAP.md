@@ -44,7 +44,6 @@ but do not yet behave as documented.
 - Batches: `OnComplete` callbacks are not dispatched, and tasks are published before the batch record exists
 - Metrics: `DotCeleryInstrumentation` defines instruments, but the client and worker never record them (tracing works)
 - Dashboard: no built-in task query, queue stats, or metrics providers; workers do not register themselves; SignalR notifications are never raised; the middleware serves the UI page for API and hub routes unless endpoints are mapped first
-- Beat: schedules without a previous run use a moving baseline (intervals over one day never fire, cron entries fire on startup), there is no leader election across instances, and `PersistState`/`StatePath` are unused
 - Circuit breaker: `UseCircuitBreaker()` registers a factory that nothing uses
 - Tenant context set by `TenantContextFilter` is not visible during task execution
 - Scoped signal handlers are resolved from the root service provider
