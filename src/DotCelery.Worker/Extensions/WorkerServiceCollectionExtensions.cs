@@ -471,6 +471,7 @@ public static class WorkerServiceCollectionExtensions
     /// <item>Task name allowlist (type confusion prevention)</item>
     /// <item>Schema version validation (wire-compatibility)</item>
     /// <item>Optional HMAC message signing (integrity verification)</item>
+    /// <item>Optional maximum message age, which narrows the window a captured signed message can be replayed in</item>
     /// </list>
     /// </remarks>
     public static DotCeleryBuilder UseMessageSecurity(

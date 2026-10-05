@@ -48,9 +48,8 @@ but do not yet behave as documented.
 - Scoped signal handlers are resolved from the root service provider
 
 ### Security Hardening
-- Replay protection for signed messages (timestamp and expiry checks)
-- Security validation before state writes and input deserialization, and dead-lettering of rejected messages (they are currently acknowledged)
-- Serializer options, including the deserialization allowlist, configurable through dependency injection
+- A signed message can be replayed after `MessageSecurityOptions.MaxMessageAge` and the inbox retention have passed; an ID cannot be refused once its inbox record expires
+- Security validation runs after the task input is deserialized and after the worker records the task as started
 - Dashboard: authorization before model binding, CSRF/origin checks on state-changing endpoints, and bounds on paging and bulk operations
 
 ### Test Coverage

@@ -5,11 +5,13 @@ using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Core.Abstractions;
+using DotCelery.Core.DeadLetter;
 using DotCelery.Core.Exceptions;
 using DotCelery.Core.Models;
 using DotCelery.Core.Serialization;
 using DotCelery.Core.Storage.Stores;
 using DotCelery.Worker;
+using DotCelery.Worker.DeadLetter;
 using DotCelery.Worker.Execution;
 using DotCelery.Worker.Filters;
 using DotCelery.Worker.Registry;
@@ -29,16 +31,58 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
     private readonly FaultyResultBackend _backend = new();
     private readonly TaskGate _gate = new();
     private readonly ServiceProvider _serviceProvider;
+    private readonly DeadLetterStore _deadLetters;
+    private readonly JsonMessageSerializer _serializer = new();
     private CeleryWorkerService? _worker;
 
     public CeleryWorkerServiceTests()
     {
+        _deadLetters = new DeadLetterStore(new InMemoryStorageProvider(), _broker, _serializer);
+
         var services = new ServiceCollection();
         services.AddSingleton(_gate);
         services.AddTransient<EchoTask>();
         services.AddTransient<BlockingTask>();
         services.AddTransient<RetryingTask>();
+        services.AddTransient<RejectingTask>();
         _serviceProvider = services.BuildServiceProvider();
+    }
+
+    [Fact]
+    public async Task ExpiredMessage_IsDeadLetteredAndAcknowledged()
+    {
+        var worker = CreateWorker();
+        _broker.Enqueue(
+            CreateMessage("t1", EchoTask.TaskName) with
+            {
+                Expires = DateTimeOffset.UtcNow.AddMinutes(-1),
+            }
+        );
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForAsync(() => _broker.HasEvent("ack:t1"));
+        await worker.StopAsync(CancellationToken.None);
+
+        var deadLetter = Assert.Single(await ReadDeadLettersAsync());
+        Assert.Equal("t1", deadLetter.TaskId);
+        Assert.Equal(DeadLetterReason.Expired, deadLetter.Reason);
+        Assert.Null(await _backend.GetResultAsync("t1"));
+    }
+
+    [Fact]
+    public async Task RejectedMessage_IsDeadLettered()
+    {
+        var worker = CreateWorker();
+        _broker.Enqueue(CreateMessage("t1", RejectingTask.TaskName));
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForAsync(() => _broker.HasEvent("ack:t1"));
+        await worker.StopAsync(CancellationToken.None);
+
+        var deadLetter = Assert.Single(await ReadDeadLettersAsync());
+        Assert.Equal("t1", deadLetter.TaskId);
+        Assert.Equal(DeadLetterReason.Rejected, deadLetter.Reason);
+        Assert.Equal(TaskState.Rejected, (await _backend.GetResultAsync("t1"))?.State);
     }
 
     [Fact]
@@ -208,6 +252,7 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
         registry.Register(typeof(EchoTask), EchoTask.TaskName);
         registry.Register(typeof(BlockingTask), BlockingTask.TaskName);
         registry.Register(typeof(RetryingTask), RetryingTask.TaskName);
+        registry.Register(typeof(RejectingTask), RejectingTask.TaskName);
 
         var executor = new TaskExecutor(
             registry,
@@ -231,7 +276,8 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
             NullLogger<CeleryWorkerService>.Instance,
             shutdownHandler: new GracefulShutdownHandler(
                 NullLogger<GracefulShutdownHandler>.Instance
-            )
+            ),
+            deadLetterHandler: CreateDeadLetterHandler()
         );
         return _worker;
     }
@@ -470,6 +516,36 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
             ITaskContext context,
             CancellationToken cancellationToken = default
         ) => throw new RetryException(countdown: null, new InvalidOperationException("Transient"));
+    }
+
+    private DeadLetterHandler CreateDeadLetterHandler() =>
+        new(
+            _serializer,
+            Options.Create(new DeadLetterOptions()),
+            NullLogger<DeadLetterHandler>.Instance,
+            _deadLetters
+        );
+
+    private async Task<List<DeadLetterMessage>> ReadDeadLettersAsync()
+    {
+        var messages = new List<DeadLetterMessage>();
+        await foreach (var message in _deadLetters.GetAllAsync())
+        {
+            messages.Add(message);
+        }
+
+        return messages;
+    }
+
+    private sealed class RejectingTask : ITask<TestInput>
+    {
+        public static string TaskName => "test.rejecting";
+
+        public Task ExecuteAsync(
+            TestInput input,
+            ITaskContext context,
+            CancellationToken cancellationToken = default
+        ) => throw new RejectException("Not wanted");
     }
 
     private sealed class TestInput

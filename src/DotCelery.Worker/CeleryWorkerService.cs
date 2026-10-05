@@ -1,6 +1,7 @@
 using System.Runtime.ExceptionServices;
 using System.Threading.Channels;
 using DotCelery.Core.Abstractions;
+using DotCelery.Core.DeadLetter;
 using DotCelery.Core.Exceptions;
 using DotCelery.Core.Models;
 using DotCelery.Worker.Execution;
@@ -31,6 +32,7 @@ public sealed class CeleryWorkerService : BackgroundService
     private readonly IDelayedMessageStore? _delayedMessageStore;
     private readonly IGracefulShutdownHandler? _shutdownHandler;
     private readonly IKillSwitch? _killSwitch;
+    private readonly IDeadLetterHandler? _deadLetterHandler;
     private readonly WorkerOptions _options;
     private readonly ILogger<CeleryWorkerService> _logger;
     private readonly Channel<BrokerMessage> _workChannel;
@@ -50,7 +52,8 @@ public sealed class CeleryWorkerService : BackgroundService
         IDelayedMessageStore? delayedMessageStore = null,
         IGracefulShutdownHandler? shutdownHandler = null,
         IKillSwitch? killSwitch = null,
-        TimeProvider? timeProvider = null
+        TimeProvider? timeProvider = null,
+        IDeadLetterHandler? deadLetterHandler = null
     )
     {
         _broker = broker;
@@ -58,6 +61,7 @@ public sealed class CeleryWorkerService : BackgroundService
         _delayedMessageStore = delayedMessageStore;
         _shutdownHandler = shutdownHandler;
         _killSwitch = killSwitch;
+        _deadLetterHandler = deadLetterHandler;
         _options = options.Value;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -213,6 +217,8 @@ public sealed class CeleryWorkerService : BackgroundService
             if (message.Message.Expires.HasValue && message.Message.Expires.Value < now)
             {
                 _logger.LogWarning("Task {TaskId} has expired, skipping", message.Message.Id);
+                await DeadLetterAsync(message.Message, DeadLetterReason.Expired)
+                    .ConfigureAwait(false);
                 await AckAsync(message).ConfigureAwait(false);
                 return;
             }
@@ -407,8 +413,45 @@ public sealed class CeleryWorkerService : BackgroundService
                     return;
                 }
             }
+            else if (result.State == TaskState.Rejected)
+            {
+                // A rejected message is handled, not processed; the dead letter queue keeps a
+                // record of it instead of dropping it silently
+                await DeadLetterAsync(message.Message, DeadLetterReason.Rejected)
+                    .ConfigureAwait(false);
+            }
 
             await AckAsync(message).ConfigureAwait(false);
+        }
+    }
+
+    // A dead letter handler that fails must not stop the message from being settled, so it is
+    // logged and the message is still acknowledged
+    private async Task DeadLetterAsync(TaskMessage message, DeadLetterReason reason)
+    {
+        if (_deadLetterHandler is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _deadLetterHandler
+                .HandleAsync(
+                    message,
+                    reason,
+                    worker: _workerName,
+                    cancellationToken: CancellationToken.None
+                )
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to store task {TaskId} in the dead letter queue",
+                message.Id
+            );
         }
     }
 

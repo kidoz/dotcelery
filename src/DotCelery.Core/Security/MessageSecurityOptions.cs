@@ -65,6 +65,20 @@ public sealed class MessageSecurityOptions
     public int MaxAllowedSchemaVersion { get; set; } = Models.TaskMessage.CurrentSchemaVersion;
 
     /// <summary>
+    /// Gets or sets the age beyond which a signed message is refused, or <c>null</c> to accept
+    /// messages of any age (default). It narrows the window in which a captured signed message
+    /// can be replayed.
+    /// </summary>
+    /// <remarks>
+    /// A message is delivered again after a worker restarts, a claim expires, or a retry, and it
+    /// keeps the timestamp it was sent with, so a window that is too short refuses those
+    /// redeliveries, which are then dead-lettered rather than run. Prefer
+    /// <c>UseInboxDeduplication</c> when a captured message must not be replayed at all: it
+    /// refuses a message whose ID was already processed, whatever its age.
+    /// </remarks>
+    public TimeSpan? MaxMessageAge { get; set; }
+
+    /// <summary>
     /// Validates the security options.
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown when options are invalid.</exception>

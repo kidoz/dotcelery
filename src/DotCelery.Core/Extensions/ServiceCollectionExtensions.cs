@@ -5,6 +5,7 @@ using DotCelery.Core.Storage.Stores;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace DotCelery.Core.Extensions;
 
@@ -64,8 +65,11 @@ public sealed class DotCeleryBuilder
     {
         Services = services;
 
-        // Register default serializer
-        services.AddSingleton<IMessageSerializer, JsonMessageSerializer>();
+        // Register default serializer, configured through JsonMessageSerializerOptions
+        services.AddSingleton<IMessageSerializer>(provider => new JsonMessageSerializer(
+            jsonOptions: null,
+            provider.GetService<IOptions<JsonMessageSerializerOptions>>()?.Value
+        ));
     }
 
     /// <summary>

@@ -97,6 +97,9 @@ public enum MessageValidationError
 
     /// <summary>Schema version not supported.</summary>
     UnsupportedSchemaVersion,
+
+    /// <summary>Message is older than the configured maximum age.</summary>
+    MessageExpired,
 }
 
 /// <summary>
@@ -106,6 +109,7 @@ public sealed class MessageSecurityValidator : IMessageSecurityValidator, IDispo
 {
     private readonly MessageSecurityOptions _options;
     private readonly ILogger<MessageSecurityValidator> _logger;
+    private readonly TimeProvider _timeProvider;
 
     // HMACSHA256 instances are not thread-safe, and this validator is a shared singleton,
     // so each signature is computed with the stateless HMACSHA256.HashData API.
@@ -115,13 +119,18 @@ public sealed class MessageSecurityValidator : IMessageSecurityValidator, IDispo
     /// <summary>
     /// Initializes a new instance of the <see cref="MessageSecurityValidator"/> class.
     /// </summary>
+    /// <param name="options">The security options.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="timeProvider">The clock for the maximum message age.</param>
     public MessageSecurityValidator(
         IOptions<MessageSecurityOptions> options,
-        ILogger<MessageSecurityValidator> logger
+        ILogger<MessageSecurityValidator> logger,
+        TimeProvider? timeProvider = null
     )
     {
         _options = options.Value;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
 
         if (_options.EnableMessageSigning && _options.SigningKey is not null)
         {
@@ -162,6 +171,26 @@ public sealed class MessageSecurityValidator : IMessageSecurityValidator, IDispo
                 MessageValidationError.PayloadTooLarge,
                 $"Payload size {message.Args.Length} bytes exceeds maximum of {_options.MaxPayloadSizeBytes} bytes"
             );
+        }
+
+        // Check the message age, which narrows the window in which a captured signed message
+        // can be replayed
+        if (_options.MaxMessageAge is { } maxAge)
+        {
+            var age = _timeProvider.GetUtcNow() - message.Timestamp;
+            if (age > maxAge)
+            {
+                _logger.LogWarning(
+                    "Message {MessageId} is {Age} old, which exceeds the maximum of {MaxAge}",
+                    message.Id,
+                    age,
+                    maxAge
+                );
+                return MessageValidationResult.Failure(
+                    MessageValidationError.MessageExpired,
+                    $"Message is {age} old, which exceeds the maximum age of {maxAge}"
+                );
+            }
         }
 
         // Check task allowlist

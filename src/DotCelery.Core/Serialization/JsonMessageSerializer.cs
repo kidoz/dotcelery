@@ -8,31 +8,35 @@ namespace DotCelery.Core.Serialization;
 /// <summary>
 /// Configuration for <see cref="JsonMessageSerializer"/>.
 /// </summary>
+/// <remarks>
+/// The properties are settable, so the options can be configured through dependency injection,
+/// for example with <c>services.Configure&lt;JsonMessageSerializerOptions&gt;(...)</c>.
+/// </remarks>
 public sealed class JsonMessageSerializerOptions
 {
     /// <summary>
-    /// Gets the JSON serializer options. When null, DotCelery uses the default
+    /// Gets or sets the JSON serializer options. When null, DotCelery uses the default
     /// AOT-friendly options with reflection fallback.
     /// </summary>
-    public JsonSerializerOptions? SerializerOptions { get; init; }
+    public JsonSerializerOptions? SerializerOptions { get; set; }
 
     /// <summary>
-    /// Gets whether deserialization is restricted to <see cref="AllowedDeserializationTypes"/>
+    /// Gets or sets whether deserialization is restricted to <see cref="AllowedDeserializationTypes"/>
     /// and, when enabled, built-in DotCelery model types known to <see cref="DotCeleryJsonContext"/>.
     /// </summary>
-    public bool EnforceDeserializationTypeAllowlist { get; init; }
+    public bool EnforceDeserializationTypeAllowlist { get; set; }
 
     /// <summary>
-    /// Gets whether DotCelery model types registered in <see cref="DotCeleryJsonContext"/>
+    /// Gets or sets whether DotCelery model types registered in <see cref="DotCeleryJsonContext"/>
     /// are allowed when <see cref="EnforceDeserializationTypeAllowlist"/> is enabled.
     /// </summary>
-    public bool AllowDotCeleryTypes { get; init; } = true;
+    public bool AllowDotCeleryTypes { get; set; } = true;
 
     /// <summary>
-    /// Gets the application DTO types that may be deserialized when
+    /// Gets or sets the application DTO types that may be deserialized when
     /// <see cref="EnforceDeserializationTypeAllowlist"/> is enabled.
     /// </summary>
-    public IReadOnlySet<Type> AllowedDeserializationTypes { get; init; } = new HashSet<Type>();
+    public IReadOnlySet<Type> AllowedDeserializationTypes { get; set; } = new HashSet<Type>();
 }
 
 /// <summary>
