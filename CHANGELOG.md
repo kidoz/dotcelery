@@ -61,6 +61,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A failed acknowledgement no longer stops a worker processing loop
 - Message signing is thread-safe; the shared `HMACSHA256` instance could produce invalid signatures under concurrent use
 - The Redis broker keeps consuming after transient errors and recreates a missing consumer group
+- The Redis broker renews the claim on a message it is still processing, every third of `RedisBrokerOptions.ClaimTimeout`, so a task that runs longer than the claim timeout is no longer reclaimed by another consumer and executed twice. A message whose consumer stopped is still reclaimed after the timeout
+- The Redis broker deletes a stream entry when it is settled, so a stream stays proportional to the work in flight instead of growing for the lifetime of the queue
 - The RabbitMQ broker acknowledges and rejects a message only on the channel that delivered it, and refuses to settle a message whose channel was lost instead of using another channel, whose tags mean other messages. It owns reconnection rather than competing with the client's automatic recovery: a consume loop rebuilds its channel and consumers after the connection is lost, so the stream pauses across a broker restart instead of ending, and a closed connection is replaced only when the broker connects again
 - The Redis broker returns buffered messages to their streams when consumption stops, adds a requeued copy before acknowledging the original, and no longer replaces its connection while reconnecting
 - Delayed messages stay in the in-memory and PostgreSQL stores until they are dispatched; a dispatcher that fails or stops mid-batch leaves them to be claimed again

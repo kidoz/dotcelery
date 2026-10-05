@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Threading.Channels;
 using DotCelery.Broker.Redis;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
@@ -239,6 +240,163 @@ public class RedisBrokerIntegrationTests : IAsyncLifetime
         }
 
         Assert.Empty(received);
+    }
+
+    [Fact]
+    public async Task ConsumeAsync_ConsumerStillProcessing_RenewsItsClaimSoItIsNotReclaimed()
+    {
+        var claimTimeout = TimeSpan.FromSeconds(2);
+        await using var holder = CreateBroker(options =>
+        {
+            options.ConsumerName = "holder";
+            options.ClaimTimeout = claimTimeout;
+            options.PendingCheckInterval = TimeSpan.FromMilliseconds(250);
+        });
+        await using var other = CreateBroker(options =>
+        {
+            options.ConsumerName = "other";
+            options.ClaimTimeout = claimTimeout;
+            options.PendingCheckInterval = TimeSpan.FromMilliseconds(250);
+        });
+        var queue = "renewed";
+
+        await holder.PublishAsync(CreateTestMessage() with { Queue = queue });
+
+        BrokerMessage? held = null;
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var processing = Task.Run(async () =>
+        {
+            await foreach (var message in holder.ConsumeAsync([queue], cts.Token))
+            {
+                held = message;
+
+                // Work on the message for several claim timeouts, as a slow task does
+                await Task.Delay(claimTimeout * 3, cts.Token);
+                await holder.AckAsync(message, cts.Token);
+                break;
+            }
+        });
+
+        while (held is null)
+        {
+            await Task.Delay(50, cts.Token);
+        }
+
+        // Wait until the claim would have expired if the consumer had not renewed it
+        await Task.Delay(claimTimeout * 2, cts.Token);
+
+        var stolen = await ReadForAsync(other, queue, TimeSpan.FromSeconds(2));
+        Assert.Empty(stolen);
+
+        await processing;
+
+        // The settled entry leaves the stream with its acknowledgement
+        Assert.Equal(0, await StreamLengthAsync(queue));
+    }
+
+    [Fact]
+    public async Task ConsumeAsync_ConsumerStopped_MessageIsReclaimedAfterTheClaimTimeout()
+    {
+        var claimTimeout = TimeSpan.FromSeconds(1);
+        var stopped = CreateBroker(options =>
+        {
+            options.ConsumerName = "stopped";
+            options.ClaimTimeout = claimTimeout;
+            options.PendingCheckInterval = TimeSpan.FromMilliseconds(250);
+        });
+        await using var other = CreateBroker(options =>
+        {
+            options.ConsumerName = "other";
+            options.ClaimTimeout = claimTimeout;
+            options.PendingCheckInterval = TimeSpan.FromMilliseconds(250);
+        });
+        var queue = "reclaimed";
+
+        await stopped.PublishAsync(CreateTestMessage() with { Queue = queue });
+
+        // Take the message and stop without settling it, which stops renewing its claim
+        using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+        {
+            await foreach (var message in stopped.ConsumeAsync([queue], cts.Token))
+            {
+                Assert.NotNull(message);
+                break;
+            }
+        }
+
+        await stopped.DisposeAsync();
+
+        var reclaimed = await ReadForAsync(other, queue, TimeSpan.FromSeconds(15));
+        Assert.Single(reclaimed);
+    }
+
+    [Fact]
+    public async Task AckAsync_RemovesTheSettledEntryFromTheStream()
+    {
+        await _broker!.PublishAsync(CreateTestMessage());
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await foreach (var message in _broker!.ConsumeAsync(["celery"], cts.Token))
+        {
+            await _broker!.AckAsync(message, cts.Token);
+            break;
+        }
+
+        Assert.Equal(0, await StreamLengthAsync("celery"));
+
+        // The empty stream keeps its consumer group: the queue goes on working
+        await _broker.PublishAsync(CreateTestMessage());
+
+        BrokerMessage? received = null;
+        await foreach (var message in _broker.ConsumeAsync(["celery"], cts.Token))
+        {
+            received = message;
+            await _broker.AckAsync(message, cts.Token);
+            break;
+        }
+
+        Assert.NotNull(received);
+    }
+
+    [Fact]
+    public async Task ConsumeAsync_AfterTheConnectionIsLost_KeepsConsuming()
+    {
+        var queue = "reconnect";
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var received = Channel.CreateUnbounded<BrokerMessage>();
+
+        // One consumer for the whole test, as a worker has: it must survive the lost connection
+        var consuming = Task.Run(
+            async () =>
+            {
+                try
+                {
+                    await foreach (var message in _broker!.ConsumeAsync([queue], cts.Token))
+                    {
+                        await received.Writer.WriteAsync(message, cts.Token).ConfigureAwait(false);
+                        await _broker.AckAsync(message, cts.Token).ConfigureAwait(false);
+                    }
+                }
+                catch (OperationCanceledException) when (cts.IsCancellationRequested)
+                {
+                    // Expected when the test ends
+                }
+            },
+            cts.Token
+        );
+
+        var before = await PublishUntilReceivedAsync(queue, received.Reader, cts.Token);
+
+        // Drop every client connection, as a network reset or a failover does
+        var killed = await _container.ExecAsync(["redis-cli", "CLIENT", "KILL", "TYPE", "normal"]);
+        Assert.Equal(0, killed.ExitCode);
+
+        var after = await PublishUntilReceivedAsync(queue, received.Reader, cts.Token);
+
+        Assert.NotEqual(before.Message.Id, after.Message.Id);
+
+        await cts.CancelAsync();
+        await consuming;
     }
 
     [Fact]
@@ -553,6 +711,72 @@ public class RedisBrokerIntegrationTests : IAsyncLifetime
             .CreateLogger<RedisBroker>();
 
         return new RedisBroker(Options.Create(options), logger);
+    }
+
+    private async Task<BrokerMessage> PublishUntilReceivedAsync(
+        string queue,
+        ChannelReader<BrokerMessage> reader,
+        CancellationToken cancellationToken
+    )
+    {
+        while (true)
+        {
+            try
+            {
+                await _broker!
+                    .PublishAsync(CreateTestMessage() with { Queue = queue }, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                // The connection is not back yet; publish again on the next round
+            }
+
+            var read = reader.ReadAsync(cancellationToken).AsTask();
+            if (
+                await Task.WhenAny(read, Task.Delay(TimeSpan.FromSeconds(2), cancellationToken))
+                == read
+            )
+            {
+                return await read;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads from a queue for a window and returns what arrived. What does not arrive within
+    /// the window was not delivered.
+    /// </summary>
+    private static async Task<List<BrokerMessage>> ReadForAsync(
+        RedisBroker broker,
+        string queue,
+        TimeSpan window
+    )
+    {
+        var messages = new List<BrokerMessage>();
+        using var cts = new CancellationTokenSource(window);
+
+        try
+        {
+            await foreach (var message in broker.ConsumeAsync([queue], cts.Token))
+            {
+                messages.Add(message);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The window ended
+        }
+
+        return messages;
+    }
+
+    private async Task<long> StreamLengthAsync(string queue)
+    {
+        await using var redis = await ConnectionMultiplexer.ConnectAsync(
+            _container.GetConnectionString()
+        );
+        return await redis.GetDatabase().StreamLengthAsync($"dotcelery:stream:{queue}");
     }
 
     private static TaskMessage CreateTestMessage() =>

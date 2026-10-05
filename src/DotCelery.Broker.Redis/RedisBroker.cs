@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -25,6 +26,12 @@ public sealed class RedisBroker : IMessageBroker
     private readonly string _consumerName;
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly HashSet<string> _initializedGroups = [];
+
+    // Deliveries handed to the consumer and not settled yet, by delivery tag. Their claims are
+    // renewed while they are processed, and they are removed from the stream when settled.
+    private readonly ConcurrentDictionary<string, RedisDelivery> _deliveries = new(
+        StringComparer.Ordinal
+    );
 
     private static readonly TimeSpan MinFailureDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan MaxFailureDelay = TimeSpan.FromSeconds(30);
@@ -176,6 +183,9 @@ public sealed class RedisBroker : IMessageBroker
             readCts.Token
         );
 
+        // Keeps the claims on messages that are still being processed
+        var renewTask = RenewClaimsAsync(db, readCts.Token);
+
         // Yield messages from the channel
         try
         {
@@ -204,6 +214,15 @@ public sealed class RedisBroker : IMessageBroker
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Error in stream read task during cleanup");
+            }
+
+            try
+            {
+                await renewTask.ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Error in claim renewal task during cleanup");
             }
 
             var undelivered = new List<BrokerMessage>();
@@ -238,6 +257,12 @@ public sealed class RedisBroker : IMessageBroker
         var db = await GetDatabaseAsync(cancellationToken).ConfigureAwait(false);
         await db.StreamAcknowledgeAsync(streamKey, _options.ConsumerGroupName, messageId)
             .ConfigureAwait(false);
+
+        // The entry goes with the acknowledgement: it is never delivered again, and leaving it
+        // would grow the stream for the lifetime of the queue
+        await db.StreamDeleteAsync(streamKey, [(RedisValue)messageId]).ConfigureAwait(false);
+
+        _deliveries.TryRemove(deliveryTag, out _);
 
         _logger.LogDebug(
             "Acknowledged message {MessageId} from stream {Stream}",
@@ -274,6 +299,9 @@ public sealed class RedisBroker : IMessageBroker
             await PublishAsync(message.Message, cancellationToken).ConfigureAwait(false);
             await db.StreamAcknowledgeAsync(streamKey, _options.ConsumerGroupName, messageId)
                 .ConfigureAwait(false);
+            await db.StreamDeleteAsync(streamKey, [(RedisValue)messageId]).ConfigureAwait(false);
+            _deliveries.TryRemove(deliveryTag, out _);
+
             _logger.LogDebug(
                 "Rejected and requeued message {MessageId} from stream {Stream}",
                 messageId,
@@ -285,6 +313,8 @@ public sealed class RedisBroker : IMessageBroker
             // Acknowledge to remove from pending list (message is lost)
             await db.StreamAcknowledgeAsync(streamKey, _options.ConsumerGroupName, messageId)
                 .ConfigureAwait(false);
+            await db.StreamDeleteAsync(streamKey, [(RedisValue)messageId]).ConfigureAwait(false);
+            _deliveries.TryRemove(deliveryTag, out _);
 
             _logger.LogDebug(
                 "Rejected and removed message {MessageId} from stream {Stream}",
@@ -482,6 +512,7 @@ public sealed class RedisBroker : IMessageBroker
             {
                 await db.StreamAcknowledgeAsync(streamKey, _options.ConsumerGroupName, entry.Id)
                     .ConfigureAwait(false);
+                await db.StreamDeleteAsync(streamKey, [entry.Id]).ConfigureAwait(false);
             }
         }
 
@@ -501,6 +532,8 @@ public sealed class RedisBroker : IMessageBroker
     {
         for (var i = 0; i < batch.Count; i++)
         {
+            TrackDelivery(batch[i]);
+
             try
             {
                 await writer.WriteAsync(batch[i], cancellationToken).ConfigureAwait(false);
@@ -511,6 +544,86 @@ public sealed class RedisBroker : IMessageBroker
                 throw;
             }
         }
+    }
+
+    // A delivery is pending in Redis from the moment the group hands it out until it is settled,
+    // and a pending delivery idle for ClaimTimeout is reclaimed, so the consumer keeps its claim
+    // alive while the message is being processed. Without this, a task that runs longer than the
+    // claim timeout would be handed to another worker and run twice.
+    private async Task RenewClaimsAsync(IDatabase db, CancellationToken cancellationToken)
+    {
+        var interval = _options.ClaimTimeout / 3;
+        if (interval <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            if (_deliveries.IsEmpty)
+            {
+                continue;
+            }
+
+            foreach (var stream in _deliveries.Values.GroupBy(delivery => delivery.StreamKey))
+            {
+                try
+                {
+                    // Only entries still pending for this consumer are renewed: one that another
+                    // consumer claimed while this one was unresponsive is not taken back.
+                    var pending = await db.StreamPendingMessagesAsync(
+                            stream.Key,
+                            _options.ConsumerGroupName,
+                            stream.Count(),
+                            _consumerName
+                        )
+                        .ConfigureAwait(false);
+
+                    if (pending.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    // Claiming with JUSTID resets the idle time without counting as a delivery
+                    await db.StreamClaimIdsOnlyAsync(
+                            stream.Key,
+                            _options.ConsumerGroupName,
+                            _consumerName,
+                            0,
+                            pending.Select(entry => entry.MessageId).ToArray()
+                        )
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+                {
+                    _logger.LogDebug(
+                        ex,
+                        "Failed to renew the claims on stream {Stream}",
+                        stream.Key
+                    );
+                }
+            }
+        }
+    }
+
+    private void TrackDelivery(BrokerMessage message)
+    {
+        if (message.DeliveryTag is not string deliveryTag)
+        {
+            return;
+        }
+
+        var (streamKey, messageId) = ParseDeliveryTag(deliveryTag);
+        _deliveries[deliveryTag] = new RedisDelivery(streamKey, messageId);
     }
 
     /// <summary>
@@ -624,6 +737,7 @@ public sealed class RedisBroker : IMessageBroker
                                 entry.Id
                             )
                             .ConfigureAwait(false);
+                        await db.StreamDeleteAsync(streamKey, [entry.Id]).ConfigureAwait(false);
                     }
                 }
 
@@ -833,6 +947,13 @@ public sealed class RedisBroker : IMessageBroker
     }
 
     private string GetStreamKey(string queue) => $"{_options.StreamKeyPrefix}{queue}";
+
+    /// <summary>
+    /// A delivery that is pending in Redis until it is settled.
+    /// </summary>
+    /// <param name="StreamKey">The stream the entry belongs to.</param>
+    /// <param name="MessageId">The stream entry id.</param>
+    private readonly record struct RedisDelivery(string StreamKey, string MessageId);
 
     private static string CreateDeliveryTag(string streamKey, RedisValue messageId) =>
         $"{streamKey}:{messageId}";

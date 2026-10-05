@@ -69,7 +69,9 @@ public sealed class RedisBrokerOptions
 
     /// <summary>
     /// Gets or sets the idle time threshold for claiming pending messages.
-    /// Messages idle longer than this are reclaimed by other consumers.
+    /// Messages idle longer than this are reclaimed by other consumers, which delivers them
+    /// again. A consumer that is still processing a message renews its claim every third of
+    /// this timeout, so only a message whose consumer stopped is reclaimed.
     /// </summary>
     public TimeSpan ClaimTimeout { get; set; } = TimeSpan.FromMinutes(5);
 

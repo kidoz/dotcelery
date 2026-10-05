@@ -34,7 +34,6 @@ but do not yet behave as documented.
 ## Known Gaps
 
 ### Delivery and Reliability
-- Redis broker: pending-message reclaim takes over messages that live workers are still processing (no lease renewal), and acknowledged entries are never deleted from streams
 - RabbitMQ broker: queue arguments (priority, queue type, dead-letter exchange) are fixed and cannot be configured
 - Without a delay store, a message with a future ETA holds the worker's consume loop for up to 5 seconds before it is requeued
 - Hard time limits are cooperative; a task that ignores its cancellation token keeps its worker slot
@@ -59,7 +58,6 @@ but do not yet behave as documented.
 ### Test Coverage
 - No tests exercise the worker consume/ack/retry/shutdown loop, the delayed-message and outbox dispatchers, or the tenant and overlap filters (the stores they use have conformance tests)
 - The in-memory broker does not model redelivery or serialization round-trips; broker contract tests should run against real brokers
-- The Redis broker has no integration coverage for a lost connection
 - Analyzer DCEL001 reports task names that are not string literals (for example, constants) as empty
 
 ## Planned Features
