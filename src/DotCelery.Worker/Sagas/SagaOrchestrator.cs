@@ -165,7 +165,13 @@ public sealed class SagaOrchestrator : ISagaOrchestrator
             return;
         }
 
-        if (saga.State == SagaState.Compensating || saga.State == SagaState.Compensated)
+        // A saga whose step failed is already marked Compensating while its compensation is
+        // still to run, so the state alone does not mean compensation is underway: a step being
+        // compensated, or a finished compensation, does.
+        if (
+            saga.State is SagaState.Compensated or SagaState.CompensationFailed
+            || saga.Steps.Any(step => step.State == SagaStepState.Compensating)
+        )
         {
             _logger.LogWarning("Saga {SagaId} is already compensating or compensated", sagaId);
             return;

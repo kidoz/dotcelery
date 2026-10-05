@@ -3,6 +3,7 @@ using DotCelery.Core.DeadLetter;
 using DotCelery.Core.Extensions;
 using DotCelery.Core.MultiTenancy;
 using DotCelery.Core.Outbox;
+using DotCelery.Core.Sagas;
 using DotCelery.Core.Security;
 using DotCelery.Core.Signals;
 using DotCelery.Worker.Batches;
@@ -11,6 +12,7 @@ using DotCelery.Worker.Execution;
 using DotCelery.Worker.Filters;
 using DotCelery.Worker.Registry;
 using DotCelery.Worker.Resilience;
+using DotCelery.Worker.Sagas;
 using DotCelery.Worker.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -249,6 +251,37 @@ public static class WorkerServiceCollectionExtensions
         );
         builder.Services.AddScoped<ITaskSignalHandler<TaskRejectedSignal>>(sp =>
             sp.GetRequiredService<BatchCompletionHandler>()
+        );
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Enables saga orchestration. This registers the orchestrator that starts and advances
+    /// sagas, and the signal handlers that settle their steps, so a saga runs and compensates
+    /// its completed steps when one fails.
+    /// </summary>
+    /// <param name="builder">The DotCelery builder.</param>
+    /// <returns>The builder.</returns>
+    /// <remarks>
+    /// Requires an ISagaStore implementation to be registered, such as AddPostgresSagaStore().
+    /// </remarks>
+    public static DotCeleryBuilder AddSagaSupport(this DotCeleryBuilder builder)
+    {
+        builder.Services.AddScoped<ISagaOrchestrator, SagaOrchestrator>();
+        builder.Services.AddScoped<SagaCompletionHandler>();
+
+        builder.Services.AddScoped<ITaskSignalHandler<TaskSuccessSignal>>(sp =>
+            sp.GetRequiredService<SagaCompletionHandler>()
+        );
+        builder.Services.AddScoped<ITaskSignalHandler<TaskFailureSignal>>(sp =>
+            sp.GetRequiredService<SagaCompletionHandler>()
+        );
+        builder.Services.AddScoped<ITaskSignalHandler<TaskRevokedSignal>>(sp =>
+            sp.GetRequiredService<SagaCompletionHandler>()
+        );
+        builder.Services.AddScoped<ITaskSignalHandler<TaskRejectedSignal>>(sp =>
+            sp.GetRequiredService<SagaCompletionHandler>()
         );
 
         return builder;

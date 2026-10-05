@@ -31,7 +31,10 @@ public sealed class TaskSignalDispatcher : ITaskSignalDispatcher
     )
         where TSignal : ITaskSignal
     {
-        var handlers = _serviceProvider.GetServices<ITaskSignalHandler<TSignal>>();
+        // A scope per dispatch, so scoped handlers are disposed with it instead of living in
+        // the root provider as accidental singletons
+        using var scope = _serviceProvider.CreateScope();
+        var handlers = scope.ServiceProvider.GetServices<ITaskSignalHandler<TSignal>>();
 
         foreach (var handler in handlers)
         {

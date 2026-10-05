@@ -40,8 +40,6 @@ but do not yet behave as documented.
 
 ### Incomplete Documented Features
 - Canvas: `Signature.Link` and `Signature.LinkError` (linked and error callbacks) are not run; groups of chains, groups, or chords are not supported
-- Sagas: the orchestrator is not registered by the DI extensions
-- Metrics: `DotCeleryInstrumentation` defines instruments, but the client and worker never record them (tracing works)
 - Dashboard: no built-in task query, queue stats, or metrics providers; workers do not register themselves; SignalR notifications are never raised; the middleware serves the UI page for API and hub routes unless endpoints are mapped first
 - Circuit breaker: `UseCircuitBreaker()` registers a factory that nothing uses
 - Tenant context set by `TenantContextFilter` is not visible during task execution

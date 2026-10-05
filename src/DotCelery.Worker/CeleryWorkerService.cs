@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.DeadLetter;
 using DotCelery.Core.Exceptions;
+using DotCelery.Core.Instrumentation;
 using DotCelery.Core.Models;
 using DotCelery.Worker.Execution;
 using Microsoft.Extensions.Hosting;
@@ -263,6 +264,8 @@ public sealed class CeleryWorkerService : BackgroundService
                 return;
             }
 
+            DotCeleryMetrics.RecordTaskReceived(message.Message.Task, message.Message.Queue);
+
             await _workChannel.Writer.WriteAsync(message, intakeToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (intakeToken.IsCancellationRequested)
@@ -310,6 +313,28 @@ public sealed class CeleryWorkerService : BackgroundService
     }
 
     private async Task ProcessMessageAsync(BrokerMessage message, CancellationToken executionToken)
+    {
+        var taskName = message.Message.Task;
+        DotCeleryMetrics.IncrementTasksInProgress(taskName);
+        DotCeleryMetrics.RecordQueueTime(
+            taskName,
+            _timeProvider.GetUtcNow() - message.Message.Timestamp
+        );
+
+        try
+        {
+            await ProcessMessageCoreAsync(message, executionToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            DotCeleryMetrics.DecrementTasksInProgress(taskName);
+        }
+    }
+
+    private async Task ProcessMessageCoreAsync(
+        BrokerMessage message,
+        CancellationToken executionToken
+    )
     {
         TaskResult result;
 
@@ -362,6 +387,8 @@ public sealed class CeleryWorkerService : BackgroundService
 
         if (result.State == TaskState.Retry)
         {
+            DotCeleryMetrics.RecordTaskRetry(message.Message.Task, result.Retries);
+
             try
             {
                 await ScheduleRetryAsync(message, result).ConfigureAwait(false);
@@ -404,6 +431,12 @@ public sealed class CeleryWorkerService : BackgroundService
         else
         {
             // Success, Failure, Rejected, and Revoked outcomes are already stored
+            DotCeleryMetrics.RecordTaskCompleted(
+                message.Message.Task,
+                result.State == TaskState.Success,
+                result.Duration
+            );
+
             if (result.State == TaskState.Success)
             {
                 if (

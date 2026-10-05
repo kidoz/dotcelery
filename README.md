@@ -228,7 +228,7 @@ and `Signature.LinkError` are not run yet; see [ROADMAP.md](ROADMAP.md#known-gap
 
 Coordinate long-running business processes with automatic compensation on failure.
 
-> **Status:** The DI extensions do not yet register `ISagaOrchestrator`. See [ROADMAP.md](ROADMAP.md#known-gaps).
+Register sagas with `AddSagaSupport()`, which adds the orchestrator and the handlers that advance and compensate them; it requires an `ISagaStore` registration, such as `AddPostgresSagaStore()`.
 
 ```csharp
 var saga = new Saga
@@ -453,7 +453,7 @@ builder.Services.AddOpenTelemetry()
 
 ### Available Metrics
 
-> **Status:** These instruments are defined in `DotCelery.Telemetry`, but the client and worker do not record them yet. Distributed tracing is emitted. See [ROADMAP.md](ROADMAP.md#known-gaps).
+The client records sends, and the worker records tasks it receives, completes (with duration), retries, queue time, and how many run at once. Distributed tracing is emitted as well.
 
 | Metric | Description |
 |--------|-------------|

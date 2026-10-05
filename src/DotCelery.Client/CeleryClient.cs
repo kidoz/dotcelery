@@ -412,6 +412,8 @@ public sealed class CeleryClient : ICeleryClient
         );
 
         await _broker.PublishAsync(message, cancellationToken).ConfigureAwait(false);
+        DotCeleryMetrics.RecordTaskSent(taskName, queue);
+
         await _backend
             .UpdateStateAsync(taskId, TaskState.Pending, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
