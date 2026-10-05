@@ -1,3 +1,5 @@
+using DotCelery.Core.Canvas;
+
 namespace DotCelery.Core.Models;
 
 /// <summary>
@@ -97,6 +99,12 @@ public sealed record TaskMessage
     /// Gets the batch ID (if task is part of a batch).
     /// </summary>
     public string? BatchId { get; init; }
+
+    /// <summary>
+    /// Gets the remaining steps of the chain this task belongs to, if any. The worker publishes
+    /// the first one with this task's result as its input when the task succeeds.
+    /// </summary>
+    public IReadOnlyList<ChainStep>? Chain { get; init; }
 
     /// <summary>
     /// Gets the correlation ID for tracing.

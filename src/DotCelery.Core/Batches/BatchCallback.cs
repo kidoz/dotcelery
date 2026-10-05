@@ -15,6 +15,11 @@ public sealed record BatchCallback
     public required string TaskName { get; init; }
 
     /// <summary>
+    /// Gets the ID the task runs with, when the caller assigned one, such as a chord body.
+    /// </summary>
+    public string? TaskId { get; init; }
+
+    /// <summary>
     /// Gets the serialized input the task receives.
     /// </summary>
 #pragma warning disable CA1819 // Properties should not return arrays - Required for serialization

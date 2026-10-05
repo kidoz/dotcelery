@@ -12,7 +12,7 @@ A distributed task queue for .NET 10, inspired by Python's [Celery](https://docs
 - **Distributed Task Execution** - Execute tasks asynchronously across multiple workers
 - **Multiple Brokers** - RabbitMQ, Redis Streams, In-Memory (Azure Service Bus, Amazon SQS planned)
 - **Result Backends** - Redis, PostgreSQL, SQL Server, MongoDB, In-Memory
-- **Canvas Workflows** - Chain, Group, and Chord primitives for describing workflows (not yet executed by workers)
+- **Canvas Workflows** - Chain, Group, and Chord primitives, dispatched by workers
 - **Beat Scheduler** - Periodic task scheduling with cron and interval support
 - **OpenTelemetry** - Built-in distributed tracing (metric instruments are defined but not yet recorded)
 
@@ -138,9 +138,9 @@ public class EmailService(ICeleryClient celery)
 
 ## Canvas Workflows
 
-DotCelery supports workflow primitives for orchestrating complex task execution patterns.
-
-> **Status:** Canvas types describe workflows, but workers do not yet dispatch chains, groups, or chord callbacks. See [ROADMAP.md](ROADMAP.md#known-gaps).
+DotCelery executes workflows built from `Chain`, `Group`, and `Chord` primitives. Send them with
+`ICanvasClient` (registered by `AddCanvasClient()`); the client assigns the task IDs up front and
+they come back in the result.
 
 These examples assume an `IMessageSerializer` named `serializer` (for example, `new JsonMessageSerializer()`).
 
@@ -157,6 +157,15 @@ var transform = new Signature { TaskName = TransformTask.TaskName };
 var save = new Signature { TaskName = SaveTask.TaskName };
 
 var chain = fetch.Then(transform).Then(save);
+
+var chainResult = await canvasClient.SendChainAsync(chain);
+```
+
+Each step runs after the previous one succeeds, with the previous result as its input; a step that
+fails stops the chain. The last step's result is read with its task ID:
+
+```csharp
+var result = await client.WaitForResultAsync(chainResult.LastTaskId);
 ```
 
 ### Group - Parallel Execution
@@ -179,7 +188,12 @@ var group = new Group(
         Args = serializer.Serialize(new EmailInput("user3@example.com", "Hi", "Body")),
     }
 );
+
+var groupResult = await canvasClient.SendGroupAsync(group);
 ```
+
+The members run in parallel. Chords need the batch store that tracks them (`AddBatchClient()` or
+an `IBatchStore` registration plus `AddBatchSupport()` on the worker).
 
 ### Chord - Parallel + Callback
 
@@ -201,7 +215,14 @@ var chord = new Group(
         Args = serializer.Serialize(new PriceInput("MSFT")),
     }
 ).WithCallback(new Signature { TaskName = AggregateTask.TaskName });
+
+var chordResult = await canvasClient.SendChordAsync(chord);
 ```
+
+The callback runs once, in whichever worker settles the last header task, when every header task
+has finished — whether it succeeded or failed. The callback receives the input given in its
+signature, and the batch ID is on its message, so it can read the header results. `Signature.Link`
+and `Signature.LinkError` are not run yet; see [ROADMAP.md](ROADMAP.md#known-gaps).
 
 ## Saga State Machine
 

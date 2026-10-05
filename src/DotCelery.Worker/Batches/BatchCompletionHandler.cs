@@ -171,7 +171,7 @@ public sealed class BatchCompletionHandler
                 .PublishAsync(
                     new TaskMessage
                     {
-                        Id = Guid.NewGuid().ToString("N"),
+                        Id = callback.TaskId ?? Guid.NewGuid().ToString("N"),
                         Task = callback.TaskName,
                         Args = callback.Args ?? [],
                         ContentType = callback.ContentType ?? _serializer.ContentType,

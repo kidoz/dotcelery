@@ -1,4 +1,5 @@
 using DotCelery.Client.Batches;
+using DotCelery.Client.Canvas;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Extensions;
 using DotCelery.Core.Routing;
@@ -168,6 +169,18 @@ public static class ClientServiceCollectionExtensions
     public static DotCeleryBuilder AddBatchClient(this DotCeleryBuilder builder)
     {
         builder.Services.AddSingleton<IBatchClient, BatchClient>();
+        return builder;
+    }
+
+    /// <summary>
+    /// Adds the canvas client that sends chains, groups, and chords.
+    /// </summary>
+    /// <param name="builder">The DotCelery builder.</param>
+    /// <returns>The builder.</returns>
+    /// <remarks>Chords additionally require an <c>IBatchStore</c> registration.</remarks>
+    public static DotCeleryBuilder AddCanvasClient(this DotCeleryBuilder builder)
+    {
+        builder.Services.AddSingleton<ICanvasClient, CanvasClient>();
         return builder;
     }
 }

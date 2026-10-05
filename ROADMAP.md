@@ -39,7 +39,7 @@ but do not yet behave as documented.
 - Hard time limits are cooperative; a task that ignores its cancellation token keeps its worker slot
 
 ### Incomplete Documented Features
-- Canvas: `Chain`, `Group`, and `Chord` define workflows, but nothing dispatches them or runs link and error callbacks
+- Canvas: `Signature.Link` and `Signature.LinkError` (linked and error callbacks) are not run; groups of chains, groups, or chords are not supported
 - Sagas: the orchestrator is not registered by the DI extensions
 - Metrics: `DotCeleryInstrumentation` defines instruments, but the client and worker never record them (tracing works)
 - Dashboard: no built-in task query, queue stats, or metrics providers; workers do not register themselves; SignalR notifications are never raised; the middleware serves the UI page for API and hub routes unless endpoints are mapped first

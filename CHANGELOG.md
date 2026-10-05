@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `BeatOptions.PersistState` and `StatePath` remember when each schedule entry last ran, so a restarted scheduler resumes the schedule, and `RunMissedOnStartup` decides whether a run missed while the scheduler was stopped is run once at startup or skipped
 - The Beat scheduler elects one scheduler per `BeatOptions.SchedulerName` among the ones sharing the configured storage (through its lease store), so several instances no longer run the same schedule; without storage every scheduler runs it, and a warning says so
 - Batch completion callbacks: the worker that settles the last task of a batch publishes its `OnComplete` task once, however the batch finished, with the input given when the batch was created and the batch ID on the message. `Batch.Callback` carries the callback and `CallbackDispatchedAt` records the claim, with `IBatchStore.TryClaimCallbackAsync` and `ReleaseCallbackClaimAsync` claiming it, so a batch whose last tasks settle at the same time runs its callback once
+- Canvas execution: `ICanvasClient` (`AddCanvasClient()`) sends chains, groups, and chords, and `TaskExecutor`/`CeleryWorkerService` run them. A chain travels with its first task's message (`TaskMessage.Chain`, `ChainStep`), and the worker that runs a step publishes the next one with the step's result as its input before acknowledging, so the chain continues without a scheduler or stored workflow and a failure stops it. A chord is a group tracked as a batch whose completion callback is its body
+- `Signature.GetInput()` exposes the typed input of `Signature<TTask, ...>`, which the canvas client serializes into `Args` before sending
 
 ### Changed
 - PostgreSQL stores no longer create their tables on first use; run migrations first (automatic with a generic host)
@@ -46,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Snapshots of historical metrics with the same timestamp but different task names are both kept
 - In-memory revocation subscribers no longer receive revocations made before they subscribed, as with the other providers
 - `RevocationManager` restores the options of revocations that exist when a worker starts, instead of default options
+- `Signature` no longer serializes its derived properties (`HasLink`, `IsScheduled`, `EffectiveEta`, and the like), so a signature carried on a message holds only its inputs
 - The worker stores a successful task's result and its inbox record in one storage transaction when the stores share a transactional provider, and stores the result before the record otherwise, so a failure between them leaves the message to be processed again instead of marked without a result. A failure to write the record is no longer logged and ignored: the message is returned to the broker
 
 ### Removed

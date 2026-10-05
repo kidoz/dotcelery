@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization;
 using DotCelery.Core.Abstractions;
 
 namespace DotCelery.Core.Canvas;
@@ -61,47 +62,56 @@ public class Signature
     /// <summary>
     /// Gets whether this signature has a linked next task.
     /// </summary>
+    [JsonIgnore]
     public bool HasLink => Link is not null;
 
     /// <summary>
     /// Gets whether this signature has an error callback.
     /// </summary>
+    [JsonIgnore]
     public bool HasErrorLink => LinkError is not null;
 
     /// <summary>
     /// Gets whether this signature has a scheduled execution time (ETA).
     /// </summary>
+    [JsonIgnore]
     public bool HasEta => Eta.HasValue;
 
     /// <summary>
     /// Gets whether this signature has a countdown delay.
     /// </summary>
+    [JsonIgnore]
     public bool HasCountdown => Countdown.HasValue;
 
     /// <summary>
     /// Gets whether this signature is scheduled (has ETA or countdown).
     /// </summary>
+    [JsonIgnore]
     public bool IsScheduled => Eta.HasValue || Countdown.HasValue;
 
     /// <summary>
     /// Gets whether this signature has expired based on the current time.
     /// </summary>
+    [JsonIgnore]
     public bool IsExpired => Expires.HasValue && Expires.Value < DateTimeOffset.UtcNow;
 
     /// <summary>
     /// Gets whether this signature has custom headers.
     /// </summary>
+    [JsonIgnore]
     public bool HasHeaders => Headers is { Count: > 0 };
 
     /// <summary>
     /// Gets the effective execution time (ETA or now + countdown).
     /// </summary>
+    [JsonIgnore]
     public DateTimeOffset? EffectiveEta =>
         Eta ?? (Countdown.HasValue ? DateTimeOffset.UtcNow + Countdown.Value : null);
 
     /// <summary>
     /// Gets the time remaining until execution, or null if not scheduled.
     /// </summary>
+    [JsonIgnore]
     public TimeSpan? TimeUntilExecution
     {
         get
@@ -126,6 +136,15 @@ public class Signature
     /// Gets the error callback signature.
     /// </summary>
     public Signature? LinkError { get; init; }
+
+    /// <summary>
+    /// Gets the input of this signature when it carries a typed one, or <c>null</c>.
+    /// </summary>
+    /// <remarks>
+    /// The typed signatures keep their input as an object; the canvas serializes it into
+    /// <see cref="Args"/> before the task is sent.
+    /// </remarks>
+    public virtual object? GetInput() => null;
 
     /// <summary>
     /// Creates a chain with this signature followed by another.
@@ -188,6 +207,9 @@ public sealed class Signature<TTask, TInput, TOutput> : Signature
     /// Gets or sets the strongly-typed input.
     /// </summary>
     public TInput? Input { get; init; }
+
+    /// <inheritdoc />
+    public override object? GetInput() => Input;
 }
 
 /// <summary>
@@ -212,4 +234,7 @@ public sealed class Signature<TTask, TInput> : Signature
     /// Gets or sets the strongly-typed input.
     /// </summary>
     public TInput? Input { get; init; }
+
+    /// <inheritdoc />
+    public override object? GetInput() => Input;
 }

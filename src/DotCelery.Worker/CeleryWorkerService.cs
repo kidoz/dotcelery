@@ -398,7 +398,84 @@ public sealed class CeleryWorkerService : BackgroundService
         else
         {
             // Success, Failure, Rejected, and Revoked outcomes are already stored
+            if (result.State == TaskState.Success)
+            {
+                if (
+                    !await ContinueChainAsync(message, result, executionToken).ConfigureAwait(false)
+                )
+                {
+                    return;
+                }
+            }
+
             await AckAsync(message).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Publishes the next step of the chain the task belongs to, with the task's result as its
+    /// input. The message is only acknowledged once the next step is published, so a failure
+    /// leaves the chain to run again instead of losing its remainder.
+    /// </summary>
+    /// <returns><c>true</c> when the caller may acknowledge the message.</returns>
+    private async Task<bool> ContinueChainAsync(
+        BrokerMessage message,
+        TaskResult result,
+        CancellationToken cancellationToken
+    )
+    {
+        if (message.Message.Chain is not { Count: > 0 } steps)
+        {
+            return true;
+        }
+
+        var step = steps[0];
+
+        try
+        {
+            await _broker
+                .PublishAsync(
+                    new TaskMessage
+                    {
+                        Id = step.TaskId,
+                        Task = step.Signature.TaskName,
+                        Args = result.Result ?? step.Signature.Args ?? [],
+                        ContentType = result.ContentType ?? message.Message.ContentType,
+                        Timestamp = _timeProvider.GetUtcNow(),
+                        Chain = steps.Count > 1 ? [.. steps.Skip(1)] : null,
+                        RootId = message.Message.RootId ?? message.Message.Id,
+                        ParentId = message.Message.Id,
+                        Queue = step.Signature.Queue,
+                        Priority = step.Signature.Priority,
+                        MaxRetries = step.Signature.MaxRetries,
+                        Headers = step.Signature.Headers,
+                        Eta = step.Signature.EffectiveEta,
+                        Expires = step.Signature.Expires,
+                    },
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+
+            _logger.LogDebug(
+                "Task {TaskId} continues its chain with {NextTaskId} for task {NextTaskName}",
+                message.Message.Id,
+                step.TaskId,
+                step.Signature.TaskName
+            );
+
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to publish the next step of the chain of task {TaskId}; returning the message to the broker",
+                message.Message.Id
+            );
+
+            await ReturnToBrokerAfterFailureAsync(message, cancellationToken).ConfigureAwait(false);
+
+            return false;
         }
     }
 

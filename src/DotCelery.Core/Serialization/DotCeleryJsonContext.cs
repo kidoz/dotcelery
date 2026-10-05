@@ -77,6 +77,9 @@ namespace DotCelery.Core.Serialization;
 [JsonSerializable(typeof(Dictionary<string, string>))]
 [JsonSerializable(typeof(IReadOnlyList<Signature>))]
 [JsonSerializable(typeof(List<Signature>))]
+[JsonSerializable(typeof(ChainStep))]
+[JsonSerializable(typeof(IReadOnlyList<ChainStep>))]
+[JsonSerializable(typeof(List<ChainStep>))]
 // Primitive types for completeness
 [JsonSerializable(typeof(byte[]))]
 [JsonSerializable(typeof(DateTimeOffset))]
