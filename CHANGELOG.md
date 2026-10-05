@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RabbitMQBrokerOptions.ReconnectDelay` sets how long the broker waits before rebuilding its channel and consumers after the connection is lost
 - `BeatOptions.PersistState` and `StatePath` remember when each schedule entry last ran, so a restarted scheduler resumes the schedule, and `RunMissedOnStartup` decides whether a run missed while the scheduler was stopped is run once at startup or skipped
 - The Beat scheduler elects one scheduler per `BeatOptions.SchedulerName` among the ones sharing the configured storage (through its lease store), so several instances no longer run the same schedule; without storage every scheduler runs it, and a warning says so
+- Batch completion callbacks: the worker that settles the last task of a batch publishes its `OnComplete` task once, however the batch finished, with the input given when the batch was created and the batch ID on the message. `Batch.Callback` carries the callback and `CallbackDispatchedAt` records the claim, with `IBatchStore.TryClaimCallbackAsync` and `ReleaseCallbackClaimAsync` claiming it, so a batch whose last tasks settle at the same time runs its callback once
 
 ### Changed
 - PostgreSQL stores no longer create their tables on first use; run migrations first (automatic with a generic host)
@@ -76,6 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PostgreSQL results larger than 8000 bytes are stored; result notifications carry only the task ID
 - The client's `Pending` state no longer makes waiting for a result return before the task finishes, and no longer overwrites a result that is already stored
 - Batch completion is atomic, so tasks finishing together are all counted; the PostgreSQL store now finishes batches, and a cancelled batch stays cancelled
+- A batch record is created before its tasks are published, so a task that a worker finishes immediately is counted and the batch can finish; a task that fails to publish, and the tasks after it, are recorded as failed so the batch does not wait for tasks that will never report
 - PostgreSQL sagas are marked completed and compensated
 - Requeueing a dead letter whose original message cannot be read keeps the dead letter instead of dropping it
 - A task whose worker stopped counts as running in the queue metrics only until the execution timeout

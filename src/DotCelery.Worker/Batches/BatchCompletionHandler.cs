@@ -1,11 +1,14 @@
+using DotCelery.Core.Abstractions;
 using DotCelery.Core.Batches;
+using DotCelery.Core.Models;
 using DotCelery.Core.Signals;
 using Microsoft.Extensions.Logging;
 
 namespace DotCelery.Worker.Batches;
 
 /// <summary>
-/// Signal handler that updates batch state when tasks complete.
+/// Signal handler that updates batch state when tasks complete, and runs the batch's callback
+/// when the last task settles.
 /// </summary>
 public sealed class BatchCompletionHandler
     : ITaskSignalHandler<TaskSuccessSignal>,
@@ -14,17 +17,32 @@ public sealed class BatchCompletionHandler
         ITaskSignalHandler<TaskRejectedSignal>
 {
     private readonly IBatchStore _batchStore;
+    private readonly IMessageBroker _broker;
+    private readonly IMessageSerializer _serializer;
     private readonly ILogger<BatchCompletionHandler> _logger;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BatchCompletionHandler"/> class.
     /// </summary>
     /// <param name="batchStore">The batch store.</param>
+    /// <param name="broker">The broker the completion callback is published to.</param>
+    /// <param name="serializer">The message serializer.</param>
     /// <param name="logger">The logger.</param>
-    public BatchCompletionHandler(IBatchStore batchStore, ILogger<BatchCompletionHandler> logger)
+    /// <param name="timeProvider">The clock for callback messages.</param>
+    public BatchCompletionHandler(
+        IBatchStore batchStore,
+        IMessageBroker broker,
+        IMessageSerializer serializer,
+        ILogger<BatchCompletionHandler> logger,
+        TimeProvider? timeProvider = null
+    )
     {
         _batchStore = batchStore;
+        _broker = broker;
+        _serializer = serializer;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -63,6 +81,8 @@ public sealed class BatchCompletionHandler
                     batchId,
                     updatedBatch.State
                 );
+
+                await DispatchCallbackAsync(updatedBatch, cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -126,7 +146,61 @@ public sealed class BatchCompletionHandler
                     batchId,
                     updatedBatch.State
                 );
+
+                await DispatchCallbackAsync(updatedBatch, cancellationToken).ConfigureAwait(false);
             }
+        }
+    }
+
+    // The callback is claimed in the store first, so it runs once even when the last tasks of a
+    // batch settle at the same time in different workers
+    private async Task DispatchCallbackAsync(Batch batch, CancellationToken cancellationToken)
+    {
+        var claimed = await _batchStore
+            .TryClaimCallbackAsync(batch.Id, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (claimed?.Callback is not { } callback)
+        {
+            return;
+        }
+
+        try
+        {
+            await _broker
+                .PublishAsync(
+                    new TaskMessage
+                    {
+                        Id = Guid.NewGuid().ToString("N"),
+                        Task = callback.TaskName,
+                        Args = callback.Args ?? [],
+                        ContentType = callback.ContentType ?? _serializer.ContentType,
+                        Timestamp = _timeProvider.GetUtcNow(),
+                        Queue = callback.Queue,
+                        Priority = callback.Priority ?? 0,
+                        MaxRetries = callback.MaxRetries ?? 0,
+                        Headers = callback.Headers,
+                        BatchId = batch.Id,
+                    },
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Published the completion callback {TaskName} of batch {BatchId}",
+                callback.TaskName,
+                batch.Id
+            );
+        }
+        catch (Exception)
+        {
+            // Nothing would dispatch the callback again if the claim stayed, so it is released
+            // for the next completion of the batch
+            await _batchStore
+                .ReleaseCallbackClaimAsync(batch.Id, CancellationToken.None)
+                .ConfigureAwait(false);
+
+            throw;
         }
     }
 }

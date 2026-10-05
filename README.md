@@ -21,7 +21,7 @@ A distributed task queue for .NET 10, inspired by Python's [Celery](https://docs
 - **Task Cancellation** - Revoke running or pending tasks with real-time notifications
 - **Dashboard UI** - Web-based monitoring UI and SignalR hub (requires custom data providers; live updates not yet raised)
 - **Rate Limiting** - Sliding window algorithm for task throttling
-- **Batches** - Grouped task submission with completion tracking (completion callbacks not yet dispatched)
+- **Batches** - Grouped task submission with completion tracking and completion callbacks
 - **Saga State Machine** - Long-running business process coordination (incomplete)
 - **Compensating Actions** - Automatic rollback when saga steps fail
 - **Progress Reporting** - Real-time task progress updates during execution
@@ -295,8 +295,7 @@ var batchId = await batchClient.CreateBatchAsync(batch =>
 var batchState = await batchClient.WaitForBatchAsync(batchId);
 ```
 
-Sending batches requires `AddBatchClient()`. Batch state tracking requires an `IBatchStore` registration and `AddBatchSupport()` on the worker.
-`OnComplete` callbacks are not yet dispatched; see [ROADMAP.md](ROADMAP.md#known-gaps).
+Sending batches requires `AddBatchClient()`. Batch state tracking requires an `IBatchStore` registration and `AddBatchSupport()` on the worker. The worker that settles the last task of a batch runs the `OnComplete` callback once, however the batch finished, with the input given to it and the batch ID on the message; the batch record is created before its tasks are published, so a task that finishes immediately is still counted.
 
 ## Beat Scheduler
 

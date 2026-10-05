@@ -53,13 +53,31 @@ public sealed class BatchClient : IBatchClient
         }
 
         var batchId = Guid.NewGuid().ToString("N");
-        var taskIds = new List<string>();
+        var taskIds = builder
+            .Tasks.Select(task => task.TaskId ?? Guid.NewGuid().ToString("N"))
+            .ToList();
 
-        // Publish all tasks in the batch
-        foreach (var batchTask in builder.Tasks)
+        // The record goes first: a worker that finishes a task before the batch exists cannot
+        // count it, and the batch would never finish
+        if (_batchStore is not null)
         {
-            var taskId = batchTask.TaskId ?? Guid.NewGuid().ToString("N");
-            taskIds.Add(taskId);
+            var batch = new Batch
+            {
+                Id = batchId,
+                Name = builder.Name,
+                State = BatchState.Pending,
+                TaskIds = taskIds,
+                CreatedAt = DateTimeOffset.UtcNow,
+                Callback = CreateCallback(builder.Callback),
+            };
+
+            await _batchStore.CreateAsync(batch, cancellationToken).ConfigureAwait(false);
+        }
+
+        for (var index = 0; index < builder.Tasks.Count; index++)
+        {
+            var batchTask = builder.Tasks[index];
+            var taskId = taskIds[index];
 
             // Serialize the input
             var args = batchTask.Input is not null ? _serializer.Serialize(batchTask.Input) : [];
@@ -78,23 +96,17 @@ public sealed class BatchClient : IBatchClient
                 BatchId = batchId,
             };
 
-            await _broker.PublishAsync(message, cancellationToken).ConfigureAwait(false);
-        }
-
-        // Create batch record if store is available
-        if (_batchStore is not null)
-        {
-            var batch = new Batch
+            try
             {
-                Id = batchId,
-                Name = builder.Name,
-                State = BatchState.Pending,
-                TaskIds = taskIds,
-                CreatedAt = DateTimeOffset.UtcNow,
-                CallbackTaskId = builder.Callback?.TaskId,
-            };
-
-            await _batchStore.CreateAsync(batch, cancellationToken).ConfigureAwait(false);
+                await _broker.PublishAsync(message, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // The tasks that were not published will never report, so the batch must not
+                // wait for them; the ones that were published keep running
+                await RecordUnpublishedTasksAsync(batchId, taskIds[index..]).ConfigureAwait(false);
+                throw;
+            }
         }
 
         _logger.LogInformation(
@@ -104,6 +116,48 @@ public sealed class BatchClient : IBatchClient
         );
 
         return batchId;
+    }
+
+    private BatchCallback? CreateCallback(BatchTask? callback) =>
+        callback is null
+            ? null
+            : new BatchCallback
+            {
+                TaskName = callback.TaskName,
+                Args = callback.Input is not null ? _serializer.Serialize(callback.Input) : null,
+                ContentType = callback.Input is not null ? _serializer.ContentType : null,
+                Queue = callback.Queue ?? _options.DefaultQueue,
+                Priority = callback.Priority,
+                MaxRetries = callback.MaxRetries,
+                Headers = callback.Headers,
+            };
+
+    // A task that was never published is recorded as failed, so the batch can still finish
+    private async Task RecordUnpublishedTasksAsync(string batchId, IReadOnlyList<string> taskIds)
+    {
+        if (_batchStore is null)
+        {
+            return;
+        }
+
+        foreach (var taskId in taskIds)
+        {
+            try
+            {
+                await _batchStore
+                    .MarkTaskFailedAsync(batchId, taskId, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to record unpublished task {TaskId} of batch {BatchId}",
+                    taskId,
+                    batchId
+                );
+            }
+        }
     }
 
     /// <inheritdoc />

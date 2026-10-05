@@ -41,7 +41,6 @@ but do not yet behave as documented.
 ### Incomplete Documented Features
 - Canvas: `Chain`, `Group`, and `Chord` define workflows, but nothing dispatches them or runs link and error callbacks
 - Sagas: the orchestrator is not registered by the DI extensions
-- Batches: `OnComplete` callbacks are not dispatched, and tasks are published before the batch record exists
 - Metrics: `DotCeleryInstrumentation` defines instruments, but the client and worker never record them (tracing works)
 - Dashboard: no built-in task query, queue stats, or metrics providers; workers do not register themselves; SignalR notifications are never raised; the middleware serves the UI page for API and hub routes unless endpoints are mapped first
 - Circuit breaker: `UseCircuitBreaker()` registers a factory that nothing uses

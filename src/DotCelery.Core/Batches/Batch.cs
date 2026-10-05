@@ -46,9 +46,15 @@ public sealed record Batch
     public DateTimeOffset? CompletedAt { get; init; }
 
     /// <summary>
-    /// Gets the callback task ID to execute on completion (if any).
+    /// Gets the task to run when the batch finishes, if any.
     /// </summary>
-    public string? CallbackTaskId { get; init; }
+    public BatchCallback? Callback { get; init; }
+
+    /// <summary>
+    /// Gets when the callback was dispatched, if it was. It is claimed once, so a batch that
+    /// finishes with several tasks settling at the same time dispatches its callback once.
+    /// </summary>
+    public DateTimeOffset? CallbackDispatchedAt { get; init; }
 
     /// <summary>
     /// Gets the total number of tasks in the batch.

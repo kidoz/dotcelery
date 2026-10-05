@@ -138,6 +138,73 @@ public sealed class BatchStore : IBatchStore
         );
 
     /// <inheritdoc />
+    public async ValueTask<Batch?> TryClaimCallbackAsync(
+        string batchId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        // Claimed with a version check rather than the shared update helper: only the writer
+        // that set the timestamp may dispatch the callback, and a second caller must see null
+        while (true)
+        {
+            var current = await _documents
+                .GetAsync(_batches, batchId, BatchTypeInfo, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (current is null)
+            {
+                return null;
+            }
+
+            var batch = current.Value;
+            if (
+                !batch.IsFinished
+                || batch.Callback is null
+                || batch.CallbackDispatchedAt is not null
+            )
+            {
+                return null;
+            }
+
+            var claimed = batch with { CallbackDispatchedAt = _timeProvider.GetUtcNow() };
+            var replaced = await _documents
+                .TryReplaceAsync(
+                    _batches,
+                    batchId,
+                    claimed,
+                    current.Version,
+                    BatchTypeInfo,
+                    WriteOptions(claimed),
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+
+            if (replaced is not null)
+            {
+                return claimed;
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public async ValueTask ReleaseCallbackClaimAsync(
+        string batchId,
+        CancellationToken cancellationToken = default
+    ) =>
+        await UpdateAsync(
+                batchId,
+                batch =>
+                    batch.CallbackDispatchedAt is null
+                        ? null
+                        : batch with
+                        {
+                            CallbackDispatchedAt = null,
+                        },
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async ValueTask<bool> DeleteAsync(
         string batchId,
         CancellationToken cancellationToken = default

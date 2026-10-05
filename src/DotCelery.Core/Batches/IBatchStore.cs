@@ -59,6 +59,31 @@ public interface IBatchStore : IAsyncDisposable
     );
 
     /// <summary>
+    /// Claims the batch's completion callback for dispatch, so a batch whose last tasks settle
+    /// at the same time runs its callback once.
+    /// </summary>
+    /// <param name="batchId">The batch ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// The finished batch with its callback claimed, or <c>null</c> when the batch has no
+    /// callback, has not finished, or its callback was claimed already.
+    /// </returns>
+    ValueTask<Batch?> TryClaimCallbackAsync(
+        string batchId,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>
+    /// Releases a callback claim that could not be dispatched, so it can be claimed again.
+    /// </summary>
+    /// <param name="batchId">The batch ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    ValueTask ReleaseCallbackClaimAsync(
+        string batchId,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>
     /// Deletes a batch.
     /// </summary>
     /// <param name="batchId">The batch ID.</param>

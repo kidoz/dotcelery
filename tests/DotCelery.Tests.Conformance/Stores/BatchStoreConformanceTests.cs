@@ -280,7 +280,54 @@ public abstract class BatchStoreConformanceTests : StoreConformanceTests
         Assert.Equal(Start.AddMinutes(1), batch.CompletedAt);
     }
 
-    private static Batch CreateBatch(string id, string[] taskIds) =>
+    [Fact]
+    public async Task TryClaimCallbackAsync_FinishedBatch_IsClaimedOnce()
+    {
+        await _store.CreateAsync(CreateBatch("batch-1", ["task-1"], withCallback: true));
+        await _store.MarkTaskCompletedAsync("batch-1", "task-1");
+
+        var claimed = await _store.TryClaimCallbackAsync("batch-1");
+        var again = await _store.TryClaimCallbackAsync("batch-1");
+
+        Assert.NotNull(claimed);
+        Assert.NotNull(claimed.Callback);
+        Assert.Equal(Start, claimed.CallbackDispatchedAt);
+        Assert.Null(again);
+    }
+
+    [Fact]
+    public async Task TryClaimCallbackAsync_UnfinishedBatch_ReturnsNull()
+    {
+        await _store.CreateAsync(CreateBatch("batch-1", ["task-1", "task-2"], withCallback: true));
+        await _store.MarkTaskCompletedAsync("batch-1", "task-1");
+
+        Assert.Null(await _store.TryClaimCallbackAsync("batch-1"));
+    }
+
+    [Fact]
+    public async Task TryClaimCallbackAsync_WithoutACallback_ReturnsNull()
+    {
+        await _store.CreateAsync(CreateBatch("batch-1", ["task-1"]));
+        await _store.MarkTaskCompletedAsync("batch-1", "task-1");
+
+        Assert.Null(await _store.TryClaimCallbackAsync("batch-1"));
+    }
+
+    [Fact]
+    public async Task ReleaseCallbackClaimAsync_MakesTheCallbackClaimableAgain()
+    {
+        await _store.CreateAsync(CreateBatch("batch-1", ["task-1"], withCallback: true));
+        await _store.MarkTaskCompletedAsync("batch-1", "task-1");
+        Assert.NotNull(await _store.TryClaimCallbackAsync("batch-1"));
+
+        await _store.ReleaseCallbackClaimAsync("batch-1");
+
+        var reclaimed = await _store.TryClaimCallbackAsync("batch-1");
+        Assert.NotNull(reclaimed);
+        Assert.NotNull(reclaimed.CallbackDispatchedAt);
+    }
+
+    private static Batch CreateBatch(string id, string[] taskIds, bool withCallback = false) =>
         new()
         {
             Id = id,
@@ -288,5 +335,8 @@ public abstract class BatchStoreConformanceTests : StoreConformanceTests
             State = BatchState.Pending,
             TaskIds = taskIds,
             CreatedAt = Start,
+            Callback = withCallback
+                ? new BatchCallback { TaskName = "callback.task", Queue = "celery" }
+                : null,
         };
 }
