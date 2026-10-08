@@ -1,4 +1,4 @@
-# DotCelery
+<h1><img src="assets/dotcelery-logo.png" alt="DotCelery" width="520" /></h1>
 
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
 [![C#](https://img.shields.io/badge/C%23-14-239120)](https://learn.microsoft.com/dotnet/csharp/)
