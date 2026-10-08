@@ -59,10 +59,20 @@ public sealed class QueueMetrics : IQueueMetrics
     }
 
     /// <inheritdoc />
-    public ValueTask<long> GetWaitingCountAsync(
+    /// <remarks>
+    /// A task that starts without a recorded enqueue, such as one an application published
+    /// without recording it, does not make the count negative: it is reported as zero.
+    /// </remarks>
+    public async ValueTask<long> GetWaitingCountAsync(
         string queue,
         CancellationToken cancellationToken = default
-    ) => _counters.GetAsync(CounterKey(queue, Waiting), cancellationToken);
+    ) =>
+        Math.Max(
+            0,
+            await _counters
+                .GetAsync(CounterKey(queue, Waiting), cancellationToken)
+                .ConfigureAwait(false)
+        );
 
     /// <inheritdoc />
     public async ValueTask<long> GetRunningCountAsync(

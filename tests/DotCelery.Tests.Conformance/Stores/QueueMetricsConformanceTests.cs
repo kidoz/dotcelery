@@ -24,6 +24,19 @@ public abstract class QueueMetricsConformanceTests : StoreConformanceTests
     }
 
     [Fact]
+    public async Task AStartWithoutARecordedEnqueue_DoesNotMakeWaitingNegative()
+    {
+        var metrics = CreateMetrics();
+
+        // A worker records the start, but nothing recorded the enqueue (for example, the task
+        // was published without a queue metrics store)
+        await metrics.RecordStartedAsync("queue-1", "task-1");
+
+        Assert.Equal(0, await CreateMetrics().GetWaitingCountAsync("queue-1"));
+        Assert.Equal(0, (await metrics.GetMetricsAsync("queue-1")).WaitingCount);
+    }
+
+    [Fact]
     public async Task RecordCompletedAsync_CountsSuccessesAndFailures()
     {
         var metrics = CreateMetrics();
