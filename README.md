@@ -19,7 +19,7 @@ A distributed task queue for .NET 10, inspired by Python's [Celery](https://docs
 ### Enterprise Features
 - **ETA/Countdown** - Schedule tasks for future execution with delayed message store
 - **Task Cancellation** - Revoke running or pending tasks with real-time notifications
-- **Dashboard UI** - Web-based monitoring UI and SignalR hub (requires custom data providers; live updates not yet raised)
+- **Dashboard UI** - Web-based monitoring UI and SignalR hub, with built-in data providers and live updates
 - **Rate Limiting** - Sliding window algorithm for task throttling
 - **Batches** - Grouped task submission with completion tracking and completion callbacks
 - **Saga State Machine** - Long-running business process coordination (incomplete)
@@ -474,6 +474,58 @@ The client records sends, and the worker records tasks it receives, completes (w
 | `dotcelery.tasks.duration` | Task execution duration (ms) |
 | `dotcelery.tasks.queue_time` | Time tasks spend in queue before processing (ms) |
 | `dotcelery.tasks.in_progress` | Tasks currently being processed |
+
+## Dashboard
+
+Add the dashboard to a host that also runs a worker. With the default in-memory worker registry it
+shows the workers of its own process; a shared registry (see the note below) shows workers in other
+processes too:
+
+```csharp
+builder.Services.AddDotCelery(celery =>
+    celery
+        .AddPostgresStorage("Host=localhost;Database=celery") // any storage works
+        .AddPostgresQueueMetrics()
+        .AddPostgresHistoricalDataStore()
+        .AddWorker()
+        .UseQueueMetrics());
+
+builder.Services.AddDotCeleryDashboard(o =>
+{
+    o.PathPrefix = "/celery";
+    o.RequireAuthorization = true; // wire AuthorizationCallback to your app's auth
+});
+
+var app = builder.Build();
+
+app.UseDotCeleryDashboard();               // the UI page
+app.MapDotCeleryDashboard("/celery");      // API controllers + SignalR hub
+```
+
+What the dashboard shows out of the box:
+
+- **Workers** — the worker registers itself and heartbeats its live active and processed task
+  counts (`WorkerOptions.WorkerHeartbeatInterval`), and unregisters when it stops.
+- **Tasks** — every task a dashboard host runs is recorded (id, name, state, worker, timings,
+  error) and expires after `DashboardOptions.TaskRecordRetention`. Listing by state and counting
+  states are indexed; listing by name scans the retained records.
+- **Queues** — waiting/running/processed counts from the queue metrics store, so
+  `UseQueueMetrics()` is what fills this panel.
+- **Metrics** — the window aggregated from the historical data store when one is registered
+  (`DashboardMetricsCollector` records per-queue snapshots every
+  `DashboardOptions.MetricsSnapshotInterval`), and otherwise computed live from the task
+  records, which also break the metrics down by task name.
+- **Live updates** — task state changes and worker status are pushed over SignalR. The
+  `DashboardNotificationService` is the extension point for your own events.
+
+The default `IWorkerRegistry` is in-memory, so it sees only workers in the same process. A
+dashboard that monitors workers in other processes needs a registry implementation shared with
+them (register it with `AddDotCeleryDashboard<TWorkerRegistry>()`), for example one backed by
+Redis or a database.
+
+The middleware serves the UI page only; paths under the prefix that belong to the API (`/api`)
+or the hub (`/hub`) pass through to their endpoints, so `MapDotCeleryDashboard` works whether the
+middleware runs before or after routing.
 
 ## Redis Storage
 

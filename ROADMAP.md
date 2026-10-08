@@ -34,6 +34,11 @@ but do not yet behave as documented.
 ### Resilience
 - Circuit breakers gate consumption per queue, with the global breaker covering failures that affected every queue; infrastructure failures feed both, and a task's own failure is left to its retries
 
+### Dashboard
+- Workers register themselves with the dashboard's registry and heartbeat their live active and processed task counts; the registry marks workers that miss their heartbeat budget unresponsive and then removes them
+- Built-in data providers: queue statistics from the queue metrics store, a task record store (written from task signals, expiring on a retention) behind the task list, state counts, and task names, and metrics from the historical data store or computed live from the records, with a collector recording per-queue snapshots
+- Task state changes and worker status changes are pushed over SignalR; the middleware passes API and hub paths through to their endpoints
+
 ## Known Gaps
 
 ### Delivery and Reliability
@@ -43,7 +48,7 @@ but do not yet behave as documented.
 
 ### Incomplete Documented Features
 - Canvas: groups of chains, groups, or chords are not supported
-- Dashboard: no built-in task query, queue stats, or metrics providers; workers do not register themselves; SignalR notifications are never raised; the middleware serves the UI page for API and hub routes unless endpoints are mapped first
+- Dashboard: the built-in in-memory worker registry sees only workers in its own process, so a distributed deployment needs a shared `IWorkerRegistry`; listing tasks by name scans the retained records (only listing by state is indexed); queue waiting counts are zero unless the application records enqueues, and consumer counts are always zero; historical metrics have no per-task breakdown, so the metrics panel's per-task view only fills live from the task records
 
 ### Security Hardening
 - A signed message can be replayed after `MessageSecurityOptions.MaxMessageAge` and the inbox retention have passed; an ID cannot be refused once its inbox record expires
