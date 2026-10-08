@@ -34,8 +34,17 @@ public sealed class DashboardMiddleware
         var path = context.Request.Path.Value ?? "";
         var prefix = _options.NormalizedPathPrefix;
 
-        // Check if this is a dashboard request
-        if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        // Check if this is a dashboard request; the prefix must be a whole path segment, so a
+        // path like /celeryjs is not the dashboard
+        if (!IsUnderPrefix(path, prefix))
+        {
+            await _next(context);
+            return;
+        }
+
+        // The API and hub paths under the prefix are served by their endpoints, not by the UI
+        // page, so they are passed on even when this middleware runs before routing
+        if (IsEndpointPath(path, prefix))
         {
             await _next(context);
             return;
@@ -80,6 +89,21 @@ public sealed class DashboardMiddleware
 
         // Not found
         context.Response.StatusCode = StatusCodes.Status404NotFound;
+    }
+
+    private static bool IsUnderPrefix(string path, string prefix) =>
+        path.Equals(prefix, StringComparison.OrdinalIgnoreCase)
+        || path.StartsWith(prefix + "/", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsEndpointPath(string path, string prefix)
+    {
+        var subPath = path[prefix.Length..];
+
+        return IsSegment(subPath, "/api") || IsSegment(subPath, "/hub");
+
+        static bool IsSegment(string subPath, string segment) =>
+            subPath.Equals(segment, StringComparison.OrdinalIgnoreCase)
+            || subPath.StartsWith(segment + "/", StringComparison.OrdinalIgnoreCase);
     }
 
     private void LoadEmbeddedResources()
