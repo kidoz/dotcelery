@@ -8,6 +8,7 @@ using DotCelery.Core.Abstractions;
 using DotCelery.Core.DeadLetter;
 using DotCelery.Core.Exceptions;
 using DotCelery.Core.Models;
+using DotCelery.Core.Resilience;
 using DotCelery.Core.Security;
 using DotCelery.Core.Serialization;
 using DotCelery.Core.Storage.Stores;
@@ -16,6 +17,7 @@ using DotCelery.Worker.DeadLetter;
 using DotCelery.Worker.Execution;
 using DotCelery.Worker.Filters;
 using DotCelery.Worker.Registry;
+using DotCelery.Worker.Resilience;
 using DotCelery.Worker.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -324,6 +326,74 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
         Assert.Null(await _backend.GetResultAsync("t1"));
     }
 
+    [Fact]
+    public async Task OpenCircuit_ReturnsTheQueueMessagesToTheBrokerUntilItCloses()
+    {
+        using var factory = CreateCircuitBreakerFactory(failureThreshold: 1);
+        var circuit = factory.GetOrCreate("celery");
+        circuit.Trip();
+
+        var worker = CreateWorker(circuitBreakerFactory: factory);
+        _broker.Enqueue(CreateMessage("t1", EchoTask.TaskName));
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForAsync(() => _broker.HasEvent("requeue:t1"));
+
+        Assert.False(_broker.HasEvent("ack:t1"));
+        Assert.Null(await _backend.GetResultAsync("t1"));
+
+        // Once the circuit closes, the same queue runs its tasks again
+        circuit.Reset();
+        _broker.Enqueue(CreateMessage("t2", EchoTask.TaskName));
+
+        await WaitForAsync(() => _broker.HasEvent("ack:t2"));
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(TaskState.Success, (await _backend.GetResultAsync("t2"))?.State);
+    }
+
+    [Fact]
+    public async Task InfrastructureFailure_OpensTheQueueAndGlobalCircuits()
+    {
+        using var factory = CreateCircuitBreakerFactory(failureThreshold: 1);
+        _backend.FailStateUpdates = true;
+
+        var worker = CreateWorker(circuitBreakerFactory: factory);
+        _broker.Enqueue(CreateMessage("t1", EchoTask.TaskName));
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForAsync(() => _broker.HasEvent("requeue:t1"));
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(CircuitState.Open, factory.GetOrCreate("celery").State);
+        Assert.Equal(CircuitState.Open, factory.GlobalCircuitBreaker.State);
+    }
+
+    [Fact]
+    public async Task SuccessfulTask_RecordsCircuitSuccess()
+    {
+        using var factory = CreateCircuitBreakerFactory(failureThreshold: 3);
+        _backend.FailStateUpdates = true;
+
+        var worker = CreateWorker(circuitBreakerFactory: factory);
+        _broker.Enqueue(CreateMessage("t1", EchoTask.TaskName));
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForAsync(() => _broker.HasEvent("requeue:t1"));
+
+        // One failure, below the threshold, so the circuit stays closed for the next message
+        Assert.Equal(CircuitState.Closed, factory.GetOrCreate("celery").State);
+        Assert.Equal(1, factory.GetOrCreate("celery").FailureCount);
+
+        _backend.FailStateUpdates = false;
+        _broker.Enqueue(CreateMessage("t2", EchoTask.TaskName));
+
+        await WaitForAsync(() => _broker.HasEvent("ack:t2"));
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(0, factory.GetOrCreate("celery").FailureCount);
+    }
+
     public async ValueTask DisposeAsync()
     {
         _gate.Release.TrySetResult();
@@ -333,7 +403,8 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
 
     private CeleryWorkerService CreateWorker(
         Action<WorkerOptions>? configure = null,
-        IMessageSecurityValidator? securityValidator = null
+        IMessageSecurityValidator? securityValidator = null,
+        ICircuitBreakerFactory? circuitBreakerFactory = null
     )
     {
         var options = new WorkerOptions
@@ -378,7 +449,8 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
                 NullLogger<GracefulShutdownHandler>.Instance
             ),
             deadLetterHandler: CreateDeadLetterHandler(),
-            securityValidator: securityValidator
+            securityValidator: securityValidator,
+            circuitBreakerFactory: circuitBreakerFactory
         );
         return _worker;
     }
@@ -629,6 +701,18 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
 
     private static MessageSecurityValidator CreateValidator(MessageSecurityOptions options) =>
         new(Options.Create(options), NullLogger<MessageSecurityValidator>.Instance);
+
+    private static CircuitBreakerFactory CreateCircuitBreakerFactory(int failureThreshold) =>
+        new(
+            Options.Create(
+                new CircuitBreakerOptions
+                {
+                    FailureThreshold = failureThreshold,
+                    OpenDuration = TimeSpan.FromMinutes(5),
+                }
+            ),
+            NullLoggerFactory.Instance
+        );
 
     private DeadLetterHandler CreateDeadLetterHandler() =>
         new(

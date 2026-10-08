@@ -36,6 +36,7 @@ public sealed class CeleryWorkerService : BackgroundService
     private readonly IKillSwitch? _killSwitch;
     private readonly IDeadLetterHandler? _deadLetterHandler;
     private readonly IMessageSecurityValidator? _securityValidator;
+    private readonly ICircuitBreakerFactory? _circuitBreakerFactory;
     private readonly WorkerOptions _options;
     private readonly ILogger<CeleryWorkerService> _logger;
     private readonly Channel<BrokerMessage> _workChannel;
@@ -57,7 +58,8 @@ public sealed class CeleryWorkerService : BackgroundService
         IKillSwitch? killSwitch = null,
         TimeProvider? timeProvider = null,
         IDeadLetterHandler? deadLetterHandler = null,
-        IMessageSecurityValidator? securityValidator = null
+        IMessageSecurityValidator? securityValidator = null,
+        ICircuitBreakerFactory? circuitBreakerFactory = null
     )
     {
         _broker = broker;
@@ -67,6 +69,7 @@ public sealed class CeleryWorkerService : BackgroundService
         _killSwitch = killSwitch;
         _deadLetterHandler = deadLetterHandler;
         _securityValidator = securityValidator;
+        _circuitBreakerFactory = circuitBreakerFactory;
         _options = options.Value;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -360,6 +363,20 @@ public sealed class CeleryWorkerService : BackgroundService
         CancellationToken executionToken
     )
     {
+        // While a queue's circuit is open (or the global one, after failures that affected
+        // every queue), its messages wait in the broker instead of running
+        if (OpenCircuitFor(message) is { } openCircuit)
+        {
+            _logger.LogWarning(
+                "Circuit '{Circuit}' is open; returning task {TaskId} of queue {Queue} to the broker",
+                openCircuit.Name,
+                message.Message.Id,
+                message.Queue
+            );
+            await ReturnToBrokerAfterFailureAsync(message, executionToken).ConfigureAwait(false);
+            return;
+        }
+
         TaskResult result;
 
         try
@@ -390,6 +407,7 @@ public sealed class CeleryWorkerService : BackgroundService
         {
             // The outcome was not recorded (for example, the result backend is unavailable)
             _killSwitch?.RecordFailure(ex);
+            RecordCircuitFailure(message, ex);
             _logger.LogError(
                 ex,
                 "Failed to process message {TaskId}, returning it to the broker",
@@ -479,6 +497,11 @@ public sealed class CeleryWorkerService : BackgroundService
             }
 
             await AckAsync(message).ConfigureAwait(false);
+
+            if (result.State == TaskState.Success)
+            {
+                RecordCircuitSuccess(message);
+            }
         }
     }
 
@@ -576,6 +599,49 @@ public sealed class CeleryWorkerService : BackgroundService
             await ReturnToBrokerAfterFailureAsync(message, cancellationToken).ConfigureAwait(false);
 
             return false;
+        }
+    }
+
+    // The circuits gate a queue's messages before execution and are fed by infrastructure
+    // failures only: a task that fails is handled by its retries, not by stopping its queue.
+    // The global breaker additionally covers failures that affect every queue.
+    private ICircuitBreaker? OpenCircuitFor(BrokerMessage message)
+    {
+        if (_circuitBreakerFactory is null)
+        {
+            return null;
+        }
+
+        var queueCircuit = _circuitBreakerFactory.GetOrCreate(message.Queue);
+        if (!queueCircuit.IsAllowed)
+        {
+            return queueCircuit;
+        }
+
+        var global = _circuitBreakerFactory.GlobalCircuitBreaker;
+        return !ReferenceEquals(queueCircuit, global) && !global.IsAllowed ? global : null;
+    }
+
+    private void RecordCircuitSuccess(BrokerMessage message) =>
+        RecordCircuit(message, circuit => circuit.RecordSuccess());
+
+    private void RecordCircuitFailure(BrokerMessage message, Exception exception) =>
+        RecordCircuit(message, circuit => circuit.RecordFailure(exception));
+
+    private void RecordCircuit(BrokerMessage message, Action<ICircuitBreaker> record)
+    {
+        if (_circuitBreakerFactory is null)
+        {
+            return;
+        }
+
+        var queueCircuit = _circuitBreakerFactory.GetOrCreate(message.Queue);
+        record(queueCircuit);
+
+        var global = _circuitBreakerFactory.GlobalCircuitBreaker;
+        if (!ReferenceEquals(queueCircuit, global))
+        {
+            record(global);
         }
     }
 
