@@ -1,7 +1,7 @@
 # Roadmap
 
 This document tracks shipped features, known gaps in them, and planned work.
-Status and scope may change as the project evolves. Last reviewed: 2026-09-29.
+Status and scope may change as the project evolves. Last reviewed: 2026-10-08.
 
 Known gaps take priority over new features: several capabilities are exposed in the public API
 but do not yet behave as documented.
@@ -22,14 +22,17 @@ but do not yet behave as documented.
 
 ### Security
 - HMAC message signing across InMemory, RabbitMQ, and Redis brokers
-- Worker-side validation filter for signatures, task-name allowlist, schema version, and payload size
-- Tenant validation against a configured tenant list
+- The worker validates signatures, the task-name allowlist, schema version, payload size, and message age before the task input is deserialized and before the task is recorded as started; a refused message is dead-lettered
+- Tenant validation against a configured tenant list, with the tenant context visible to the task
 - Dashboard authorization filter applied to controllers, SignalR hub, and middleware
 - Dashboard route prefixing via `DashboardRoutePrefixConvention`
 
 ### Task Registration and Dispatch
 - Analyzer reports duplicate task names at compilation end
 - `SendOptions.TenantId` and `SendOptions.PartitionKey` with tenant-aware queue routing
+
+### Resilience
+- Circuit breakers gate consumption per queue, with the global breaker covering failures that affected every queue; infrastructure failures feed both, and a task's own failure is left to its retries
 
 ## Known Gaps
 
@@ -39,19 +42,14 @@ but do not yet behave as documented.
 - Hard time limits are cooperative; a task that ignores its cancellation token keeps its worker slot
 
 ### Incomplete Documented Features
-- Canvas: `Signature.Link` and `Signature.LinkError` (linked and error callbacks) are not run; groups of chains, groups, or chords are not supported
+- Canvas: groups of chains, groups, or chords are not supported
 - Dashboard: no built-in task query, queue stats, or metrics providers; workers do not register themselves; SignalR notifications are never raised; the middleware serves the UI page for API and hub routes unless endpoints are mapped first
-- Circuit breaker: `UseCircuitBreaker()` registers a factory that nothing uses
-- Tenant context set by `TenantContextFilter` is not visible during task execution
-- Scoped signal handlers are resolved from the root service provider
 
 ### Security Hardening
 - A signed message can be replayed after `MessageSecurityOptions.MaxMessageAge` and the inbox retention have passed; an ID cannot be refused once its inbox record expires
-- Security validation runs after the task input is deserialized and after the worker records the task as started
 - Dashboard: authorization before model binding, CSRF/origin checks on state-changing endpoints, and bounds on paging and bulk operations
 
 ### Test Coverage
-- No tests exercise the worker consume/ack/retry/shutdown loop, the delayed-message and outbox dispatchers, or the tenant and overlap filters (the stores they use have conformance tests)
 - The in-memory broker does not model redelivery or serialization round-trips; broker contract tests should run against real brokers
 - Analyzer DCEL001 reports task names that are not string literals (for example, constants) as empty
 

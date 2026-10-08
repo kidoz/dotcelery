@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The client and the worker record the metrics that `DotCelery.Telemetry` defines: sends, receives, completions with duration, retries, queue time, and tasks in progress, through `DotCeleryMetrics` in `DotCelery.Core` (the telemetry package re-exports it, so `AddDotCeleryInstrumentation()` still registers the same `DotCelery` meter)
 - `AddSagaSupport()` registers the saga orchestrator (`ISagaOrchestrator`) and the completion handlers that advance and compensate sagas, so sagas can be started through the public API
 - The default `JsonMessageSerializer` reads `JsonMessageSerializerOptions` from dependency injection, so the serializer options, including the deserialization type allowlist, can be configured with `services.Configure<JsonMessageSerializerOptions>(...)`; its properties are settable for that
+- Canvas callbacks run: a task that succeeds publishes its `Signature.Link` with the task's result as the callback's input, and a task that fails publishes its `Signature.LinkError` with a `TaskErrorInfo` payload (the failed task's ID, name, and error). The callbacks travel on the message like chain steps, each step's callbacks travel with it, and a message is settled only once its callback is published
+- The worker's circuit breakers gate consumption: while a queue's circuit is open, or the global one after failures that affected every queue, the queue's messages are returned to the broker instead of being run. Infrastructure failures feed the queue breaker and the global one, and a successful task clears the queue's failure count; task failures are left to retries and never stop a queue
 
 ### Changed
 - PostgreSQL stores no longer create their tables on first use; run migrations first (automatic with a generic host)
@@ -54,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RevocationManager` restores the options of revocations that exist when a worker starts, instead of default options
 - `Signature` no longer serializes its derived properties (`HasLink`, `IsScheduled`, `EffectiveEta`, and the like), so a signature carried on a message holds only its inputs
 - The worker stores a successful task's result and its inbox record in one storage transaction when the stores share a transactional provider, and stores the result before the record otherwise, so a failure between them leaves the message to be processed again instead of marked without a result. A failure to write the record is no longer logged and ignored: the message is returned to the broker
+- Security validation runs when the worker receives a message, before the task input is deserialized and before the task is recorded as started, instead of in a task filter that ran after both. A refused message is stored in the dead letter queue and acknowledged without being recorded as a task result
 
 ### Removed
 - `AutoCreateTables` from every PostgreSQL store's options
@@ -63,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The per-store in-memory and PostgreSQL implementations and their options, including `PostgresBackendOptions`, and `InMemoryRateLimiter` from Core
 - The per-store Redis implementations and their options, including `RedisBackendOptions`, and `RedisBackendJsonContext`
 - The per-store MongoDB implementations and their options, including `MongoBackendOptions`
+- `SecurityValidationFilter`, whose validation `UseMessageSecurity()` now performs in the worker before the message reaches the executor
 
 ### Fixed
 - The worker no longer drops a message when the result backend, revocation store, rate limiter, or retry publish fails; it returns the message to the broker
@@ -73,6 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Redis broker keeps consuming after transient errors and recreates a missing consumer group
 - An expired message and a message the worker rejects are stored in the dead letter queue instead of being acknowledged silently, when a dead letter store is registered
 - Signal handlers dispatched in process are resolved from a scope per dispatch, so scoped handlers are disposed with it instead of living in the root provider
+- The tenant context of a task is now visible to the task itself: the executor enters the tenant scope around the task, because a value written to an `AsyncLocal` by `TenantContextFilter` (which runs inside the filter pipeline) never flowed back to its caller. The filter still rejects tasks whose tenant is not allowed and does not enter the scope for them
 - Starting compensation for a saga whose step failed no longer returns early: the store marks such a saga `Compensating` while its compensation is still to run, which the orchestrator mistook for compensation already underway, so compensated steps were never compensated
 - The Redis broker renews the claim on a message it is still processing, every third of `RedisBrokerOptions.ClaimTimeout`, so a task that runs longer than the claim timeout is no longer reclaimed by another consumer and executed twice. A message whose consumer stopped is still reclaimed after the timeout
 - The Redis broker deletes a stream entry when it is settled, so a stream stays proportional to the work in flight instead of growing for the lifetime of the queue

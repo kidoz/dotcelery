@@ -25,7 +25,7 @@ A distributed task queue for .NET 10, inspired by Python's [Celery](https://docs
 - **Saga State Machine** - Long-running business process coordination (incomplete)
 - **Compensating Actions** - Automatic rollback when saga steps fail
 - **Progress Reporting** - Real-time task progress updates during execution
-- **Circuit Breaker** - Fault tolerance with automatic recovery (not yet applied to task execution)
+- **Circuit Breaker** - Fault tolerance with automatic recovery, gating each queue's consumption
 - **Kill Switch** - Emergency task execution control
 - **Multi-Tenancy** - Tenant isolation with queue routing
 
@@ -221,8 +221,13 @@ var chordResult = await canvasClient.SendChordAsync(chord);
 
 The callback runs once, in whichever worker settles the last header task, when every header task
 has finished — whether it succeeded or failed. The callback receives the input given in its
-signature, and the batch ID is on its message, so it can read the header results. `Signature.Link`
-and `Signature.LinkError` are not run yet; see [ROADMAP.md](ROADMAP.md#known-gaps).
+signature, and the batch ID is on its message, so it can read the header results.
+
+A signature can also carry callbacks of its own: `Link` runs when the task succeeds, with the
+task's result as its input, and `LinkError` runs when it fails, with a `TaskErrorInfo` payload
+(the failed task's ID, name, and error). A chain carries each step's callbacks to that step, and
+a message is settled only after its callback is published, so a callback is not lost. Groups of
+chains, groups, or chords are not supported; see [ROADMAP.md](ROADMAP.md#known-gaps).
 
 ## Saga State Machine
 
@@ -399,9 +404,13 @@ public async Task<OrderResult> ExecuteAsync(
 
 ### Circuit Breaker
 
-Prevent cascade failures with automatic circuit breaking.
-
-> **Status:** `UseCircuitBreaker()` registers the circuit breaker factory, but the worker does not yet use it. See [ROADMAP.md](ROADMAP.md#known-gaps).
+Prevent cascade failures with automatic circuit breaking. Each queue has its own circuit, and a
+global circuit covers failures that affected every queue. While a circuit is open, the messages
+of the affected queue are returned to the broker instead of being run, so a failing dependency is
+not hammered; once it closes again they flow normally. Infrastructure failures — an unavailable
+result backend, for example — feed the queue circuit and the global one, and a successful task
+clears the queue's failure count. A task's own failure does not trip a circuit: retries and the
+dead letter queue handle it.
 
 ```csharp
 builder.Services.AddDotCelery(celery =>
