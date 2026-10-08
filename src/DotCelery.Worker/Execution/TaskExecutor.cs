@@ -4,6 +4,7 @@ using DotCelery.Core.Exceptions;
 using DotCelery.Core.Filters;
 using DotCelery.Core.Instrumentation;
 using DotCelery.Core.Models;
+using DotCelery.Core.MultiTenancy;
 using DotCelery.Core.Signals;
 using DotCelery.Core.Storage.Stores;
 using DotCelery.Core.TimeLimits;
@@ -32,6 +33,7 @@ public sealed class TaskExecutor
     private readonly IRateLimiter? _rateLimiter;
     private readonly CompiledTaskInvoker _taskInvoker;
     private readonly OutcomeRecorder? _outcomes;
+    private readonly MultiTenancyOptions? _multiTenancyOptions;
     private readonly WorkerOptions _options;
     private readonly ILogger<TaskExecutor> _logger;
 
@@ -50,7 +52,8 @@ public sealed class TaskExecutor
         ITaskSignalDispatcher? signalDispatcher = null,
         IRateLimiter? rateLimiter = null,
         TimeLimitEnforcer? timeLimitEnforcer = null,
-        IInboxStore? inboxStore = null
+        IInboxStore? inboxStore = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null
     )
     {
         _registry = registry;
@@ -66,6 +69,9 @@ public sealed class TaskExecutor
         _outcomes = OutcomeRecorder.Create(resultBackend, inboxStore);
         _options = options.Value;
         _logger = logger;
+
+        var tenantOptions = multiTenancyOptions?.Value;
+        _multiTenancyOptions = tenantOptions is { Enabled: true } ? tenantOptions : null;
     }
 
     /// <summary>
@@ -706,6 +712,11 @@ public sealed class TaskExecutor
             );
         }
 
+        // The tenant context is set here rather than in a filter: a value written to an
+        // AsyncLocal inside an awaited async method (the filter pipeline) does not flow back to
+        // its caller, so a filter that sets it is never seen by the task.
+        using var tenantScope = SetTenantContext(context.Message);
+
         // Execute the task with time limit enforcement
         try
         {
@@ -778,6 +789,13 @@ public sealed class TaskExecutor
 
         return (executedContext.Result, stopwatch.Elapsed, false, null);
     }
+
+    // Makes the tenant of the message ambient for the task and its remaining filters, and
+    // restores the previous tenant when the task is done
+    private IDisposable? SetTenantContext(TaskMessage message) =>
+        _multiTenancyOptions is null
+            ? null
+            : TenantContext.SetTenant(_multiTenancyOptions.ResolveTenantId(message));
 
     private async Task<object?> ExecuteWithTimeLimitsAsync(
         string taskId,

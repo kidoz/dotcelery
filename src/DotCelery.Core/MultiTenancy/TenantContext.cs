@@ -1,3 +1,5 @@
+using DotCelery.Core.Models;
+
 namespace DotCelery.Core.MultiTenancy;
 
 /// <summary>
@@ -83,5 +85,22 @@ public static class TenantContextExtensions
         }
 
         return headers.GetValueOrDefault(headerName);
+    }
+
+    /// <summary>
+    /// Gets the tenant a message belongs to: its tenant ID, the tenant in its headers, or the
+    /// configured default.
+    /// </summary>
+    /// <param name="options">The multi-tenancy options.</param>
+    /// <param name="message">The message.</param>
+    /// <returns>The tenant ID.</returns>
+    public static string? ResolveTenantId(this MultiTenancyOptions options, TaskMessage message)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(message);
+
+        return message.TenantId
+            ?? message.Headers.GetTenantId(options.TenantIdHeader)
+            ?? options.DefaultTenantId;
     }
 }

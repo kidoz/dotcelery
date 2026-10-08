@@ -7,14 +7,19 @@ using Microsoft.Extensions.Options;
 namespace DotCelery.Worker.Filters;
 
 /// <summary>
-/// Filter that sets the tenant context for task execution based on message tenant ID.
+/// Filter that validates the tenant a task belongs to, rejecting tasks whose tenant is not in
+/// the configured tenant list.
 /// </summary>
-public sealed class TenantContextFilter : ITaskFilterWithExceptionHandling
+/// <remarks>
+/// The tenant context itself (<see cref="TenantContext.Current"/>) is set by the executor
+/// around the task, not by this filter: a value written to an <c>AsyncLocal</c> inside an
+/// awaited async method (the filter pipeline) does not flow back to its caller, so a filter
+/// that sets it would never be seen by the task.
+/// </remarks>
+public sealed class TenantContextFilter : ITaskFilter
 {
     private readonly MultiTenancyOptions _options;
     private readonly ILogger<TenantContextFilter> _logger;
-
-    private const string TenantScopeProperty = "TenantScope";
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TenantContextFilter"/> class.
@@ -29,7 +34,7 @@ public sealed class TenantContextFilter : ITaskFilterWithExceptionHandling
     }
 
     /// <inheritdoc />
-    public int Order => -2000; // Run very early to set tenant before other filters
+    public int Order => -2000; // Run very early, before filters that depend on the tenant
 
     /// <inheritdoc />
     public ValueTask OnExecutingAsync(
@@ -42,18 +47,13 @@ public sealed class TenantContextFilter : ITaskFilterWithExceptionHandling
             return ValueTask.CompletedTask;
         }
 
-        // Get tenant ID from task context (direct property or headers)
-        var tenantId =
-            context.TaskContext.TenantId
-            ?? context.TaskContext.Headers?.GetTenantId(_options.TenantIdHeader)
-            ?? _options.DefaultTenantId;
-
-        // Validate tenant if enabled
+        // Validate the tenant if enabled
         if (
             (_options.ValidateTenants || _options.ValidTenants.Count > 0)
             && _options.ValidTenants.Count > 0
         )
         {
+            var tenantId = _options.ResolveTenantId(context.Message);
             if (!_options.ValidTenants.Contains(tenantId))
             {
                 _logger.LogWarning(
@@ -74,19 +74,8 @@ public sealed class TenantContextFilter : ITaskFilterWithExceptionHandling
                         Message = $"Tenant '{tenantId}' is not valid",
                     },
                 };
-                return ValueTask.CompletedTask;
             }
         }
-
-        // Set tenant context
-        var scope = TenantContext.SetTenant(tenantId);
-        context.Properties[TenantScopeProperty] = scope;
-
-        _logger.LogDebug(
-            "Set tenant context to {TenantId} for task {TaskId}",
-            tenantId,
-            context.TaskId
-        );
 
         return ValueTask.CompletedTask;
     }
@@ -95,31 +84,5 @@ public sealed class TenantContextFilter : ITaskFilterWithExceptionHandling
     public ValueTask OnExecutedAsync(
         TaskExecutedContext context,
         CancellationToken cancellationToken
-    )
-    {
-        DisposeTenantScope(context.Properties);
-        return ValueTask.CompletedTask;
-    }
-
-    /// <inheritdoc />
-    public ValueTask<bool> OnExceptionAsync(
-        TaskExceptionContext context,
-        CancellationToken cancellationToken
-    )
-    {
-        DisposeTenantScope(context.Properties);
-        return ValueTask.FromResult(false);
-    }
-
-    private static void DisposeTenantScope(IDictionary<string, object?> properties)
-    {
-        if (
-            properties.TryGetValue(TenantScopeProperty, out var scopeObj)
-            && scopeObj is IDisposable scope
-        )
-        {
-            scope.Dispose();
-            properties.Remove(TenantScopeProperty);
-        }
-    }
+    ) => ValueTask.CompletedTask;
 }
