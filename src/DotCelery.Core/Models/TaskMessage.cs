@@ -107,6 +107,19 @@ public sealed record TaskMessage
     public IReadOnlyList<ChainStep>? Chain { get; init; }
 
     /// <summary>
+    /// Gets the linked signature to run when this task succeeds, if any. The worker publishes it
+    /// with this task's result as its input, before acknowledging the message.
+    /// </summary>
+    public Signature? Link { get; init; }
+
+    /// <summary>
+    /// Gets the error callback signature to run when this task fails, if any. The worker
+    /// publishes it with a <see cref="TaskErrorInfo"/> payload as its input, before
+    /// acknowledging the message.
+    /// </summary>
+    public Signature? LinkError { get; init; }
+
+    /// <summary>
     /// Gets the correlation ID for tracing.
     /// </summary>
     public string? CorrelationId { get; init; }

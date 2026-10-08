@@ -235,6 +235,8 @@ public sealed class CanvasClient : ICanvasClient
                     RootId = canvasId,
                     ParentId = parentId,
                     Chain = chain is { Count: > 0 } ? chain : null,
+                    Link = signature.Link,
+                    LinkError = signature.LinkError,
                     BatchId = batchId,
                 },
                 cancellationToken
@@ -243,9 +245,17 @@ public sealed class CanvasClient : ICanvasClient
     }
 
     // A signature travels as bytes: the typed input becomes Args, and computed properties are
-    // left behind
+    // left behind. Linked callbacks are carried with it, materialized the same way, so a linked
+    // signature whose input is typed still arrives with its Args. The visited set cuts a link
+    // that refers back to one of its own callbacks instead of recursing forever.
     private Signature ToMessageSignature(Signature signature) =>
-        new()
+        Materialize(signature, new HashSet<Signature>(ReferenceEqualityComparer.Instance));
+
+    private Signature Materialize(Signature signature, HashSet<Signature> visited)
+    {
+        visited.Add(signature);
+
+        return new()
         {
             TaskName = signature.TaskName,
             Args =
@@ -261,9 +271,14 @@ public sealed class CanvasClient : ICanvasClient
             Expires = signature.Expires,
             Headers = signature.Headers,
             StoreResult = signature.StoreResult,
-            Link = signature.Link,
-            LinkError = signature.LinkError,
+            Link =
+                signature.Link is { } link && visited.Add(link) ? Materialize(link, visited) : null,
+            LinkError =
+                signature.LinkError is { } error && visited.Add(error)
+                    ? Materialize(error, visited)
+                    : null,
         };
+    }
 
     private List<Signature> RequireSignatures(Group group)
     {

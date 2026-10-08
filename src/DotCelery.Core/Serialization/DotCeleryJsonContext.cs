@@ -33,6 +33,7 @@ namespace DotCelery.Core.Serialization;
 [JsonSerializable(typeof(Chain))]
 [JsonSerializable(typeof(Group))]
 [JsonSerializable(typeof(Chord))]
+[JsonSerializable(typeof(TaskErrorInfo))]
 // Dead Letter Queue
 [JsonSerializable(typeof(DeadLetterMessage))]
 [JsonSerializable(typeof(DeadLetterReason))]

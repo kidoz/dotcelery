@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Broker.InMemory;
 using DotCelery.Client;
@@ -46,6 +47,8 @@ public sealed class CanvasExecutionTests : IAsyncDisposable
         services.AddTransient<IncrementTask>();
         services.AddTransient<DoubleTask>();
         services.AddTransient<CollectTask>();
+        services.AddTransient<FailingTask>();
+        services.AddTransient<ErrorCollectTask>();
         var batchHandler = new BatchCompletionHandler(
             _batchStore,
             _broker,
@@ -71,6 +74,8 @@ public sealed class CanvasExecutionTests : IAsyncDisposable
         registry.Register(typeof(IncrementTask), IncrementTask.TaskName);
         registry.Register(typeof(DoubleTask), DoubleTask.TaskName);
         registry.Register(typeof(CollectTask), CollectTask.TaskName);
+        registry.Register(typeof(FailingTask), FailingTask.TaskName);
+        registry.Register(typeof(ErrorCollectTask), ErrorCollectTask.TaskName);
 
         var executor = new TaskExecutor(
             registry,
@@ -156,6 +161,91 @@ public sealed class CanvasExecutionTests : IAsyncDisposable
         Assert.NotNull(batch.CallbackDispatchedAt);
     }
 
+    [Fact]
+    public async Task Link_RunsWithTheTaskResultWhenTheTaskSucceeds()
+    {
+        CollectTask.Received.Clear();
+        var client = CreateClient();
+        var signature = new Signature<IncrementTask, NumberInput, NumberInput>
+        {
+            Input = new NumberInput { Value = 1 },
+            // The task's result is passed to the callback, so this input is not used
+            Link = new Signature<CollectTask, NumberInput>
+            {
+                Input = new NumberInput { Value = 42 },
+            },
+        };
+
+        var group = await client.SendGroupAsync(new Group(signature));
+        await _worker.StartAsync(CancellationToken.None);
+
+        var taskResult = await WaitForResultAsync(group.TaskIds[0]);
+        Assert.Equal(TaskState.Success, taskResult.State);
+
+        var linkResult = await WaitForResultAsync($"{group.TaskIds[0]}:link");
+        Assert.Equal(TaskState.Success, linkResult.State);
+        Assert.Equal(2, Assert.Single(CollectTask.Received));
+    }
+
+    [Fact]
+    public async Task LinkError_RunsWithTheFailureWhenTheTaskFails()
+    {
+        ErrorCollectTask.Received.Clear();
+        var client = CreateClient();
+        var signature = new Signature<FailingTask, NumberInput>
+        {
+            Input = new NumberInput { Value = 1 },
+            Link = new Signature<CollectTask, NumberInput>(),
+            LinkError = new Signature<ErrorCollectTask, TaskErrorInfo>(),
+        };
+
+        var group = await client.SendGroupAsync(new Group(signature));
+        await _worker.StartAsync(CancellationToken.None);
+
+        var taskResult = await WaitForResultAsync(group.TaskIds[0]);
+        Assert.Equal(TaskState.Failure, taskResult.State);
+
+        var linkResult = await WaitForResultAsync($"{group.TaskIds[0]}:link-error");
+        Assert.Equal(TaskState.Success, linkResult.State);
+
+        var error = Assert.Single(ErrorCollectTask.Received);
+        Assert.Equal(group.TaskIds[0], error.TaskId);
+        Assert.Equal(FailingTask.TaskName, error.TaskName);
+        Assert.Equal("boom", error.ErrorMessage);
+
+        // The success callback of a failed task is not run
+        Assert.Null(await _backend.GetResultAsync($"{group.TaskIds[0]}:link"));
+    }
+
+    [Fact]
+    public async Task Chain_CarriesEachStepsLinkToTheNextStep()
+    {
+        CollectTask.Received.Clear();
+        var client = CreateClient();
+        var chain = new Chain(
+            new Signature<IncrementTask, NumberInput, NumberInput>
+            {
+                Input = new NumberInput { Value = 1 },
+            },
+            new Signature<DoubleTask, NumberInput, NumberInput>
+            {
+                Link = new Signature<CollectTask, NumberInput>(),
+            }
+        );
+
+        var result = await client.SendChainAsync(chain);
+        await _worker.StartAsync(CancellationToken.None);
+
+        var last = await WaitForResultAsync(result.LastTaskId);
+        Assert.Equal(TaskState.Success, last.State);
+
+        var linkResult = await WaitForResultAsync($"{result.LastTaskId}:link");
+        Assert.Equal(TaskState.Success, linkResult.State);
+
+        // 1 -> increment 2 -> double 4, and the second step's link ran with its result
+        Assert.Equal(4, Assert.Single(CollectTask.Received));
+    }
+
     public async ValueTask DisposeAsync()
     {
         await _worker.StopAsync(CancellationToken.None);
@@ -212,10 +302,44 @@ public sealed class CanvasExecutionTests : IAsyncDisposable
     {
         public static string TaskName => "tests.collect";
 
+        public static ConcurrentQueue<int> Received { get; } = new();
+
         public Task ExecuteAsync(
             NumberInput input,
             ITaskContext context,
             CancellationToken cancellationToken = default
-        ) => Task.CompletedTask;
+        )
+        {
+            Received.Enqueue(input.Value);
+            return Task.CompletedTask;
+        }
+    }
+
+    public sealed class FailingTask : ITask<NumberInput>
+    {
+        public static string TaskName => "tests.failing";
+
+        public Task ExecuteAsync(
+            NumberInput input,
+            ITaskContext context,
+            CancellationToken cancellationToken = default
+        ) => throw new InvalidOperationException("boom");
+    }
+
+    public sealed class ErrorCollectTask : ITask<TaskErrorInfo>
+    {
+        public static string TaskName => "tests.error-collect";
+
+        public static ConcurrentQueue<TaskErrorInfo> Received { get; } = new();
+
+        public Task ExecuteAsync(
+            TaskErrorInfo input,
+            ITaskContext context,
+            CancellationToken cancellationToken = default
+        )
+        {
+            Received.Enqueue(input);
+            return Task.CompletedTask;
+        }
     }
 }

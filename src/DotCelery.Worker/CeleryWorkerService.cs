@@ -1,11 +1,14 @@
 using System.Runtime.ExceptionServices;
+using System.Text.Json;
 using System.Threading.Channels;
 using DotCelery.Core.Abstractions;
+using DotCelery.Core.Canvas;
 using DotCelery.Core.DeadLetter;
 using DotCelery.Core.Exceptions;
 using DotCelery.Core.Instrumentation;
 using DotCelery.Core.Models;
 using DotCelery.Core.Security;
+using DotCelery.Core.Serialization;
 using DotCelery.Worker.Execution;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -487,6 +490,24 @@ public sealed class CeleryWorkerService : BackgroundService
                 {
                     return;
                 }
+
+                if (
+                    !await ContinueWithLinkAsync(message, result, executionToken)
+                        .ConfigureAwait(false)
+                )
+                {
+                    return;
+                }
+            }
+            else if (result.State == TaskState.Failure)
+            {
+                if (
+                    !await ContinueWithErrorLinkAsync(message, result, executionToken)
+                        .ConfigureAwait(false)
+                )
+                {
+                    return;
+                }
             }
             else if (result.State == TaskState.Rejected)
             {
@@ -541,7 +562,7 @@ public sealed class CeleryWorkerService : BackgroundService
     /// leaves the chain to run again instead of losing its remainder.
     /// </summary>
     /// <returns><c>true</c> when the caller may acknowledge the message.</returns>
-    private async Task<bool> ContinueChainAsync(
+    private Task<bool> ContinueChainAsync(
         BrokerMessage message,
         TaskResult result,
         CancellationToken cancellationToken
@@ -549,41 +570,132 @@ public sealed class CeleryWorkerService : BackgroundService
     {
         if (message.Message.Chain is not { Count: > 0 } steps)
         {
-            return true;
+            return Task.FromResult(true);
         }
 
         var step = steps[0];
 
+        return PublishFollowUpAsync(
+            message,
+            step.Signature,
+            step.TaskId,
+            result.Result ?? step.Signature.Args ?? [],
+            result.ContentType ?? message.Message.ContentType,
+            chain: steps.Count > 1 ? [.. steps.Skip(1)] : null,
+            cancellationToken
+        );
+    }
+
+    /// <summary>
+    /// Publishes the linked callback of a successful task with the task's result as the
+    /// callback's input, when the task has a <see cref="TaskMessage.Link"/>.
+    /// </summary>
+    /// <returns><c>true</c> when the caller may acknowledge the message.</returns>
+    private Task<bool> ContinueWithLinkAsync(
+        BrokerMessage message,
+        TaskResult result,
+        CancellationToken cancellationToken
+    )
+    {
+        if (message.Message.Link is not { } link)
+        {
+            return Task.FromResult(true);
+        }
+
+        return PublishFollowUpAsync(
+            message,
+            link,
+            $"{message.Message.Id}:link",
+            result.Result ?? link.Args ?? [],
+            result.ContentType ?? message.Message.ContentType,
+            chain: null,
+            cancellationToken
+        );
+    }
+
+    /// <summary>
+    /// Publishes the error callback of a failed task with a <see cref="TaskErrorInfo"/> payload
+    /// as the callback's input, when the task has a <see cref="TaskMessage.LinkError"/>.
+    /// </summary>
+    /// <returns><c>true</c> when the caller may acknowledge the message.</returns>
+    private Task<bool> ContinueWithErrorLinkAsync(
+        BrokerMessage message,
+        TaskResult result,
+        CancellationToken cancellationToken
+    )
+    {
+        if (message.Message.LinkError is not { } errorLink)
+        {
+            return Task.FromResult(true);
+        }
+
+        var error = new TaskErrorInfo
+        {
+            TaskId = message.Message.Id,
+            TaskName = message.Message.Task,
+            ErrorType = result.Exception?.Type,
+            ErrorMessage = result.Exception?.Message,
+        };
+
+        return PublishFollowUpAsync(
+            message,
+            errorLink,
+            $"{message.Message.Id}:link-error",
+            JsonSerializer.SerializeToUtf8Bytes(error, DotCeleryJsonContext.Default.TaskErrorInfo),
+            "application/json",
+            chain: null,
+            cancellationToken
+        );
+    }
+
+    /// <summary>
+    /// Publishes a follow-up task for a settled message: the next chain step, a linked success
+    /// callback, or an error callback. The message is only acknowledged once the follow-up is
+    /// published, so a failure leaves the follow-up to be published again instead of losing it.
+    /// </summary>
+    /// <returns><c>true</c> when the caller may acknowledge the message.</returns>
+    private async Task<bool> PublishFollowUpAsync(
+        BrokerMessage message,
+        Signature followUp,
+        string followUpId,
+        byte[] args,
+        string contentType,
+        IReadOnlyList<ChainStep>? chain,
+        CancellationToken cancellationToken
+    )
+    {
         try
         {
             await _broker
                 .PublishAsync(
                     new TaskMessage
                     {
-                        Id = step.TaskId,
-                        Task = step.Signature.TaskName,
-                        Args = result.Result ?? step.Signature.Args ?? [],
-                        ContentType = result.ContentType ?? message.Message.ContentType,
+                        Id = followUpId,
+                        Task = followUp.TaskName,
+                        Args = args,
+                        ContentType = contentType,
                         Timestamp = _timeProvider.GetUtcNow(),
-                        Chain = steps.Count > 1 ? [.. steps.Skip(1)] : null,
+                        Chain = chain,
+                        Link = followUp.Link,
+                        LinkError = followUp.LinkError,
                         RootId = message.Message.RootId ?? message.Message.Id,
                         ParentId = message.Message.Id,
-                        Queue = step.Signature.Queue,
-                        Priority = step.Signature.Priority,
-                        MaxRetries = step.Signature.MaxRetries,
-                        Headers = step.Signature.Headers,
-                        Eta = step.Signature.EffectiveEta,
-                        Expires = step.Signature.Expires,
+                        Queue = followUp.Queue,
+                        Priority = followUp.Priority,
+                        MaxRetries = followUp.MaxRetries,
+                        Headers = followUp.Headers,
+                        Eta = followUp.EffectiveEta,
+                        Expires = followUp.Expires,
                     },
                     cancellationToken
                 )
                 .ConfigureAwait(false);
 
             _logger.LogDebug(
-                "Task {TaskId} continues its chain with {NextTaskId} for task {NextTaskName}",
+                "Task {TaskId} published follow-up {FollowUpId} for task {FollowUpTaskName}",
                 message.Message.Id,
-                step.TaskId,
-                step.Signature.TaskName
+                followUpId,
+                followUp.TaskName
             );
 
             return true;
@@ -592,7 +704,8 @@ public sealed class CeleryWorkerService : BackgroundService
         {
             _logger.LogError(
                 ex,
-                "Failed to publish the next step of the chain of task {TaskId}; returning the message to the broker",
+                "Failed to publish follow-up {FollowUpId} of task {TaskId}; returning the message to the broker",
+                followUpId,
                 message.Message.Id
             );
 
