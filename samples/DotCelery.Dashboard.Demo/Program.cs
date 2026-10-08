@@ -18,8 +18,10 @@ builder.Services.AddDotCelery(celery =>
     celery
         .UseInMemoryBroker()
         .UseInMemoryBackend()
+        .AddInMemoryStorage() // task records for the dashboard's task list
         .AddInMemoryHighPriorityFeatures() // delayed store, revocation, rate limiter
-        .AddInMemoryHistoricalDataStore() // powers the /metrics/historical endpoints
+        .AddInMemoryQueueMetrics() // queue statistics for the dashboard
+        .AddInMemoryHistoricalDataStore() // powers the metrics panel and /metrics/historical
         .AddTask<EmailTask>()
         .AddTask<CalculationTask>()
         .AddTask<FlakyTask>()
@@ -29,8 +31,10 @@ builder.Services.AddDotCelery(celery =>
             o.WorkerName = "demo-worker-1";
             o.Concurrency = 4;
             o.Queues = ["celery"];
+            o.WorkerHeartbeatInterval = TimeSpan.FromSeconds(5);
         })
         .AddDelayedMessageDispatcher()
+        .UseQueueMetrics() // records the queue statistics the dashboard shows
 );
 
 // 2. Mount the dashboard. Default prefix is "/celery".
@@ -39,6 +43,7 @@ builder.Services.AddDotCeleryDashboard(o =>
     o.Title = "DotCelery Demo Dashboard";
     o.PathPrefix = "/celery";
     o.RefreshIntervalSeconds = 3;
+    o.MetricsSnapshotInterval = TimeSpan.FromSeconds(15); // demo only — the default is a minute
     o.AllowTaskOperations = true; // show Revoke buttons
     o.ExposeExceptionDetails = true; // demo only — keep false in prod
 
@@ -47,21 +52,14 @@ builder.Services.AddDotCeleryDashboard(o =>
     o.RequireAuthorization = false;
 });
 
-// 3. Hosted services that make the dashboard interesting:
-//    - register the in-process worker so the Workers panel is populated
-//    - keep enqueueing tasks so the Recent Tasks panel keeps moving
-builder.Services.AddHostedService<WorkerHeartbeatService>();
+// 3. Keep enqueueing tasks so the Recent Tasks panel keeps moving. The worker registers
+//    itself with the dashboard's registry (the heartbeat service AddWorker adds), so the
+//    Workers panel is populated without any wiring here.
 builder.Services.AddHostedService<TrafficGeneratorService>();
 
 var app = builder.Build();
 
-// The dashboard middleware is a terminal handler for everything under its path
-// prefix and would otherwise shadow the API controllers (e.g. /celery/api/overview
-// would return index.html). Run it only when routing did NOT match an endpoint —
-// API controllers and the SignalR hub then win for their routes.
-app.UseRouting();
-app.UseWhen(ctx => ctx.GetEndpoint() is null, branch => branch.UseDotCeleryDashboard());
-
+app.UseDotCeleryDashboard(); // the UI page; API and hub paths pass through to their endpoints
 app.MapDotCeleryDashboard("/celery"); // API controllers + SignalR hub
 app.MapGet("/", () => Results.Redirect("/celery/"));
 
