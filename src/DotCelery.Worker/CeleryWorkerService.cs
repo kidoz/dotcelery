@@ -10,6 +10,7 @@ using DotCelery.Core.Models;
 using DotCelery.Core.Security;
 using DotCelery.Core.Serialization;
 using DotCelery.Worker.Execution;
+using DotCelery.Worker.Services;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -40,6 +41,7 @@ public sealed class CeleryWorkerService : BackgroundService
     private readonly IDeadLetterHandler? _deadLetterHandler;
     private readonly IMessageSecurityValidator? _securityValidator;
     private readonly ICircuitBreakerFactory? _circuitBreakerFactory;
+    private readonly WorkerActivity? _activity;
     private readonly WorkerOptions _options;
     private readonly ILogger<CeleryWorkerService> _logger;
     private readonly Channel<BrokerMessage> _workChannel;
@@ -62,7 +64,8 @@ public sealed class CeleryWorkerService : BackgroundService
         TimeProvider? timeProvider = null,
         IDeadLetterHandler? deadLetterHandler = null,
         IMessageSecurityValidator? securityValidator = null,
-        ICircuitBreakerFactory? circuitBreakerFactory = null
+        ICircuitBreakerFactory? circuitBreakerFactory = null,
+        WorkerActivity? activity = null
     )
     {
         _broker = broker;
@@ -73,11 +76,11 @@ public sealed class CeleryWorkerService : BackgroundService
         _deadLetterHandler = deadLetterHandler;
         _securityValidator = securityValidator;
         _circuitBreakerFactory = circuitBreakerFactory;
+        _activity = activity;
         _options = options.Value;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
-        _workerName =
-            _options.WorkerName ?? $"worker-{Environment.MachineName}-{Environment.ProcessId}";
+        _workerName = WorkerIdentity.Resolve(_options);
 
         _workChannel = Channel.CreateBounded<BrokerMessage>(
             new BoundedChannelOptions(_options.PrefetchCount * _options.Concurrency)
@@ -350,6 +353,7 @@ public sealed class CeleryWorkerService : BackgroundService
             taskName,
             _timeProvider.GetUtcNow() - message.Message.Timestamp
         );
+        _activity?.IncrementActiveTasks();
 
         try
         {
@@ -358,6 +362,7 @@ public sealed class CeleryWorkerService : BackgroundService
         finally
         {
             DotCeleryMetrics.DecrementTasksInProgress(taskName);
+            _activity?.DecrementActiveTasks();
         }
     }
 
@@ -481,6 +486,7 @@ public sealed class CeleryWorkerService : BackgroundService
                 result.State == TaskState.Success,
                 result.Duration
             );
+            _activity?.IncrementProcessedTasks();
 
             if (result.State == TaskState.Success)
             {

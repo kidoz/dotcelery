@@ -394,6 +394,21 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
         Assert.Equal(0, factory.GetOrCreate("celery").FailureCount);
     }
 
+    [Fact]
+    public async Task ProcessingATask_IsCountedAsWorkerActivity()
+    {
+        var activity = new WorkerActivity();
+        var worker = CreateWorker(activity: activity);
+        _broker.Enqueue(CreateMessage("t1", EchoTask.TaskName));
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForAsync(() => _broker.HasEvent("ack:t1"));
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, activity.ProcessedTasks);
+        Assert.Equal(0, activity.ActiveTasks);
+    }
+
     public async ValueTask DisposeAsync()
     {
         _gate.Release.TrySetResult();
@@ -404,7 +419,8 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
     private CeleryWorkerService CreateWorker(
         Action<WorkerOptions>? configure = null,
         IMessageSecurityValidator? securityValidator = null,
-        ICircuitBreakerFactory? circuitBreakerFactory = null
+        ICircuitBreakerFactory? circuitBreakerFactory = null,
+        WorkerActivity? activity = null
     )
     {
         var options = new WorkerOptions
@@ -450,7 +466,8 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
             ),
             deadLetterHandler: CreateDeadLetterHandler(),
             securityValidator: securityValidator,
-            circuitBreakerFactory: circuitBreakerFactory
+            circuitBreakerFactory: circuitBreakerFactory,
+            activity: activity
         );
         return _worker;
     }

@@ -21,6 +21,14 @@ public sealed class WorkerOptions
     public string? WorkerName { get; set; }
 
     /// <summary>
+    /// Gets or sets how often the worker sends a heartbeat to an <c>IWorkerRegistry</c>, when
+    /// one is registered (the dashboard registers one). The heartbeat carries the worker's
+    /// active and processed task counts, so the dashboard sees the worker as online. Without a
+    /// registry the worker does not send heartbeats.
+    /// </summary>
+    public TimeSpan WorkerHeartbeatInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// Gets or sets the prefetch count per worker.
     /// </summary>
     public int PrefetchCount { get; set; } = 4;

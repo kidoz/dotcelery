@@ -89,6 +89,11 @@ public static class WorkerServiceCollectionExtensions
         builder.Services.AddHostedService(sp => sp.GetRequiredService<RevocationManager>());
         builder.Services.AddHostedService<CeleryWorkerService>();
 
+        // The heartbeat registers the worker with an IWorkerRegistry when one is registered,
+        // such as the dashboard's, and does nothing without one
+        builder.Services.AddSingleton<WorkerActivity>();
+        builder.Services.AddHostedService<WorkerHeartbeatService>();
+
         // Ensure IHost's shutdown budget is at least as long as the worker's drain budget,
         // otherwise IHostApplicationLifetime cancels the token passed to StopAsync before
         // in-flight tasks finish. We only raise the timeout — never lower it — so
