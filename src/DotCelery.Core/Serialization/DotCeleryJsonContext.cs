@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Batches;
 using DotCelery.Core.Canvas;
+using DotCelery.Core.Dashboard;
 using DotCelery.Core.DeadLetter;
 using DotCelery.Core.Models;
 using DotCelery.Core.Outbox;
@@ -66,6 +67,10 @@ namespace DotCelery.Core.Serialization;
 // Progress Types
 [JsonSerializable(typeof(ProgressInfo))]
 [JsonSerializable(typeof(ProgressUpdatedSignal))]
+// Dashboard Types
+[JsonSerializable(typeof(TaskSummary))]
+[JsonSerializable(typeof(IReadOnlyList<TaskSummary>))]
+[JsonSerializable(typeof(List<TaskSummary>))]
 // Revocation Types
 [JsonSerializable(typeof(RevocationEvent))]
 // Collection Types (commonly used in models)

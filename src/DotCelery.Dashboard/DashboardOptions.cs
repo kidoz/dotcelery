@@ -47,6 +47,26 @@ public sealed class DashboardOptions
     public TimeSpan MetricsWindow { get; set; } = TimeSpan.FromHours(1);
 
     /// <summary>
+    /// Gets or sets how long a task record the dashboard keeps lives. Records feed the task
+    /// list, the state counts, and the live metrics window. Default is 24 hours.
+    /// </summary>
+    public TimeSpan TaskRecordRetention { get; set; } = TimeSpan.FromHours(24);
+
+    /// <summary>
+    /// Gets or sets how long a worker may go without a heartbeat before the dashboard marks it
+    /// unresponsive and, after another interval, removes it. It should be longer than the
+    /// worker's <c>WorkerOptions.WorkerHeartbeatInterval</c>. Default is 90 seconds.
+    /// </summary>
+    public TimeSpan WorkerOfflineTimeout { get; set; } = TimeSpan.FromSeconds(90);
+
+    /// <summary>
+    /// Gets or sets how often the dashboard records a metrics snapshot into the
+    /// <c>IHistoricalDataStore</c>, when one is registered. Each snapshot holds the tasks
+    /// completed since the previous one. Default is 1 minute.
+    /// </summary>
+    public TimeSpan MetricsSnapshotInterval { get; set; } = TimeSpan.FromMinutes(1);
+
+    /// <summary>
     /// Gets or sets a custom authorization check.
     /// Return true to allow access, false to deny.
     /// </summary>

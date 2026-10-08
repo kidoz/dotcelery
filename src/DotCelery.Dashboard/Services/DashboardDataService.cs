@@ -14,6 +14,9 @@ public sealed class DashboardDataService : IDashboardDataProvider
     private readonly IResultBackend _resultBackend;
     private readonly IMessageBroker _broker;
     private readonly IWorkerRegistry? _workerRegistry;
+    private readonly ITaskSummaryProvider? _taskSummaries;
+    private readonly IQueueStatsProvider? _queueStats;
+    private readonly IMetricsProvider? _metrics;
     private readonly DashboardOptions _options;
     private readonly ILogger<DashboardDataService> _logger;
 
@@ -25,12 +28,18 @@ public sealed class DashboardDataService : IDashboardDataProvider
         IMessageBroker broker,
         IOptions<DashboardOptions> options,
         ILogger<DashboardDataService> logger,
-        IWorkerRegistry? workerRegistry = null
+        IWorkerRegistry? workerRegistry = null,
+        ITaskSummaryProvider? taskSummaries = null,
+        IQueueStatsProvider? queueStats = null,
+        IMetricsProvider? metrics = null
     )
     {
         _resultBackend = resultBackend;
         _broker = broker;
         _workerRegistry = workerRegistry;
+        _taskSummaries = taskSummaries;
+        _queueStats = queueStats;
+        _metrics = metrics;
         _options = options.Value;
         _logger = logger;
     }
@@ -41,6 +50,22 @@ public sealed class DashboardDataService : IDashboardDataProvider
     )
     {
         var stats = new List<QueueStats>();
+
+        // Prefer the registered queue stats provider (the queue metrics store), then a broker
+        // that can report its own queues
+        if (_queueStats is not null)
+        {
+            await foreach (
+                var queueStat in _queueStats
+                    .GetAllQueueStatsAsync(cancellationToken)
+                    .ConfigureAwait(false)
+            )
+            {
+                stats.Add(queueStat);
+            }
+
+            return stats;
+        }
 
         // Get queue stats from broker if supported
         if (_broker is IQueueStatsProvider queueStatsProvider)
@@ -66,6 +91,13 @@ public sealed class DashboardDataService : IDashboardDataProvider
         CancellationToken cancellationToken = default
     )
     {
+        if (_taskSummaries is not null)
+        {
+            return await _taskSummaries
+                .GetTasksByStateAsync(state, limit, offset, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         var tasks = new List<TaskSummary>();
 
         if (_resultBackend is ITaskQueryProvider queryProvider)
@@ -91,6 +123,13 @@ public sealed class DashboardDataService : IDashboardDataProvider
         CancellationToken cancellationToken = default
     )
     {
+        if (_taskSummaries is not null)
+        {
+            return await _taskSummaries
+                .GetTasksByNameAsync(taskName, limit, offset, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         var tasks = new List<TaskSummary>();
 
         if (_resultBackend is ITaskQueryProvider queryProvider)
@@ -114,6 +153,17 @@ public sealed class DashboardDataService : IDashboardDataProvider
         CancellationToken cancellationToken = default
     )
     {
+        // A task record also covers tasks that have not produced a result yet, such as a task
+        // that is still running
+        if (
+            _taskSummaries is not null
+            && await _taskSummaries.GetTaskAsync(taskId, cancellationToken).ConfigureAwait(false)
+                is { } summary
+        )
+        {
+            return summary;
+        }
+
         var result = await _resultBackend
             .GetResultAsync(taskId, cancellationToken)
             .ConfigureAwait(false);
@@ -150,6 +200,11 @@ public sealed class DashboardDataService : IDashboardDataProvider
         CancellationToken cancellationToken = default
     )
     {
+        if (_metrics is not null)
+        {
+            return await _metrics.GetMetricsAsync(window, cancellationToken).ConfigureAwait(false);
+        }
+
         if (_resultBackend is IMetricsProvider metricsProvider)
         {
             return await metricsProvider
@@ -157,7 +212,7 @@ public sealed class DashboardDataService : IDashboardDataProvider
                 .ConfigureAwait(false);
         }
 
-        // Return empty metrics if backend doesn't support metrics
+        // Return empty metrics if nothing can provide them
         return new DashboardMetrics { Window = window };
     }
 
@@ -166,6 +221,13 @@ public sealed class DashboardDataService : IDashboardDataProvider
         CancellationToken cancellationToken = default
     )
     {
+        if (_taskSummaries is not null)
+        {
+            return await _taskSummaries
+                .GetStateCountsAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         if (_resultBackend is ITaskQueryProvider queryProvider)
         {
             return await queryProvider.GetStateCountsAsync(cancellationToken).ConfigureAwait(false);
@@ -179,6 +241,11 @@ public sealed class DashboardDataService : IDashboardDataProvider
         CancellationToken cancellationToken = default
     )
     {
+        if (_taskSummaries is not null)
+        {
+            return await _taskSummaries.GetTaskNamesAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         if (_resultBackend is ITaskQueryProvider queryProvider)
         {
             return await queryProvider.GetTaskNamesAsync(cancellationToken).ConfigureAwait(false);
@@ -198,44 +265,8 @@ public sealed class DashboardDataService : IDashboardDataProvider
             CompletedAt = result.CompletedAt,
             Duration = result.Duration,
             Retries = result.Retries,
-            ExceptionMessage = SanitizeExceptionMessage(result.Exception),
+            ExceptionMessage = TaskExceptionSanitizer.Sanitize(result.Exception, _options),
         };
-    }
-
-    /// <summary>
-    /// Sanitizes exception information to prevent information disclosure.
-    /// </summary>
-    private string? SanitizeExceptionMessage(TaskExceptionInfo? exception)
-    {
-        if (exception is null)
-        {
-            return null;
-        }
-
-        if (_options.ExposeExceptionDetails)
-        {
-            // Full details requested - truncate if too long
-            var message = exception.Message;
-            if (message?.Length > _options.MaxExceptionMessageLength)
-            {
-                return message[.._options.MaxExceptionMessageLength] + "...";
-            }
-            return message;
-        }
-
-        // Sanitized mode - only show exception type without sensitive details
-        var exceptionType = exception.Type;
-        if (string.IsNullOrEmpty(exceptionType))
-        {
-            return "An error occurred";
-        }
-
-        // Extract just the type name without namespace for privacy
-        var typeName = exceptionType.Contains('.')
-            ? exceptionType[(exceptionType.LastIndexOf('.') + 1)..]
-            : exceptionType;
-
-        return $"{typeName}: Task execution failed";
     }
 }
 

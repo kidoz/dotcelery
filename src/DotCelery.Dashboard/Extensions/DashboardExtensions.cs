@@ -1,4 +1,5 @@
 using DotCelery.Core.Dashboard;
+using DotCelery.Core.Signals;
 using DotCelery.Dashboard.Hubs;
 using DotCelery.Dashboard.Middleware;
 using DotCelery.Dashboard.Routing;
@@ -34,23 +35,7 @@ public static class DashboardExtensions
 
         // Register dashboard services
         services.AddSingleton<IWorkerRegistry, InMemoryWorkerRegistry>();
-        services.AddScoped<IDashboardDataProvider, DashboardDataService>();
-        services.AddSingleton<DashboardNotificationService>();
-        services.AddScoped<DashboardAuthorizationFilter>();
-
-        // Add SignalR
-        services.AddSignalR();
-
-        // Add controllers for API endpoints
-        services
-            .AddControllers(options =>
-            {
-                options.Conventions.Add(
-                    new DashboardRoutePrefixConvention(routeOptions.PathPrefix)
-                );
-                options.Filters.AddService<DashboardAuthorizationFilter>();
-            })
-            .AddApplicationPart(typeof(DashboardExtensions).Assembly);
+        AddDashboardServices(services, routeOptions);
 
         return services;
     }
@@ -79,9 +64,45 @@ public static class DashboardExtensions
 
         // Register dashboard services with custom worker registry
         services.AddSingleton<IWorkerRegistry, TWorkerRegistry>();
+        AddDashboardServices(services, routeOptions);
+
+        return services;
+    }
+
+    private static void AddDashboardServices(
+        IServiceCollection services,
+        DashboardOptions routeOptions
+    )
+    {
         services.AddScoped<IDashboardDataProvider, DashboardDataService>();
         services.AddSingleton<DashboardNotificationService>();
         services.AddScoped<DashboardAuthorizationFilter>();
+
+        // The task record store indexes the tasks this host runs, so the dashboard can list and
+        // count them; the providers serve queue stats, task queries, and metrics from the
+        // stores the application already has (it does not need to implement them)
+        services.AddSingleton<TaskRecordStore>();
+        services.AddSingleton<ITaskSummaryProvider, DashboardTaskSummaryProvider>();
+        services.AddSingleton<IQueueStatsProvider, DashboardQueueStatsProvider>();
+        services.AddSingleton<IMetricsProvider, DashboardMetricsProvider>();
+
+        // Task signals feed the records and the SignalR notifications; the monitor watches the
+        // worker registry and announces workers coming and going
+        services.AddScoped<DashboardTaskSignalHandler>();
+        services.AddScoped<ITaskSignalHandler<TaskPreRunSignal>>(sp =>
+            sp.GetRequiredService<DashboardTaskSignalHandler>()
+        );
+        services.AddScoped<ITaskSignalHandler<TaskPostRunSignal>>(sp =>
+            sp.GetRequiredService<DashboardTaskSignalHandler>()
+        );
+        services.AddScoped<ITaskSignalHandler<TaskFailureSignal>>(sp =>
+            sp.GetRequiredService<DashboardTaskSignalHandler>()
+        );
+        services.AddScoped<ITaskSignalHandler<TaskRejectedSignal>>(sp =>
+            sp.GetRequiredService<DashboardTaskSignalHandler>()
+        );
+        services.AddHostedService<DashboardWorkerMonitor>();
+        services.AddHostedService<DashboardMetricsCollector>();
 
         // Add SignalR
         services.AddSignalR();
@@ -96,8 +117,6 @@ public static class DashboardExtensions
                 options.Filters.AddService<DashboardAuthorizationFilter>();
             })
             .AddApplicationPart(typeof(DashboardExtensions).Assembly);
-
-        return services;
     }
 
     /// <summary>
