@@ -1,12 +1,8 @@
 using System.Threading.Channels;
 using DotCelery.Broker.InMemory;
 using DotCelery.Core.Abstractions;
-using DotCelery.Core.Filters;
 using DotCelery.Core.Models;
-using DotCelery.Core.Progress;
 using DotCelery.Core.Security;
-using DotCelery.Worker.Filters;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -220,47 +216,6 @@ public class SecurityFixesTests
         await broker.DisposeAsync();
     }
 
-    [Fact]
-    public async Task SecurityValidationFilter_WithSigningEnabled_RejectsUnsignedMessage()
-    {
-        var filter = new SecurityValidationFilter(
-            Options.Create(
-                new MessageSecurityOptions
-                {
-                    EnableMessageSigning = true,
-                    SigningKey = "0123456789abcdef0123456789abcdef"u8.ToArray(),
-                }
-            ),
-            NullLogger<SecurityValidationFilter>.Instance,
-            new MessageSecurityValidator(
-                Options.Create(
-                    new MessageSecurityOptions
-                    {
-                        EnableMessageSigning = true,
-                        SigningKey = "0123456789abcdef0123456789abcdef"u8.ToArray(),
-                    }
-                ),
-                NullLogger<MessageSecurityValidator>.Instance
-            )
-        );
-        var context = new TaskExecutingContext
-        {
-            TaskId = "task-1",
-            TaskName = "test.task",
-            Message = CreateTestMessage(),
-            Input = null,
-            TaskType = typeof(object),
-            TaskContext = SubstituteTaskContext.Instance,
-            ServiceProvider = new ServiceCollection().BuildServiceProvider(),
-        };
-
-        await filter.OnExecutingAsync(context, CancellationToken.None);
-
-        Assert.True(context.SkipExecution);
-        Assert.NotNull(context.SkipResult);
-        Assert.Equal(TaskState.Rejected, context.SkipResult.State);
-    }
-
     #endregion
 
     private static TaskMessage CreateTestMessage() =>
@@ -273,33 +228,4 @@ public class SecurityFixesTests
             Timestamp = DateTimeOffset.UtcNow,
             Queue = "test-queue",
         };
-
-    private sealed class SubstituteTaskContext : ITaskContext
-    {
-        public static SubstituteTaskContext Instance { get; } = new();
-        public string TaskId => "task-1";
-        public string TaskName => "test.task";
-        public int RetryCount => 0;
-        public int MaxRetries => 3;
-        public string Queue => "test-queue";
-        public DateTimeOffset SentAt => DateTimeOffset.UtcNow;
-        public DateTimeOffset? Eta => null;
-        public DateTimeOffset? Expires => null;
-        public string? ParentId => null;
-        public string? RootId => null;
-        public string? CorrelationId => null;
-        public string? TenantId => null;
-        public string? PartitionKey => null;
-        public IReadOnlyDictionary<string, string>? Headers => null;
-        public IProgressReporter Progress => throw new NotSupportedException();
-
-        public void Retry(TimeSpan? countdown = null, Exception? exception = null) =>
-            throw new NotSupportedException();
-
-        public Task UpdateStateAsync(TaskState state, object? metadata = null) =>
-            Task.CompletedTask;
-
-        public T GetRequiredService<T>()
-            where T : notnull => throw new NotSupportedException();
-    }
 }

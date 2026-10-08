@@ -306,8 +306,9 @@ public static class WorkerServiceCollectionExtensions
 
     /// <summary>
     /// Adds circuit breaker functionality to the worker.
-    /// Circuit breakers protect against cascading failures by temporarily disabling
-    /// consumption when a queue experiences too many failures.
+    /// Circuit breakers protect against cascading failures by returning a queue's messages to
+    /// the broker, instead of running them, while the queue's circuit or the global one is open
+    /// after infrastructure failures.
     /// </summary>
     /// <param name="builder">The DotCelery builder.</param>
     /// <param name="configure">Optional configuration action.</param>
@@ -506,6 +507,11 @@ public static class WorkerServiceCollectionExtensions
     /// <item>Optional HMAC message signing (integrity verification)</item>
     /// <item>Optional maximum message age, which narrows the window a captured signed message can be replayed in</item>
     /// </list>
+    /// <para>
+    /// The worker validates each message as it receives it, before the task input is
+    /// deserialized and before the task is recorded as started. A refused message is stored in
+    /// the dead letter queue and acknowledged instead of being executed.
+    /// </para>
     /// </remarks>
     public static DotCeleryBuilder UseMessageSecurity(
         this DotCeleryBuilder builder,
@@ -519,7 +525,6 @@ public static class WorkerServiceCollectionExtensions
         });
 
         builder.Services.AddSingleton<IMessageSecurityValidator, MessageSecurityValidator>();
-        builder.AddTaskFilter<SecurityValidationFilter>();
 
         return builder;
     }

@@ -8,6 +8,7 @@ using DotCelery.Core.Abstractions;
 using DotCelery.Core.DeadLetter;
 using DotCelery.Core.Exceptions;
 using DotCelery.Core.Models;
+using DotCelery.Core.Security;
 using DotCelery.Core.Serialization;
 using DotCelery.Core.Storage.Stores;
 using DotCelery.Worker;
@@ -227,6 +228,102 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
         );
     }
 
+    [Fact]
+    public async Task UnsignedMessage_WithSigningRequired_IsDeadLetteredWithoutRunning()
+    {
+        using var validator = CreateValidator(
+            new MessageSecurityOptions
+            {
+                EnableMessageSigning = true,
+                RejectUnsignedMessages = true,
+                SigningKey = SigningKey,
+            }
+        );
+        var worker = CreateWorker(securityValidator: validator);
+        _broker.Enqueue(CreateMessage("t1", EchoTask.TaskName));
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForAsync(() => _broker.HasEvent("ack:t1"));
+        await worker.StopAsync(CancellationToken.None);
+
+        var deadLetter = Assert.Single(await ReadDeadLettersAsync());
+        Assert.Equal("t1", deadLetter.TaskId);
+        Assert.Equal(DeadLetterReason.Rejected, deadLetter.Reason);
+
+        // Refused on receipt: the message was neither rejected nor recorded, so the task
+        // never started
+        Assert.False(_broker.HasEvent("reject:t1"));
+        Assert.Null(await _backend.GetResultAsync("t1"));
+    }
+
+    [Fact]
+    public async Task DisallowedTaskName_IsDeadLetteredWithoutRunning()
+    {
+        using var validator = CreateValidator(
+            new MessageSecurityOptions
+            {
+                EnforceTaskAllowlist = true,
+                AllowedTaskNames = ["other.task"],
+            }
+        );
+        var worker = CreateWorker(securityValidator: validator);
+        _broker.Enqueue(CreateMessage("t1", EchoTask.TaskName));
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForAsync(() => _broker.HasEvent("ack:t1"));
+        await worker.StopAsync(CancellationToken.None);
+
+        var deadLetter = Assert.Single(await ReadDeadLettersAsync());
+        Assert.Equal(DeadLetterReason.Rejected, deadLetter.Reason);
+        Assert.Null(await _backend.GetResultAsync("t1"));
+    }
+
+    [Fact]
+    public async Task SignedMessage_Runs()
+    {
+        using var validator = CreateValidator(
+            new MessageSecurityOptions
+            {
+                EnableMessageSigning = true,
+                RejectUnsignedMessages = true,
+                SigningKey = SigningKey,
+            }
+        );
+        var worker = CreateWorker(securityValidator: validator);
+
+        var message = CreateMessage("t1", EchoTask.TaskName);
+        var rawBody = _serializer.Serialize(message);
+        _broker.Enqueue(message, rawBody, validator.Sign(rawBody));
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForAsync(() => _broker.HasEvent("ack:t1"));
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(TaskState.Success, (await _backend.GetResultAsync("t1"))?.State);
+        Assert.Empty(await ReadDeadLettersAsync());
+    }
+
+    [Fact]
+    public async Task MessageWhoseBodyDoesNotMatchItsSignature_IsDeadLettered()
+    {
+        using var validator = CreateValidator(
+            new MessageSecurityOptions { EnableMessageSigning = true, SigningKey = SigningKey }
+        );
+        var worker = CreateWorker(securityValidator: validator);
+
+        var message = CreateMessage("t1", EchoTask.TaskName);
+        var tamperedBody = _serializer.Serialize(CreateMessage("t2", EchoTask.TaskName));
+        _broker.Enqueue(message, tamperedBody, validator.Sign(_serializer.Serialize(message)));
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForAsync(() => _broker.HasEvent("ack:t1"));
+        await worker.StopAsync(CancellationToken.None);
+
+        var deadLetter = Assert.Single(await ReadDeadLettersAsync());
+        Assert.Equal(DeadLetterReason.Rejected, deadLetter.Reason);
+        Assert.Null(await _backend.GetResultAsync("t1"));
+    }
+
     public async ValueTask DisposeAsync()
     {
         _gate.Release.TrySetResult();
@@ -234,7 +331,10 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
         await _serviceProvider.DisposeAsync();
     }
 
-    private CeleryWorkerService CreateWorker(Action<WorkerOptions>? configure = null)
+    private CeleryWorkerService CreateWorker(
+        Action<WorkerOptions>? configure = null,
+        IMessageSecurityValidator? securityValidator = null
+    )
     {
         var options = new WorkerOptions
         {
@@ -277,7 +377,8 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
             shutdownHandler: new GracefulShutdownHandler(
                 NullLogger<GracefulShutdownHandler>.Instance
             ),
-            deadLetterHandler: CreateDeadLetterHandler()
+            deadLetterHandler: CreateDeadLetterHandler(),
+            securityValidator: securityValidator
         );
         return _worker;
     }
@@ -318,7 +419,11 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
 
         public IReadOnlyCollection<string> UnsettledWhenClosed { get; private set; } = [];
 
-        public void Enqueue(TaskMessage message) =>
+        public void Enqueue(
+            TaskMessage message,
+            byte[]? rawBody = null,
+            string? signature = null
+        ) =>
             _pending.Writer.TryWrite(
                 new BrokerMessage
                 {
@@ -326,6 +431,8 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
                     DeliveryTag = Guid.NewGuid(),
                     Queue = message.Queue,
                     ReceivedAt = DateTimeOffset.UtcNow,
+                    RawBody = rawBody,
+                    Signature = signature,
                 }
             );
 
@@ -517,6 +624,11 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
             CancellationToken cancellationToken = default
         ) => throw new RetryException(countdown: null, new InvalidOperationException("Transient"));
     }
+
+    private static byte[] SigningKey => "0123456789abcdef0123456789abcdef"u8.ToArray();
+
+    private static MessageSecurityValidator CreateValidator(MessageSecurityOptions options) =>
+        new(Options.Create(options), NullLogger<MessageSecurityValidator>.Instance);
 
     private DeadLetterHandler CreateDeadLetterHandler() =>
         new(

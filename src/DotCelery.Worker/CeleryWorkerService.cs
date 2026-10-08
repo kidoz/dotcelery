@@ -5,6 +5,7 @@ using DotCelery.Core.DeadLetter;
 using DotCelery.Core.Exceptions;
 using DotCelery.Core.Instrumentation;
 using DotCelery.Core.Models;
+using DotCelery.Core.Security;
 using DotCelery.Worker.Execution;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -34,6 +35,7 @@ public sealed class CeleryWorkerService : BackgroundService
     private readonly IGracefulShutdownHandler? _shutdownHandler;
     private readonly IKillSwitch? _killSwitch;
     private readonly IDeadLetterHandler? _deadLetterHandler;
+    private readonly IMessageSecurityValidator? _securityValidator;
     private readonly WorkerOptions _options;
     private readonly ILogger<CeleryWorkerService> _logger;
     private readonly Channel<BrokerMessage> _workChannel;
@@ -54,7 +56,8 @@ public sealed class CeleryWorkerService : BackgroundService
         IGracefulShutdownHandler? shutdownHandler = null,
         IKillSwitch? killSwitch = null,
         TimeProvider? timeProvider = null,
-        IDeadLetterHandler? deadLetterHandler = null
+        IDeadLetterHandler? deadLetterHandler = null,
+        IMessageSecurityValidator? securityValidator = null
     )
     {
         _broker = broker;
@@ -63,6 +66,7 @@ public sealed class CeleryWorkerService : BackgroundService
         _shutdownHandler = shutdownHandler;
         _killSwitch = killSwitch;
         _deadLetterHandler = deadLetterHandler;
+        _securityValidator = securityValidator;
         _options = options.Value;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -210,6 +214,26 @@ public sealed class CeleryWorkerService : BackgroundService
             if (_killSwitch is not null)
             {
                 await _killSwitch.WaitUntilReadyAsync(intakeToken).ConfigureAwait(false);
+            }
+
+            // Validate before the message reaches a worker, so a refused message is never
+            // deserialized, recorded as started, or executed
+            if (_securityValidator is not null)
+            {
+                if (ValidateMessage(message) is { } rejection)
+                {
+                    _logger.LogWarning(
+                        "Rejecting message {TaskId} for task {TaskName}: {Error}",
+                        message.Message.Id,
+                        message.Message.Task,
+                        rejection.ErrorMessage
+                    );
+
+                    await DeadLetterAsync(message.Message, DeadLetterReason.Rejected)
+                        .ConfigureAwait(false);
+                    await AckAsync(message).ConfigureAwait(false);
+                    return;
+                }
             }
 
             var now = _timeProvider.GetUtcNow();
@@ -553,6 +577,31 @@ public sealed class CeleryWorkerService : BackgroundService
 
             return false;
         }
+    }
+
+    // A message is refused when the security validator rejects it or its raw body does not
+    // match its signature
+    private MessageValidationResult? ValidateMessage(BrokerMessage message)
+    {
+        var result = _securityValidator!.Validate(message.Message, message.Signature);
+        if (!result.IsValid)
+        {
+            return result;
+        }
+
+        if (
+            message.RawBody is { Length: > 0 } rawBody
+            && !string.IsNullOrEmpty(message.Signature)
+            && !_securityValidator.VerifySignature(rawBody, message.Signature)
+        )
+        {
+            return MessageValidationResult.Failure(
+                MessageValidationError.InvalidSignature,
+                "Message signature is invalid"
+            );
+        }
+
+        return null;
     }
 
     private async Task ScheduleRetryAsync(BrokerMessage message, TaskResult result)
