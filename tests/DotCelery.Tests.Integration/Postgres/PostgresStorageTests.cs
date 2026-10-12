@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using DotCelery.Backend.Postgres;
 using DotCelery.Backend.Postgres.Storage;
 using DotCelery.Core.Abstractions;
+using DotCelery.Core.Dashboard;
 using DotCelery.Core.Models;
 using DotCelery.Core.Outbox;
 using DotCelery.Core.Storage;
@@ -275,6 +276,17 @@ public sealed class PostgresQueueMetricsTests(PostgresStorageFixture fixture)
 {
     protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
         ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+}
+
+[Collection(PostgresStorageTestGroup.Name)]
+public sealed class PostgresWorkerRegistryTests(PostgresStorageFixture fixture)
+    : ExpiringWorkerRegistryConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+
+    protected override IWorkerRegistry CreateRegistry() =>
+        new WorkerRegistry(Provider, CreateOptions(), Time);
 }
 
 [Collection(PostgresStorageTestGroup.Name)]

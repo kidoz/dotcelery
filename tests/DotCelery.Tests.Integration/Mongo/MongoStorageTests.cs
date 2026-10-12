@@ -2,6 +2,7 @@ using DotCelery.Backend.Mongo.Extensions;
 using DotCelery.Backend.Mongo.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Batches;
+using DotCelery.Core.Dashboard;
 using DotCelery.Core.Execution;
 using DotCelery.Core.Models;
 using DotCelery.Core.Partitioning;
@@ -183,6 +184,17 @@ public sealed class MongoQueueMetricsTests(MongoStorageFixture fixture)
 {
     protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
         ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+}
+
+[Collection(MongoStorageTestGroup.Name)]
+public sealed class MongoWorkerRegistryTests(MongoStorageFixture fixture)
+    : ExpiringWorkerRegistryConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+
+    protected override IWorkerRegistry CreateRegistry() =>
+        new WorkerRegistry(Provider, CreateOptions(), Time);
 }
 
 [Collection(MongoStorageTestGroup.Name)]

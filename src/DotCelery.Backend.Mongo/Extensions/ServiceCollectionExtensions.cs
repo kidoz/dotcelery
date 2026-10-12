@@ -1,6 +1,7 @@
 using DotCelery.Backend.Mongo.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Batches;
+using DotCelery.Core.Dashboard;
 using DotCelery.Core.Execution;
 using DotCelery.Core.Extensions;
 using DotCelery.Core.Partitioning;
@@ -240,6 +241,18 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         Action<MongoStorageOptions>? configure = null
     ) => services.AddMongoStorageStore<IQueueMetrics, QueueMetrics>(configure);
+
+    /// <summary>
+    /// Adds the MongoDB worker registry, which every worker and dashboard sharing the storage
+    /// sees, so a dashboard shows the workers of other processes and the queues they consume.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configure">Optional configuration action.</param>
+    /// <returns>The service collection.</returns>
+    public static IServiceCollection AddMongoWorkerRegistry(
+        this IServiceCollection services,
+        Action<MongoStorageOptions>? configure = null
+    ) => services.AddMongoStorageStore<IWorkerRegistry, WorkerRegistry>(configure);
 
     /// <summary>
     /// Adds the MongoDB historical data store.

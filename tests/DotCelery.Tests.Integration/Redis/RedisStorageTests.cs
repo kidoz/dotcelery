@@ -2,6 +2,7 @@ using DotCelery.Backend.Redis.Extensions;
 using DotCelery.Backend.Redis.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Batches;
+using DotCelery.Core.Dashboard;
 using DotCelery.Core.Execution;
 using DotCelery.Core.Models;
 using DotCelery.Core.Partitioning;
@@ -183,6 +184,17 @@ public sealed class RedisQueueMetricsTests(RedisStorageFixture fixture)
 {
     protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
         ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+}
+
+[Collection(RedisStorageTestGroup.Name)]
+public sealed class RedisWorkerRegistryTests(RedisStorageFixture fixture)
+    : ExpiringWorkerRegistryConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+
+    protected override IWorkerRegistry CreateRegistry() =>
+        new WorkerRegistry(Provider, CreateOptions(), Time);
 }
 
 [Collection(RedisStorageTestGroup.Name)]

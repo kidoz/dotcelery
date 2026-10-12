@@ -78,6 +78,13 @@ public sealed class StorageStoreOptions
     /// </summary>
     public TimeSpan PurgeInterval { get; set; } = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// Gets or sets how long a worker's registry record is kept after its last heartbeat, so a
+    /// worker that stops without unregistering stops being listed even when no dashboard cleans
+    /// the registry up. It should be several heartbeat intervals. Default is 5 minutes.
+    /// </summary>
+    public TimeSpan WorkerRetention { get; set; } = TimeSpan.FromMinutes(5);
+
     internal string Name(string name)
     {
         ArgumentException.ThrowIfNullOrEmpty(Prefix);

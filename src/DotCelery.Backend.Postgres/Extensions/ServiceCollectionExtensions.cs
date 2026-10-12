@@ -1,6 +1,7 @@
 using DotCelery.Backend.Postgres.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Batches;
+using DotCelery.Core.Dashboard;
 using DotCelery.Core.Execution;
 using DotCelery.Core.Extensions;
 using DotCelery.Core.Partitioning;
@@ -269,6 +270,18 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         Action<PostgresStorageOptions>? configure = null
     ) => services.AddPostgresStorageStore<IQueueMetrics, QueueMetrics>(configure);
+
+    /// <summary>
+    /// Adds the PostgreSQL worker registry, which every worker and dashboard sharing the storage
+    /// sees, so a dashboard shows the workers of other processes and the queues they consume.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configure">Optional configuration action.</param>
+    /// <returns>The service collection.</returns>
+    public static IServiceCollection AddPostgresWorkerRegistry(
+        this IServiceCollection services,
+        Action<PostgresStorageOptions>? configure = null
+    ) => services.AddPostgresStorageStore<IWorkerRegistry, WorkerRegistry>(configure);
 
     /// <summary>
     /// Adds the PostgreSQL historical data store.

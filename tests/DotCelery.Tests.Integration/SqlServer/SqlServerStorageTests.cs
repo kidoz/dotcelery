@@ -5,6 +5,7 @@ using DotCelery.Backend.SqlServer.Extensions;
 using DotCelery.Backend.SqlServer.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Batches;
+using DotCelery.Core.Dashboard;
 using DotCelery.Core.Execution;
 using DotCelery.Core.Models;
 using DotCelery.Core.Outbox;
@@ -646,6 +647,17 @@ public sealed class SqlServerQueueMetricsTests(SqlServerStorageFixture fixture)
 {
     protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
         ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+}
+
+[Collection(SqlServerStorageTestGroup.Name)]
+public sealed class SqlServerWorkerRegistryTests(SqlServerStorageFixture fixture)
+    : ExpiringWorkerRegistryConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult(fixture.CreateProvider(timeProvider));
+
+    protected override IWorkerRegistry CreateRegistry() =>
+        new WorkerRegistry(Provider, CreateOptions(), Time);
 }
 
 [Collection(SqlServerStorageTestGroup.Name)]

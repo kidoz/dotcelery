@@ -1,6 +1,7 @@
 using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Batches;
+using DotCelery.Core.Dashboard;
 using DotCelery.Core.Execution;
 using DotCelery.Core.Extensions;
 using DotCelery.Core.MultiTenancy;
@@ -219,6 +220,20 @@ public static class InMemoryBackendExtensions
     {
         builder.AddInMemoryStorage();
         builder.Services.AddSingleton<IQueueMetrics, QueueMetrics>();
+        return builder;
+    }
+
+    /// <summary>
+    /// Adds the in-memory worker registry, which sees the workers of its own process. A
+    /// deployment whose workers run in other processes registers a registry shared with them
+    /// instead, such as <c>AddRedisWorkerRegistry</c>.
+    /// </summary>
+    /// <param name="builder">The DotCelery builder.</param>
+    /// <returns>The builder.</returns>
+    public static DotCeleryBuilder AddInMemoryWorkerRegistry(this DotCeleryBuilder builder)
+    {
+        builder.AddInMemoryStorage();
+        builder.Services.AddSingleton<IWorkerRegistry, WorkerRegistry>();
         return builder;
     }
 

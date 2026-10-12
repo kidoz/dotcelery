@@ -1,6 +1,7 @@
 using DotCelery.Backend.SqlServer.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Batches;
+using DotCelery.Core.Dashboard;
 using DotCelery.Core.Execution;
 using DotCelery.Core.Extensions;
 using DotCelery.Core.Partitioning;
@@ -271,6 +272,18 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         Action<SqlServerStorageOptions>? configure = null
     ) => services.AddSqlServerStorageStore<IQueueMetrics, QueueMetrics>(configure);
+
+    /// <summary>
+    /// Adds the SQL Server worker registry, which every worker and dashboard sharing the storage
+    /// sees, so a dashboard shows the workers of other processes and the queues they consume.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configure">Optional configuration action.</param>
+    /// <returns>The service collection.</returns>
+    public static IServiceCollection AddSqlServerWorkerRegistry(
+        this IServiceCollection services,
+        Action<SqlServerStorageOptions>? configure = null
+    ) => services.AddSqlServerStorageStore<IWorkerRegistry, WorkerRegistry>(configure);
 
     /// <summary>
     /// Adds the SQL Server historical data store.

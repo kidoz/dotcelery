@@ -71,6 +71,8 @@ namespace DotCelery.Core.Serialization;
 [JsonSerializable(typeof(TaskSummary))]
 [JsonSerializable(typeof(IReadOnlyList<TaskSummary>))]
 [JsonSerializable(typeof(List<TaskSummary>))]
+[JsonSerializable(typeof(WorkerInfo))]
+[JsonSerializable(typeof(WorkerStatus))]
 // Revocation Types
 [JsonSerializable(typeof(RevocationEvent))]
 // Collection Types (commonly used in models)

@@ -1,7 +1,10 @@
 namespace DotCelery.Tests.Unit.Storage;
 
 using DotCelery.Backend.InMemory.Storage;
+using DotCelery.Core.Dashboard;
 using DotCelery.Core.Storage;
+using DotCelery.Core.Storage.Stores;
+using DotCelery.Dashboard.Services;
 using DotCelery.Tests.Conformance.Storage;
 using DotCelery.Tests.Conformance.Stores;
 
@@ -111,4 +114,21 @@ public sealed class InMemoryHistoricalDataStoreTests : HistoricalDataStoreConfor
 {
     protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
         ValueTask.FromResult<IStorageProvider>(new InMemoryStorageProvider(timeProvider));
+}
+
+public sealed class InMemoryStorageWorkerRegistryTests : ExpiringWorkerRegistryConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult<IStorageProvider>(new InMemoryStorageProvider(timeProvider));
+
+    protected override IWorkerRegistry CreateRegistry() =>
+        new WorkerRegistry(Provider, CreateOptions(), Time);
+}
+
+public sealed class InProcessWorkerRegistryTests : WorkerRegistryConformanceTests
+{
+    protected override ValueTask<IStorageProvider> CreateProviderAsync(TimeProvider timeProvider) =>
+        ValueTask.FromResult<IStorageProvider>(new InMemoryStorageProvider(timeProvider));
+
+    protected override IWorkerRegistry CreateRegistry() => new InMemoryWorkerRegistry(Time);
 }
