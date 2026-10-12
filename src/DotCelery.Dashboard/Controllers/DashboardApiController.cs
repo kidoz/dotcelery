@@ -112,8 +112,7 @@ public class DashboardApiController : ControllerBase
         CancellationToken cancellationToken = default
     )
     {
-        pageSize = Math.Min(pageSize, _options.PageSize);
-        var offset = (page - 1) * pageSize;
+        (page, pageSize, var offset) = ClampPaging(page, pageSize);
 
         IReadOnlyList<TaskSummary> tasks;
 
@@ -359,6 +358,11 @@ public class DashboardApiController : ControllerBase
             return BadRequest("Revocation store is not configured");
         }
 
+        if (ExceedsBulkLimit(request.TaskIds) is { } bulkLimitError)
+        {
+            return bulkLimitError;
+        }
+
         var taskIds = await ResolveTaskIdsAsync(request.TaskIds, request.Filter, cancellationToken);
         if (taskIds.Count == 0)
         {
@@ -423,6 +427,11 @@ public class DashboardApiController : ControllerBase
         if (_deadLetterStore is null)
         {
             return BadRequest("Dead letter store is not configured");
+        }
+
+        if (ExceedsBulkLimit(request.TaskIds) is { } bulkLimitError)
+        {
+            return bulkLimitError;
         }
 
         // For retry, we need task IDs from the dead letter store
@@ -493,8 +502,7 @@ public class DashboardApiController : ControllerBase
         CancellationToken cancellationToken = default
     )
     {
-        pageSize = Math.Min(pageSize, _options.PageSize);
-        var offset = (page - 1) * pageSize;
+        (page, pageSize, var offset) = ClampPaging(page, pageSize);
 
         var tasks = await GetFilteredTasksAsync(filter, pageSize, offset, cancellationToken);
 
@@ -508,6 +516,25 @@ public class DashboardApiController : ControllerBase
             }
         );
     }
+
+    // Paging is clamped so a request cannot ask for a page outside the configured bounds or
+    // overflow the offset
+    private (int Page, int PageSize, int Offset) ClampPaging(int page, int pageSize)
+    {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, Math.Max(1, _options.PageSize));
+
+        var offset = (long)(page - 1) * pageSize;
+        return (page, pageSize, offset > int.MaxValue ? int.MaxValue : (int)offset);
+    }
+
+    // A bulk operation may not affect more tasks than the configured limit
+    private BadRequestObjectResult? ExceedsBulkLimit(IReadOnlyList<string>? taskIds) =>
+        taskIds is { Count: > 0 } ids && ids.Count > _options.MaxBulkOperationSize
+            ? BadRequest(
+                $"A bulk operation can affect at most {_options.MaxBulkOperationSize} tasks."
+            )
+            : null;
 
     private async Task<IReadOnlyList<string>> ResolveTaskIdsAsync(
         IReadOnlyList<string>? explicitIds,
@@ -525,7 +552,12 @@ public class DashboardApiController : ControllerBase
             return [];
         }
 
-        var tasks = await GetFilteredTasksAsync(filter, 1000, 0, cancellationToken);
+        var tasks = await GetFilteredTasksAsync(
+            filter,
+            _options.MaxBulkOperationSize,
+            0,
+            cancellationToken
+        );
         return tasks.Select(t => t.TaskId).ToList();
     }
 
@@ -577,7 +609,13 @@ public class DashboardApiController : ControllerBase
         }
 
         var failedTasks = new List<TaskSummary>();
-        await foreach (var dlm in _deadLetterStore.GetAllAsync(1000, 0, cancellationToken))
+        await foreach (
+            var dlm in _deadLetterStore.GetAllAsync(
+                _options.MaxBulkOperationSize,
+                0,
+                cancellationToken
+            )
+        )
         {
             // Apply filter criteria
             if (
