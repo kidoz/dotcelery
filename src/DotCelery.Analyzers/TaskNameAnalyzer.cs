@@ -48,21 +48,8 @@ public sealed class TaskNameAnalyzer : DiagnosticAnalyzer
                 {
                     var namedType = (INamedTypeSymbol)symbolContext.Symbol;
 
-                    // Check if type implements ITask
-                    if (
-                        !namedType.AllInterfaces.Any(i =>
-                            SymbolEqualityComparer.Default.Equals(i.OriginalDefinition, iTaskSymbol)
-                            || i.OriginalDefinition?.AllInterfaces.Any(ii =>
-                                SymbolEqualityComparer.Default.Equals(ii, iTaskSymbol)
-                            ) == true
-                        )
-                    )
-                    {
-                        return;
-                    }
-
-                    // Skip abstract classes
-                    if (namedType.IsAbstract)
+                    // Skip types that do not implement ITask, and abstract base classes
+                    if (!IsTaskType(namedType, iTaskSymbol) || namedType.IsAbstract)
                     {
                         return;
                     }
@@ -77,56 +64,74 @@ public sealed class TaskNameAnalyzer : DiagnosticAnalyzer
                         );
                         symbolContext.ReportDiagnostic(diagnostic);
                     }
-
-                    // Find TaskName property
-                    var taskNameProperty = namedType
-                        .GetMembers("TaskName")
-                        .OfType<IPropertySymbol>()
-                        .FirstOrDefault(p => p.IsStatic);
-
-                    if (taskNameProperty == null)
-                    {
-                        // TaskName not found - compiler will catch this
-                        return;
-                    }
-
-                    // Get TaskName value from syntax
-                    var syntaxReference =
-                        taskNameProperty.DeclaringSyntaxReferences.FirstOrDefault();
-                    if (syntaxReference == null)
-                    {
-                        return;
-                    }
-
-                    var syntax = syntaxReference.GetSyntax();
-                    if (syntax is PropertyDeclarationSyntax propertyDecl)
-                    {
-                        var taskNameValue = ExtractTaskNameValue(propertyDecl);
-
-                        // Check if TaskName is empty or null
-                        if (taskNameValue == null || string.IsNullOrWhiteSpace(taskNameValue))
-                        {
-                            var diagnostic = Diagnostic.Create(
-                                DiagnosticDescriptors.TaskNameCannotBeEmpty,
-                                propertyDecl.Identifier.GetLocation(),
-                                namedType.Name
-                            );
-                            symbolContext.ReportDiagnostic(diagnostic);
-                            return;
-                        }
-
-                        taskNames
-                            .GetOrAdd(
-                                taskNameValue,
-                                _ => new System.Collections.Concurrent.ConcurrentBag<(
-                                    INamedTypeSymbol Type,
-                                    Location Location
-                                )>()
-                            )
-                            .Add((namedType, propertyDecl.Identifier.GetLocation()));
-                    }
                 },
                 SymbolKind.NamedType
+            );
+
+            // The TaskName value is evaluated through the semantic model, which a symbol action
+            // does not provide; it resolves literals, constant references, and folded constant
+            // expressions alike
+            compilationContext.RegisterSyntaxNodeAction(
+                syntaxContext =>
+                {
+                    var propertyDecl = (PropertyDeclarationSyntax)syntaxContext.Node;
+
+                    if (
+                        syntaxContext.SemanticModel.GetDeclaredSymbol(propertyDecl)
+                            is not IPropertySymbol property
+                        || !property.IsStatic
+                        || property.Name != "TaskName"
+                    )
+                    {
+                        return;
+                    }
+
+                    var namedType = property.ContainingType;
+                    if (
+                        namedType is null
+                        || !IsTaskType(namedType, iTaskSymbol)
+                        || namedType.IsAbstract
+                    )
+                    {
+                        return;
+                    }
+
+                    // A name that is not a compile-time constant cannot be evaluated here, so
+                    // only a constant is validated and tracked
+                    if (
+                        !TryGetTaskNameValue(
+                            propertyDecl,
+                            syntaxContext.SemanticModel,
+                            out var taskNameValue
+                        )
+                    )
+                    {
+                        return;
+                    }
+
+                    // Check if TaskName is empty
+                    if (string.IsNullOrWhiteSpace(taskNameValue))
+                    {
+                        var diagnostic = Diagnostic.Create(
+                            DiagnosticDescriptors.TaskNameCannotBeEmpty,
+                            propertyDecl.Identifier.GetLocation(),
+                            namedType.Name
+                        );
+                        syntaxContext.ReportDiagnostic(diagnostic);
+                        return;
+                    }
+
+                    taskNames
+                        .GetOrAdd(
+                            taskNameValue,
+                            _ => new System.Collections.Concurrent.ConcurrentBag<(
+                                INamedTypeSymbol Type,
+                                Location Location
+                            )>()
+                        )
+                        .Add((namedType, propertyDecl.Identifier.GetLocation()));
+                },
+                SyntaxKind.PropertyDeclaration
             );
 
             compilationContext.RegisterCompilationEndAction(endContext =>
@@ -156,46 +161,69 @@ public sealed class TaskNameAnalyzer : DiagnosticAnalyzer
         });
     }
 
-    private static string? ExtractTaskNameValue(PropertyDeclarationSyntax propertyDecl)
+    /// <summary>
+    /// Gets whether a type implements <c>ITask</c>, directly or through an interface it implements.
+    /// </summary>
+    private static bool IsTaskType(INamedTypeSymbol namedType, INamedTypeSymbol iTaskSymbol) =>
+        namedType.AllInterfaces.Any(i =>
+            SymbolEqualityComparer.Default.Equals(i.OriginalDefinition, iTaskSymbol)
+            || i.OriginalDefinition?.AllInterfaces.Any(ii =>
+                SymbolEqualityComparer.Default.Equals(ii, iTaskSymbol)
+            ) == true
+        );
+
+    /// <summary>
+    /// Gets the value of a TaskName property when it is a compile-time constant, which includes
+    /// string literals, references to constants, and constant expressions the compiler folds.
+    /// </summary>
+    private static bool TryGetTaskNameValue(
+        PropertyDeclarationSyntax propertyDecl,
+        SemanticModel semanticModel,
+        out string value
+    )
     {
-        // Handle: public static string TaskName => "value";
-        if (
-            propertyDecl.ExpressionBody?.Expression is LiteralExpressionSyntax literal
-            && literal.IsKind(SyntaxKind.StringLiteralExpression)
-        )
+        value = string.Empty;
+
+        var expression = GetValueExpression(propertyDecl);
+        if (expression is null)
         {
-            return literal.Token.ValueText;
+            return false;
         }
 
-        // Handle: public static string TaskName { get => "value"; }
+        var constant = semanticModel.GetConstantValue(expression);
+        if (!constant.HasValue)
+        {
+            // A name computed at run time cannot be evaluated here
+            return false;
+        }
+
+        value = constant.Value as string ?? string.Empty;
+        return true;
+    }
+
+    private static ExpressionSyntax? GetValueExpression(PropertyDeclarationSyntax propertyDecl)
+    {
+        // Handle: public static string TaskName => "value";
+        if (propertyDecl.ExpressionBody is not null)
+        {
+            return propertyDecl.ExpressionBody.Expression;
+        }
+
         var getter = propertyDecl.AccessorList?.Accessors.FirstOrDefault(a =>
             a.IsKind(SyntaxKind.GetAccessorDeclaration)
         );
 
-        if (
-            getter?.ExpressionBody?.Expression is LiteralExpressionSyntax getterLiteral
-            && getterLiteral.IsKind(SyntaxKind.StringLiteralExpression)
-        )
+        // Handle: public static string TaskName { get => "value"; }
+        if (getter?.ExpressionBody is not null)
         {
-            return getterLiteral.Token.ValueText;
+            return getter.ExpressionBody.Expression;
         }
 
         // Handle: public static string TaskName { get { return "value"; } }
-        if (getter?.Body != null)
-        {
-            var returnStatement = getter
-                .Body.Statements.OfType<ReturnStatementSyntax>()
-                .FirstOrDefault();
+        var returnStatement = getter
+            ?.Body?.Statements.OfType<ReturnStatementSyntax>()
+            .FirstOrDefault();
 
-            if (
-                returnStatement?.Expression is LiteralExpressionSyntax returnLiteral
-                && returnLiteral.IsKind(SyntaxKind.StringLiteralExpression)
-            )
-            {
-                return returnLiteral.Token.ValueText;
-            }
-        }
-
-        return null;
+        return returnStatement?.Expression;
     }
 }

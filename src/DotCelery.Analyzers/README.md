@@ -17,7 +17,10 @@ The analyzers will automatically be included in your project and run during comp
 #### DCEL001: Task name cannot be empty
 **Severity**: Error
 
-TaskName must be a non-empty string for proper routing.
+TaskName must be a non-empty string for proper routing. The name is evaluated through the
+semantic model, so string literals, references to constants, and constant expressions the
+compiler folds are all understood (and compared for DCEL002). A name computed at run time is
+left alone, since it cannot be evaluated here.
 
 ```csharp
 // ❌ Bad
@@ -30,6 +33,12 @@ public sealed class MyTask : ITask<Input, Output>
 public sealed class MyTask : ITask<Input, Output>
 {
     public static string TaskName => "my.task";
+}
+
+// ✅ Good
+public sealed class OtherTask : ITask<Input, Output>
+{
+    public static string TaskName => TaskNames.Other; // a constant reference
 }
 ```
 

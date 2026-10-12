@@ -102,6 +102,116 @@ public class TaskNameAnalyzerTests
     }
 
     [Fact]
+    public async Task ConstantAndFoldedTaskNames_AreAccepted()
+    {
+        const string test = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using DotCelery.Core.Abstractions;
+
+            public static class TaskNames
+            {
+                public const string Email = "email.send";
+            }
+
+            public sealed class EmailTask : ITask<TestInput, TestOutput>
+            {
+                public static string TaskName => TaskNames.Email;
+
+                public Task<TestOutput> ExecuteAsync(TestInput input, ITaskContext context, CancellationToken cancellationToken = default)
+                {
+                    return Task.FromResult(new TestOutput());
+                }
+            }
+
+            public sealed class SmsTask : ITask<TestInput, TestOutput>
+            {
+                public static string TaskName => "sms." + "send";
+
+                public Task<TestOutput> ExecuteAsync(TestInput input, ITaskContext context, CancellationToken cancellationToken = default)
+                {
+                    return Task.FromResult(new TestOutput());
+                }
+            }
+
+            public class TestInput { }
+            public class TestOutput { }
+            """;
+
+        await CSharpAnalyzerVerifier<TaskNameAnalyzer>.VerifyAnalyzerAsync(test);
+    }
+
+    [Fact]
+    public async Task ConstantTaskName_FoldsIntoDuplicateDetection()
+    {
+        const string test = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using DotCelery.Core.Abstractions;
+
+            public static class TaskNames
+            {
+                public const string Email = "email.send";
+            }
+
+            public sealed class TestTask1 : ITask<TestInput, TestOutput>
+            {
+                public static string TaskName => TaskNames.Email;
+
+                public Task<TestOutput> ExecuteAsync(TestInput input, ITaskContext context, CancellationToken cancellationToken = default)
+                {
+                    return Task.FromResult(new TestOutput());
+                }
+            }
+
+            public sealed class TestTask2 : ITask<TestInput, TestOutput>
+            {
+                public static string {|#0:TaskName|} => "email.send";
+
+                public Task<TestOutput> ExecuteAsync(TestInput input, ITaskContext context, CancellationToken cancellationToken = default)
+                {
+                    return Task.FromResult(new TestOutput());
+                }
+            }
+
+            public class TestInput { }
+            public class TestOutput { }
+            """;
+
+        await CSharpAnalyzerVerifier<TaskNameAnalyzer>.VerifyAnalyzerAsync(
+            test,
+            DiagnosticDescriptors.DuplicateTaskName
+        );
+    }
+
+    [Fact]
+    public async Task RuntimeTaskName_IsNotReportedAsEmpty()
+    {
+        const string test = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using DotCelery.Core.Abstractions;
+
+            public sealed class TestTask : ITask<TestInput, TestOutput>
+            {
+                public static string TaskName => BuildName();
+
+                private static string BuildName() => "runtime.task";
+
+                public Task<TestOutput> ExecuteAsync(TestInput input, ITaskContext context, CancellationToken cancellationToken = default)
+                {
+                    return Task.FromResult(new TestOutput());
+                }
+            }
+
+            public class TestInput { }
+            public class TestOutput { }
+            """;
+
+        await CSharpAnalyzerVerifier<TaskNameAnalyzer>.VerifyAnalyzerAsync(test);
+    }
+
+    [Fact]
     public async Task UnsealedTask_ReportsDiagnostic()
     {
         const string test = """
