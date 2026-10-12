@@ -10,7 +10,7 @@ A distributed task queue for .NET 10, inspired by Python's [Celery](https://docs
 
 ### Core Features
 - **Distributed Task Execution** - Execute tasks asynchronously across multiple workers
-- **Multiple Brokers** - RabbitMQ, Redis Streams, In-Memory (Azure Service Bus, Amazon SQS planned)
+- **Multiple Brokers** - RabbitMQ, Redis Streams, Amazon SQS, In-Memory (Azure Service Bus planned)
 - **Result Backends** - Redis, PostgreSQL, SQL Server, MongoDB, In-Memory
 - **Canvas Workflows** - Chain, Group, and Chord primitives, dispatched by workers
 - **Beat Scheduler** - Periodic task scheduling with cron and interval support
@@ -45,6 +45,7 @@ dotnet add package DotCelery.Core
 dotnet add package DotCelery.Client
 dotnet add package DotCelery.Worker
 dotnet add package DotCelery.Broker.RabbitMQ
+dotnet add package DotCelery.Broker.Sqs
 dotnet add package DotCelery.Backend.Redis
 ```
 
@@ -686,6 +687,7 @@ dotcelery/
 |--------|---------|
 | RabbitMQ | 3.8+ |
 | Redis | 5.0+ (Streams) |
+| Amazon SQS | Standard queues (LocalStack is used for the tests) |
 
 ### Backend Requirements
 

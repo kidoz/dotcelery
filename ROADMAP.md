@@ -15,7 +15,8 @@ but do not yet behave as documented.
 ### Brokers
 - Redis broker (Redis Streams with consumer groups)
 - RabbitMQ publisher confirms, mandatory routing, and configurable queue arguments (queue type, dead-lettering, TTL, length, overflow, priority depth)
-- One broker contract, held to the same behavior by every broker through a shared conformance suite (in-memory in the unit suite, RabbitMQ and Redis against containers), and `IBrokerCapabilities` for what a broker guarantees beyond it
+- One broker contract, held to the same behavior by every broker through a shared conformance suite (in-memory in the unit suite, RabbitMQ, Redis, and Amazon SQS against containers), and `IBrokerCapabilities` for what a broker guarantees beyond it
+- Amazon SQS broker: delivery delay for scheduled messages, visibility renewal while a task runs, discard on rejection with the queue's redrive policy for dead-lettering, and its declared capabilities
 
 ### Serialization
 - Source-generated JSON contexts for core message types (`DotCeleryJsonContext`)
@@ -55,9 +56,7 @@ but do not yet behave as documented.
 ## Planned Features
 
 ### Brokers
-- Azure Service Bus broker
-- Amazon SQS broker
-- Broker contract extensions these require: lease renewal for long-running tasks, native delayed delivery, and explicit dead-letter versus discard; the shared contract suite and `IBrokerCapabilities` they build on are in place
+- Azure Service Bus broker, with the contract extensions the other brokers have (lease renewal for long-running tasks, native delayed delivery, and explicit dead-letter versus discard); it has no portable local emulator, so a decision is needed on how its contract tests run
 
 ### Serialization
 - Pluggable serializers (MessagePack/Protobuf); brokers currently hard-code the JSON envelope
