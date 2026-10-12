@@ -25,6 +25,7 @@ public sealed class RabbitMQBroker : IMessageBroker
     private readonly ILogger<RabbitMQBroker> _logger;
     private readonly IDeadLetterStore? _deadLetterStore;
     private readonly IMessageSecurityValidator? _messageSecurityValidator;
+    private readonly IReadOnlyDictionary<string, object?> _queueArguments;
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly SemaphoreSlim _publishChannelLock = new(1, 1);
 
@@ -57,6 +58,10 @@ public sealed class RabbitMQBroker : IMessageBroker
         _logger = logger;
         _deadLetterStore = deadLetterStore;
         _messageSecurityValidator = messageSecurityValidator;
+
+        // Snapshot the arguments, so later edits to the options do not change what queues are
+        // declared with
+        _queueArguments = new Dictionary<string, object?>(_options.QueueArguments);
     }
 
     /// <inheritdoc />
@@ -653,10 +658,7 @@ public sealed class RabbitMQBroker : IMessageBroker
                 durable: _options.DurableQueues,
                 exclusive: false,
                 autoDelete: false,
-                arguments: new Dictionary<string, object?>
-                {
-                    ["x-max-priority"] = 10, // Enable priority queues
-                },
+                arguments: new Dictionary<string, object?>(_queueArguments),
                 cancellationToken: cancellationToken
             )
             .ConfigureAwait(false);

@@ -38,6 +38,22 @@ public sealed class RabbitMQBrokerOptions
     public bool DurableQueues { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets the arguments queues are declared with. The defaults declare a priority
+    /// queue (<c>x-max-priority: 10</c>). Set them to configure the queue type
+    /// (<c>x-queue-type: "quorum"</c>), a broker-level dead-letter exchange
+    /// (<c>x-dead-letter-exchange</c> and <c>x-dead-letter-routing-key</c>), a message time to
+    /// live in milliseconds (<c>x-message-ttl</c>), a maximum length (<c>x-max-length</c>), the
+    /// overflow policy (<c>x-overflow</c>) or any other broker argument. A queue that exists
+    /// with different arguments is not redeclared: the broker refuses the declaration, which is
+    /// reported as an error.
+    /// </summary>
+    public IDictionary<string, object?> QueueArguments
+    {
+        get;
+        set => field = value ?? throw new ArgumentNullException(nameof(value));
+    } = new Dictionary<string, object?> { ["x-max-priority"] = 10 };
+
+    /// <summary>
     /// Gets or sets the default exchange name. Empty string uses the default exchange.
     /// </summary>
     public string Exchange { get; set; } = "";

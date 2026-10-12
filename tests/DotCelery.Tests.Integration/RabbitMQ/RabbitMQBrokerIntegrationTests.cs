@@ -4,6 +4,7 @@ using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using RabbitMQ.Client;
 using Testcontainers.RabbitMq;
 
 namespace DotCelery.Tests.Integration.RabbitMQ;
@@ -293,6 +294,89 @@ public class RabbitMQBrokerIntegrationTests : IAsyncLifetime
         Assert.Equal("custom-queue", received.Queue);
     }
 
+    [Fact]
+    public async Task Queues_AreDeclaredWithTheConfiguredArguments()
+    {
+        var options = Options.Create(
+            new RabbitMQBrokerOptions
+            {
+                ConnectionString = _container.GetConnectionString(),
+                QueueArguments = new Dictionary<string, object?>
+                {
+                    ["x-max-priority"] = 5,
+                    ["x-message-ttl"] = 60_000,
+                },
+            }
+        );
+        await using var broker = new RabbitMQBroker(options, CreateLogger());
+
+        // Publishing declares the queue with the configured arguments
+        await broker.PublishAsync(CreateTestMessage() with { Queue = "queue-arguments" });
+
+        await AssertQueueArgumentsAsync(
+            "queue-arguments",
+            new Dictionary<string, object?> { ["x-max-priority"] = 5, ["x-message-ttl"] = 60_000 },
+            new Dictionary<string, object?> { ["x-message-ttl"] = 60_000 }
+        );
+    }
+
+    [Fact]
+    public async Task Queues_UseTheDefaultPriorityArgumentWhenNotConfigured()
+    {
+        await _broker!.PublishAsync(CreateTestMessage());
+
+        await AssertQueueArgumentsAsync(
+            "celery",
+            new Dictionary<string, object?> { ["x-max-priority"] = 10 },
+            new Dictionary<string, object?> { ["x-max-priority"] = 9 }
+        );
+    }
+
+    /// <summary>
+    /// Proves which arguments a queue was declared with: declaring it again with the same
+    /// arguments succeeds, and with different ones the broker refuses the declaration
+    /// (PRECONDITION_FAILED).
+    /// </summary>
+    private async Task AssertQueueArgumentsAsync(
+        string queue,
+        Dictionary<string, object?> matching,
+        Dictionary<string, object?> mismatching
+    )
+    {
+        var factory = new ConnectionFactory { Uri = new Uri(_container.GetConnectionString()) };
+        await using var connection = await factory.CreateConnectionAsync();
+
+        await using (var channel = await connection.CreateChannelAsync())
+        {
+            await channel.QueueDeclareAsync(
+                queue: queue,
+                durable: true,
+                exclusive: false,
+                autoDelete: false,
+                arguments: matching
+            );
+        }
+
+        await using (var channel = await connection.CreateChannelAsync())
+        {
+            var mismatch = await Assert.ThrowsAnyAsync<Exception>(() =>
+                channel.QueueDeclareAsync(
+                    queue: queue,
+                    durable: true,
+                    exclusive: false,
+                    autoDelete: false,
+                    arguments: mismatching
+                )
+            );
+
+            Assert.Contains(
+                "PRECONDITION_FAILED",
+                mismatch.ToString(),
+                StringComparison.OrdinalIgnoreCase
+            );
+        }
+    }
+
     private static TaskMessage CreateTestMessage() =>
         new()
         {
@@ -303,4 +387,7 @@ public class RabbitMQBrokerIntegrationTests : IAsyncLifetime
             Timestamp = DateTimeOffset.UtcNow,
             Queue = "celery",
         };
+
+    private static ILogger<RabbitMQBroker> CreateLogger() =>
+        LoggerFactory.Create(builder => builder.AddConsole()).CreateLogger<RabbitMQBroker>();
 }
