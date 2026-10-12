@@ -25,6 +25,7 @@ public sealed class InMemoryBroker : IMessageBroker, IBrokerCapabilities
     private readonly ConcurrentDictionary<string, Channel<BrokerMessage>> _queues = new();
     private readonly InMemoryBrokerOptions _options;
     private readonly IMessageSecurityValidator? _messageSecurityValidator;
+    private readonly IQueueMetrics? _queueMetrics;
     private readonly Lock _lock = new();
 
     // A delivered message that has not been settled, and the consumer it was delivered to
@@ -43,17 +44,20 @@ public sealed class InMemoryBroker : IMessageBroker, IBrokerCapabilities
     /// </summary>
     /// <param name="options">The broker options.</param>
     /// <param name="messageSecurityValidator">Optional message security validator.</param>
+    /// <param name="queueMetrics">Optional queue metrics store the publishes are recorded in.</param>
     public InMemoryBroker(
         IOptions<InMemoryBrokerOptions> options,
-        IMessageSecurityValidator? messageSecurityValidator = null
+        IMessageSecurityValidator? messageSecurityValidator = null,
+        IQueueMetrics? queueMetrics = null
     )
     {
         _options = options.Value;
         _messageSecurityValidator = messageSecurityValidator;
+        _queueMetrics = queueMetrics;
     }
 
     /// <inheritdoc />
-    public ValueTask PublishAsync(
+    public async ValueTask PublishAsync(
         TaskMessage message,
         CancellationToken cancellationToken = default
     )
@@ -75,7 +79,12 @@ public sealed class InMemoryBroker : IMessageBroker, IBrokerCapabilities
             Signature = _messageSecurityValidator?.Sign(rawBody),
         };
 
-        return channel.Writer.WriteAsync(brokerMessage, cancellationToken);
+        await channel.Writer.WriteAsync(brokerMessage, cancellationToken).ConfigureAwait(false);
+
+        // The message is in the queue, so the queue's waiting count follows what was published
+        await _queueMetrics
+            .RecordEnqueueAsync(message.Queue, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <inheritdoc />

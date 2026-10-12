@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using DotCelery.Broker.Redis;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
+using DotCelery.Tests.Conformance.Stores;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
@@ -695,7 +696,10 @@ public class RedisBrokerIntegrationTests : IAsyncLifetime
         Assert.DoesNotContain(received, m => m.Message.Id == taken.Message.Id);
     }
 
-    private RedisBroker CreateBroker(Action<RedisBrokerOptions>? configure = null)
+    private RedisBroker CreateBroker(
+        Action<RedisBrokerOptions>? configure = null,
+        IQueueMetrics? queueMetrics = null
+    )
     {
         var options = new RedisBrokerOptions
         {
@@ -710,7 +714,31 @@ public class RedisBrokerIntegrationTests : IAsyncLifetime
             .Create(builder => builder.AddConsole())
             .CreateLogger<RedisBroker>();
 
-        return new RedisBroker(Options.Create(options), logger);
+        return new RedisBroker(Options.Create(options), logger, queueMetrics: queueMetrics);
+    }
+
+    [Fact]
+    public async Task PublishAsync_WithQueueMetrics_RecordsTheEnqueue()
+    {
+        var metrics = new RecordingQueueMetrics();
+        await using var broker = CreateBroker(queueMetrics: metrics);
+
+        await broker.PublishAsync(CreateTestMessage() with { Queue = "metrics-queue" });
+
+        Assert.Equal(1, metrics.CountOf("metrics-queue"));
+    }
+
+    [Fact]
+    public async Task PublishAsync_OfAnOversizedMessage_RecordsNothing()
+    {
+        var metrics = new RecordingQueueMetrics();
+        await using var broker = CreateBroker(o => o.MaxMessageSizeBytes = 1, metrics);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await broker.PublishAsync(CreateTestMessage())
+        );
+
+        Assert.Empty(metrics.Enqueued);
     }
 
     private async Task<BrokerMessage> PublishUntilReceivedAsync(

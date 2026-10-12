@@ -50,6 +50,7 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
     private readonly ILogger<SqsBroker> _logger;
     private readonly IDeadLetterStore? _deadLetterStore;
     private readonly IMessageSecurityValidator? _messageSecurityValidator;
+    private readonly IQueueMetrics? _queueMetrics;
     private readonly AmazonSQSClient _client;
     private readonly ConcurrentDictionary<string, string> _queueUrls = new(StringComparer.Ordinal);
     private bool _disposed;
@@ -61,11 +62,13 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
     /// <param name="logger">The logger.</param>
     /// <param name="deadLetterStore">Optional dead letter store for messages that cannot be read.</param>
     /// <param name="messageSecurityValidator">Optional message security validator.</param>
+    /// <param name="queueMetrics">Optional queue metrics store the publishes are recorded in.</param>
     public SqsBroker(
         IOptions<SqsBrokerOptions> options,
         ILogger<SqsBroker> logger,
         IDeadLetterStore? deadLetterStore = null,
-        IMessageSecurityValidator? messageSecurityValidator = null
+        IMessageSecurityValidator? messageSecurityValidator = null,
+        IQueueMetrics? queueMetrics = null
     )
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -74,6 +77,7 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
         _logger = logger;
         _deadLetterStore = deadLetterStore;
         _messageSecurityValidator = messageSecurityValidator;
+        _queueMetrics = queueMetrics;
 
         var config = new AmazonSQSConfig
         {
@@ -147,6 +151,11 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
         }
 
         await _client.SendMessageAsync(request, cancellationToken).ConfigureAwait(false);
+
+        // The message is accepted by the queue, so its waiting count follows what was published
+        await _queueMetrics
+            .RecordEnqueueAsync(message.Queue, _logger, cancellationToken)
+            .ConfigureAwait(false);
 
         _logger.LogDebug(
             "Published message {MessageId} to queue {Queue}",

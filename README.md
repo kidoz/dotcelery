@@ -535,10 +535,13 @@ What the dashboard shows out of the box:
 - **Tasks** — every task a dashboard host runs is recorded (id, name, state, worker, timings,
   error) and expires after `DashboardOptions.TaskRecordRetention`. Listing by state and counting
   states are indexed; listing by name scans the retained records.
-- **Queues** — waiting/running/processed counts from the queue metrics store, so
-  `UseQueueMetrics()` is what fills this panel, and the consumers of each queue from the worker
-  registry: the online workers whose registered queues contain it (a queue no online worker lists
-  keeps what the metrics store reports, which is zero for the bundled stores).
+- **Queues** — waiting/running/processed counts from the queue metrics store. The bundled
+  brokers record each message they publish as it enters its queue and `UseQueueMetrics()` records
+  the tasks that start and finish, so a queue's waiting count follows the messages in it; a host
+  that only sends tasks records its publishes too once it registers a queue metrics store. The
+  consumers of each queue come from the worker registry: the online workers whose registered
+  queues contain it (a queue no online worker lists keeps what the metrics store reports, which
+  is zero for the bundled stores).
 - **Metrics** — the window aggregated from the historical data store when one is registered
   (`DashboardMetricsCollector` records per-queue snapshots every
   `DashboardOptions.MetricsSnapshotInterval`), and otherwise computed live from the task

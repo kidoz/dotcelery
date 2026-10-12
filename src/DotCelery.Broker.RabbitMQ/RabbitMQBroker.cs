@@ -25,6 +25,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
     private readonly ILogger<RabbitMQBroker> _logger;
     private readonly IDeadLetterStore? _deadLetterStore;
     private readonly IMessageSecurityValidator? _messageSecurityValidator;
+    private readonly IQueueMetrics? _queueMetrics;
     private readonly IReadOnlyDictionary<string, object?> _queueArguments;
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly SemaphoreSlim _publishChannelLock = new(1, 1);
@@ -47,17 +48,20 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
     /// <param name="logger">The logger.</param>
     /// <param name="deadLetterStore">Optional dead letter store for deserialization failures.</param>
     /// <param name="messageSecurityValidator">Optional message security validator.</param>
+    /// <param name="queueMetrics">Optional queue metrics store the publishes are recorded in.</param>
     public RabbitMQBroker(
         IOptions<RabbitMQBrokerOptions> options,
         ILogger<RabbitMQBroker> logger,
         IDeadLetterStore? deadLetterStore = null,
-        IMessageSecurityValidator? messageSecurityValidator = null
+        IMessageSecurityValidator? messageSecurityValidator = null,
+        IQueueMetrics? queueMetrics = null
     )
     {
         _options = options.Value;
         _logger = logger;
         _deadLetterStore = deadLetterStore;
         _messageSecurityValidator = messageSecurityValidator;
+        _queueMetrics = queueMetrics;
 
         // Snapshot the arguments, so later edits to the options do not change what queues are
         // declared with
@@ -132,6 +136,11 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
                 body: body,
                 cancellationToken: cancellationToken
             )
+            .ConfigureAwait(false);
+
+        // The publish is confirmed, so the message is in the queue and its waiting count follows
+        await _queueMetrics
+            .RecordEnqueueAsync(message.Queue, _logger, cancellationToken)
             .ConfigureAwait(false);
 
         _logger.LogDebug(

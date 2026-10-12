@@ -6,6 +6,7 @@ using DotCelery.Core.Models;
 using DotCelery.Core.Serialization;
 using DotCelery.Core.Storage.Stores;
 using DotCelery.Tests.Conformance.Brokers;
+using DotCelery.Tests.Conformance.Stores;
 using DotCelery.Worker;
 using DotCelery.Worker.Execution;
 using DotCelery.Worker.Filters;
@@ -77,6 +78,38 @@ public sealed class SqsBrokerIntegrationTests(LocalStackFixture fixture) : IAsyn
     }
 
     public async ValueTask DisposeAsync() => await _broker.DisposeAsync();
+
+    [Fact]
+    public async Task PublishAsync_WithQueueMetrics_RecordsTheEnqueue()
+    {
+        var metrics = new RecordingQueueMetrics();
+        await using var broker = SqsConformanceBroker.Create(fixture, metrics);
+        var queue = $"metrics-{Guid.NewGuid():N}";
+
+        await broker.PublishAsync(SqsConformanceBroker.CreateMessage(queue));
+
+        Assert.Equal(1, metrics.CountOf(queue));
+    }
+
+    [Fact]
+    public async Task PublishAsync_OfAnOversizedMessage_RecordsNothing()
+    {
+        var metrics = new RecordingQueueMetrics();
+        await using var broker = SqsConformanceBroker.Create(fixture, metrics);
+        var queue = $"metrics-{Guid.NewGuid():N}";
+
+        // A message over the broker's limit is refused before it reaches the queue
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await broker.PublishAsync(
+                SqsConformanceBroker.CreateMessage(queue) with
+                {
+                    Args = new byte[300_000],
+                }
+            )
+        );
+
+        Assert.Empty(metrics.Enqueued);
+    }
 
     [Fact]
     public void TheBroker_DeclaresItsCapabilities()
@@ -239,7 +272,21 @@ public sealed class SqsBrokerIntegrationTests(LocalStackFixture fixture) : IAsyn
 /// </summary>
 internal static class SqsConformanceBroker
 {
-    public static SqsBroker Create(LocalStackFixture fixture) =>
+    /// <summary>
+    /// Creates a message for a queue.
+    /// </summary>
+    public static TaskMessage CreateMessage(string queue) =>
+        new()
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Task = "tests.metrics",
+            Args = "{}"u8.ToArray(),
+            ContentType = "application/json",
+            Timestamp = DateTimeOffset.UtcNow,
+            Queue = queue,
+        };
+
+    public static SqsBroker Create(LocalStackFixture fixture, IQueueMetrics? queueMetrics = null) =>
         new(
             Options.Create(
                 new SqsBrokerOptions
@@ -253,6 +300,7 @@ internal static class SqsConformanceBroker
                     WaitTime = TimeSpan.FromSeconds(1),
                 }
             ),
-            NullLogger<SqsBroker>.Instance
+            NullLogger<SqsBroker>.Instance,
+            queueMetrics: queueMetrics
         );
 }

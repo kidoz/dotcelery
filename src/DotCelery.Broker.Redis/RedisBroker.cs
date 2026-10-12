@@ -23,6 +23,7 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
     private readonly RedisBrokerOptions _options;
     private readonly ILogger<RedisBroker> _logger;
     private readonly IMessageSecurityValidator? _messageSecurityValidator;
+    private readonly IQueueMetrics? _queueMetrics;
     private readonly string _consumerName;
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly HashSet<string> _initializedGroups = [];
@@ -49,15 +50,18 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
     /// <param name="options">The broker options.</param>
     /// <param name="logger">The logger.</param>
     /// <param name="messageSecurityValidator">Optional message security validator.</param>
+    /// <param name="queueMetrics">Optional queue metrics store the publishes are recorded in.</param>
     public RedisBroker(
         IOptions<RedisBrokerOptions> options,
         ILogger<RedisBroker> logger,
-        IMessageSecurityValidator? messageSecurityValidator = null
+        IMessageSecurityValidator? messageSecurityValidator = null,
+        IQueueMetrics? queueMetrics = null
     )
     {
         _options = options.Value;
         _logger = logger;
         _messageSecurityValidator = messageSecurityValidator;
+        _queueMetrics = queueMetrics;
         _consumerName =
             _options.ConsumerName ?? $"{Environment.MachineName}-{Environment.ProcessId}";
 
@@ -130,6 +134,11 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
         {
             await db.StreamAddAsync(streamKey, entries).ConfigureAwait(false);
         }
+
+        // The entry is in the stream, so the queue's waiting count follows what was published
+        await _queueMetrics
+            .RecordEnqueueAsync(message.Queue, _logger, cancellationToken)
+            .ConfigureAwait(false);
 
         _logger.LogDebug("Published message {MessageId} to stream {Stream}", message.Id, streamKey);
     }

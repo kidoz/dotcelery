@@ -105,8 +105,12 @@ public interface IQueueMetrics
     );
 
     /// <summary>
-    /// Records a message being enqueued.
+    /// Records a message being enqueued, for a queue that is filled outside a broker.
     /// </summary>
+    /// <remarks>
+    /// The bundled brokers record what they publish themselves, so an application that also
+    /// calls this for a published message counts that message twice.
+    /// </remarks>
     /// <param name="queue">The queue name.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     ValueTask RecordEnqueuedAsync(string queue, CancellationToken cancellationToken = default);

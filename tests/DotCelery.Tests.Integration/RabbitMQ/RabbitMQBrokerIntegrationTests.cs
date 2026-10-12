@@ -2,6 +2,7 @@ using System.Threading.Channels;
 using DotCelery.Broker.RabbitMQ;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
+using DotCelery.Tests.Conformance.Stores;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
@@ -375,6 +376,48 @@ public class RabbitMQBrokerIntegrationTests : IAsyncLifetime
                 StringComparison.OrdinalIgnoreCase
             );
         }
+    }
+
+    [Fact]
+    public async Task PublishAsync_WithQueueMetrics_RecordsTheEnqueue()
+    {
+        var metrics = new RecordingQueueMetrics();
+        await using var broker = new RabbitMQBroker(
+            Options.Create(
+                new RabbitMQBrokerOptions { ConnectionString = _container.GetConnectionString() }
+            ),
+            CreateLogger(),
+            queueMetrics: metrics
+        );
+
+        await broker.PublishAsync(CreateTestMessage() with { Queue = "metrics-queue" });
+        await broker.PublishAsync(CreateTestMessage() with { Queue = "metrics-queue" });
+
+        Assert.Equal(2, metrics.CountOf("metrics-queue"));
+        Assert.DoesNotContain(metrics.Enqueued, queue => queue != "metrics-queue");
+    }
+
+    [Fact]
+    public async Task PublishAsync_OfAnOversizedMessage_RecordsNothing()
+    {
+        var metrics = new RecordingQueueMetrics();
+        await using var broker = new RabbitMQBroker(
+            Options.Create(
+                new RabbitMQBrokerOptions
+                {
+                    ConnectionString = _container.GetConnectionString(),
+                    MaxMessageSizeBytes = 1,
+                }
+            ),
+            CreateLogger(),
+            queueMetrics: metrics
+        );
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await broker.PublishAsync(CreateTestMessage())
+        );
+
+        Assert.Empty(metrics.Enqueued);
     }
 
     private static TaskMessage CreateTestMessage() =>

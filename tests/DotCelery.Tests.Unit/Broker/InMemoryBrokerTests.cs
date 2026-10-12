@@ -1,6 +1,8 @@
 using DotCelery.Broker.InMemory;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
+using DotCelery.Tests.Conformance.Stores;
+using Microsoft.Extensions.Options;
 
 namespace DotCelery.Tests.Unit.Broker;
 
@@ -177,6 +179,38 @@ public class InMemoryBrokerTests : IAsyncDisposable
         _broker.PurgeQueue("celery");
 
         Assert.Equal(0, _broker.GetQueueLength("celery"));
+    }
+
+    [Fact]
+    public async Task PublishAsync_WithQueueMetrics_RecordsTheEnqueueOfTheQueue()
+    {
+        var metrics = new RecordingQueueMetrics();
+        await using var broker = new InMemoryBroker(
+            Options.Create(new InMemoryBrokerOptions()),
+            queueMetrics: metrics
+        );
+
+        await broker.PublishAsync(CreateTestMessage() with { Queue = "priority" });
+        await broker.PublishAsync(CreateTestMessage() with { Queue = "priority" });
+        await broker.PublishAsync(CreateTestMessage());
+
+        Assert.Equal(2, metrics.CountOf("priority"));
+        Assert.Equal(1, metrics.CountOf("celery"));
+    }
+
+    [Fact]
+    public async Task PublishAsync_WhenTheMetricsStoreIsDown_StillPublishes()
+    {
+        var metrics = new RecordingQueueMetrics { Fail = true };
+        await using var broker = new InMemoryBroker(
+            Options.Create(new InMemoryBrokerOptions()),
+            queueMetrics: metrics
+        );
+
+        await broker.PublishAsync(CreateTestMessage());
+
+        Assert.Equal(1, broker.GetQueueLength("celery"));
+        Assert.Empty(metrics.Enqueued);
     }
 
     public async ValueTask DisposeAsync()
