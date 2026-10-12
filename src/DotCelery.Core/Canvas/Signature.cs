@@ -7,7 +7,7 @@ namespace DotCelery.Core.Canvas;
 /// <summary>
 /// Represents a task signature - a blueprint for a task invocation.
 /// </summary>
-public class Signature
+public class Signature : CanvasPrimitive
 {
     /// <summary>
     /// Gets or sets the task name.
@@ -136,6 +136,17 @@ public class Signature
     /// Gets the error callback signature.
     /// </summary>
     public Signature? LinkError { get; init; }
+
+    /// <inheritdoc />
+    // A signature carried on a message holds only its inputs, so its primitive type is not sent
+    [JsonIgnore]
+    public override CanvasType Type => CanvasType.Signature;
+
+    /// <inheritdoc />
+    public override IEnumerable<Signature> GetSignatures()
+    {
+        yield return this;
+    }
 
     /// <summary>
     /// Gets the input of this signature when it carries a typed one, or <c>null</c>.

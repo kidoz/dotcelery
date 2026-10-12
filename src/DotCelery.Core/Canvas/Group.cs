@@ -4,48 +4,13 @@ namespace DotCelery.Core.Canvas;
 /// Represents a group of tasks executed in parallel.
 /// All tasks in the group run concurrently and their results are collected.
 /// </summary>
+/// <remarks>
+/// A member is any canvas primitive: a signature, a chain, or another group. A nested group
+/// is flattened into its members by the client that sends the canvas.
+/// </remarks>
 public sealed class Group : CanvasPrimitive
 {
     private readonly List<CanvasPrimitive> _members;
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="Group"/> class.
-    /// </summary>
-    /// <param name="signatures">The signatures to execute in parallel.</param>
-    public Group(IEnumerable<Signature> signatures)
-    {
-        ArgumentNullException.ThrowIfNull(signatures);
-        _members = signatures.Select(s => (CanvasPrimitive)new SignatureWrapper(s)).ToList();
-
-        if (_members.Count == 0)
-        {
-            throw new ArgumentException(
-                "Group must contain at least one task.",
-                nameof(signatures)
-            );
-        }
-    }
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="Group"/> class using params span (zero-allocation).
-    /// </summary>
-    /// <param name="signatures">The signatures to execute in parallel.</param>
-    public Group(params ReadOnlySpan<Signature> signatures)
-    {
-        if (signatures.IsEmpty)
-        {
-            throw new ArgumentException(
-                "Group must contain at least one task.",
-                nameof(signatures)
-            );
-        }
-
-        _members = new List<CanvasPrimitive>(signatures.Length);
-        foreach (var signature in signatures)
-        {
-            _members.Add(new SignatureWrapper(signature));
-        }
-    }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="Group"/> class with canvas primitives.
@@ -79,11 +44,7 @@ public sealed class Group : CanvasPrimitive
             );
         }
 
-        _members = new List<CanvasPrimitive>(primitives.Length);
-        foreach (var primitive in primitives)
-        {
-            _members.Add(primitive);
-        }
+        _members = [.. primitives];
     }
 
     /// <summary>
@@ -110,18 +71,6 @@ public sealed class Group : CanvasPrimitive
     /// Gets the number of members in the group.
     /// </summary>
     public int Count => _members.Count;
-
-    /// <summary>
-    /// Adds another signature to run in parallel.
-    /// </summary>
-    /// <param name="signature">The signature to add.</param>
-    /// <returns>This group for fluent chaining.</returns>
-    public Group And(Signature signature)
-    {
-        ArgumentNullException.ThrowIfNull(signature);
-        _members.Add(new SignatureWrapper(signature));
-        return this;
-    }
 
     /// <summary>
     /// Adds another primitive to run in parallel.
@@ -187,26 +136,6 @@ public sealed class Group : CanvasPrimitive
     public override IEnumerable<Signature> GetSignatures()
     {
         return _members.SelectMany(m => m.GetSignatures());
-    }
-}
-
-/// <summary>
-/// Wrapper to treat a Signature as a CanvasPrimitive.
-/// </summary>
-internal sealed class SignatureWrapper : CanvasPrimitive
-{
-    public SignatureWrapper(Signature signature)
-    {
-        Signature = signature;
-    }
-
-    public Signature Signature { get; }
-
-    public override CanvasType Type => CanvasType.Signature;
-
-    public override IEnumerable<Signature> GetSignatures()
-    {
-        yield return Signature;
     }
 }
 

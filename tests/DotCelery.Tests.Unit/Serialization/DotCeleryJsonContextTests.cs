@@ -246,6 +246,14 @@ public class DotCeleryJsonContextTests
         Assert.NotNull(deserialized);
         Assert.Equal("test.task", deserialized.TaskName);
         Assert.Equal("high-priority", deserialized.Queue);
+
+        // A signature carried on a message holds only its inputs, not its canvas type or the
+        // other computed properties
+        using var document = JsonDocument.Parse(json);
+        Assert.DoesNotContain(
+            document.RootElement.EnumerateObject(),
+            property => property.Name is "type" or "link" or "hasLink" or "effectiveEta"
+        );
     }
 
     [Fact]
