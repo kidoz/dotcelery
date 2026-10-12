@@ -37,8 +37,8 @@ but do not yet behave as documented.
 - Circuit breakers gate consumption per queue, with the global breaker covering failures that affected every queue; infrastructure failures feed both, and a task's own failure is left to its retries
 
 ### Dashboard
-- Workers register themselves with the dashboard's registry and heartbeat their live active and processed task counts; the registry marks workers that miss their heartbeat budget unresponsive and then removes them
-- Built-in data providers: queue statistics from the queue metrics store, a task record store (written from task signals, expiring on a retention) behind the task list, state counts, and task names, and metrics from the historical data store or computed live from the records, with a collector recording per-queue snapshots
+- Workers register themselves with the dashboard's registry and heartbeat their live active and processed task counts; the registry marks workers that miss their heartbeat budget unresponsive and then removes them. It is in-process by default, and `AddRedisWorkerRegistry`, `AddPostgresWorkerRegistry`, `AddSqlServerWorkerRegistry`, `AddMongoWorkerRegistry`, and `AddInMemoryWorkerRegistry` register one built on the storage primitives, which every host sharing that storage sees and which the same conformance tests hold to the same behavior on every provider
+- Built-in data providers: queue statistics from the queue metrics store with the consumers of each queue counted from the worker registry, a task record store (written from task signals, expiring on a retention) behind the task list, state counts, and task names, and metrics from the historical data store or computed live from the records, with a collector recording per-queue snapshots
 - Task state changes and worker status changes are pushed over SignalR; the middleware passes API and hub paths through to their endpoints
 
 ## Known Gaps
@@ -48,7 +48,7 @@ but do not yet behave as documented.
 
 ### Incomplete Documented Features
 - Canvas: a chord cannot be a member of a group, and a group cannot be a step of a chain — `Group.Then` builds a chain whose first step is the internal group placeholder, which the client publishes as a `__group__` task no worker can run. Following a group with a task is written as a chord (`WithCallback`)
-- Dashboard: the built-in in-memory worker registry sees only workers in its own process, so a distributed deployment needs a shared `IWorkerRegistry`; listing tasks by name scans the retained records (only listing by state is indexed); queue waiting counts are zero unless the application records enqueues, and consumer counts are always zero; historical metrics have no per-task breakdown, so the metrics panel's per-task view only fills live from the task records
+- Dashboard: the default worker registry is in-process, and so are the consumer counts taken from it, so a deployment whose workers run elsewhere registers a registry on shared storage; listing tasks by name scans the retained records (only listing by state is indexed); queue waiting counts are zero unless the application records enqueues; historical metrics have no per-task breakdown, so the metrics panel's per-task view only fills live from the task records
 
 ### Security Hardening
 - A signed message can be replayed after `MessageSecurityOptions.MaxMessageAge` and the inbox retention have passed; an ID cannot be refused once its inbox record expires

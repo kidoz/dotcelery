@@ -5,6 +5,7 @@ using DotCelery.Dashboard.Middleware;
 using DotCelery.Dashboard.Routing;
 using DotCelery.Dashboard.Security;
 using DotCelery.Dashboard.Services;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace DotCelery.Dashboard.Extensions;
 
@@ -33,8 +34,9 @@ public static class DashboardExtensions
             services.Configure(configure);
         }
 
-        // Register dashboard services
-        services.AddSingleton<IWorkerRegistry, InMemoryWorkerRegistry>();
+        // Register dashboard services. A registry the application already registered, such as a
+        // shared one, wins over the in-process default
+        services.TryAddSingleton<IWorkerRegistry, InMemoryWorkerRegistry>();
         AddDashboardServices(services, routeOptions);
 
         return services;

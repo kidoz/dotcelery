@@ -509,6 +509,10 @@ builder.Services.AddDotCelery(celery =>
         .AddWorker()
         .UseQueueMetrics());
 
+// Every worker and dashboard configured with this storage shares the registry, so the dashboard
+// sees workers in other processes; without one it sees the workers of its own process
+builder.Services.AddPostgresWorkerRegistry();
+
 builder.Services.AddDotCeleryDashboard(o =>
 {
     o.PathPrefix = "/celery";
@@ -524,12 +528,17 @@ app.MapDotCeleryDashboard("/celery");      // API controllers + SignalR hub
 What the dashboard shows out of the box:
 
 - **Workers** — the worker registers itself and heartbeats its live active and processed task
-  counts (`WorkerOptions.WorkerHeartbeatInterval`), and unregisters when it stops.
+  counts (`WorkerOptions.WorkerHeartbeatInterval`), and unregisters when it stops. A worker that
+  stops without unregistering is marked unresponsive after `DashboardOptions.WorkerOfflineTimeout`,
+  and its record is removed after another pass or expires after
+  `StorageStoreOptions.WorkerRetention` when a shared registry is used.
 - **Tasks** — every task a dashboard host runs is recorded (id, name, state, worker, timings,
   error) and expires after `DashboardOptions.TaskRecordRetention`. Listing by state and counting
   states are indexed; listing by name scans the retained records.
 - **Queues** — waiting/running/processed counts from the queue metrics store, so
-  `UseQueueMetrics()` is what fills this panel.
+  `UseQueueMetrics()` is what fills this panel, and the consumers of each queue from the worker
+  registry: the online workers whose registered queues contain it (a queue no online worker lists
+  keeps what the metrics store reports, which is zero for the bundled stores).
 - **Metrics** — the window aggregated from the historical data store when one is registered
   (`DashboardMetricsCollector` records per-queue snapshots every
   `DashboardOptions.MetricsSnapshotInterval`), and otherwise computed live from the task
@@ -537,10 +546,13 @@ What the dashboard shows out of the box:
 - **Live updates** — task state changes and worker status are pushed over SignalR. The
   `DashboardNotificationService` is the extension point for your own events.
 
-The default `IWorkerRegistry` is in-memory, so it sees only workers in the same process. A
-dashboard that monitors workers in other processes needs a registry implementation shared with
-them (register it with `AddDotCeleryDashboard<TWorkerRegistry>()`), for example one backed by
-Redis or a database.
+The default `IWorkerRegistry` is in-memory, so it sees only workers in the same process. To
+monitor workers in other processes — and to count their consumers in the queue panel — register
+a registry shared with them: `AddRedisWorkerRegistry`, `AddPostgresWorkerRegistry`,
+`AddSqlServerWorkerRegistry`, `AddMongoWorkerRegistry`, or `AddInMemoryWorkerRegistry`, each
+taking the options of the storage the hosts share. The dashboard keeps a registry the
+application registered before it, and otherwise registers the in-process one; a custom
+implementation can also be registered with `AddDotCeleryDashboard<TWorkerRegistry>()`.
 
 The middleware serves the UI page only; paths under the prefix that belong to the API (`/api`)
 or the hub (`/hub`) pass through to their endpoints, so `MapDotCeleryDashboard` works whether the

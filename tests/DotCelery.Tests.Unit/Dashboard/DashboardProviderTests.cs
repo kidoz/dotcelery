@@ -2,6 +2,7 @@ using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Dashboard;
 using DotCelery.Core.Models;
+using DotCelery.Core.Storage.Stores;
 using DotCelery.Dashboard;
 using DotCelery.Dashboard.Services;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -56,6 +57,56 @@ public sealed class DashboardProviderTests
         Assert.Equal(3, queue.MessageCount);
         Assert.Equal(1, queue.InProgressCount);
         Assert.Equal(2, queue.ConsumerCount);
+    }
+
+    [Fact]
+    public async Task QueueStats_CountTheOnlineWorkersThatListTheQueue()
+    {
+        var metrics = new FakeQueueMetrics
+        {
+            Data =
+            {
+                ["celery"] = new QueueMetricsData { Queue = "celery", WaitingCount = 3 },
+                ["priority"] = new QueueMetricsData { Queue = "priority", ConsumerCount = 7 },
+            },
+        };
+        var workers = new WorkerRegistry(_storage, timeProvider: _time);
+        await workers.RegisterWorkerAsync(CreateWorker("worker-1", "celery", "priority"));
+        await workers.RegisterWorkerAsync(CreateWorker("worker-2", "celery"));
+        var provider = new DashboardQueueStatsProvider(metrics, workers);
+
+        var all = new List<QueueStats>();
+        await foreach (var stats in provider.GetAllQueueStatsAsync())
+        {
+            all.Add(stats);
+        }
+
+        // Two workers consume celery, one of them also consumes priority; a queue no online
+        // worker lists keeps the count the queue metrics store reports
+        Assert.Equal(2, all.Single(queue => queue.Name == "celery").ConsumerCount);
+        Assert.Equal(1, all.Single(queue => queue.Name == "priority").ConsumerCount);
+    }
+
+    [Fact]
+    public async Task QueueStats_DoNotCountWorkersThatMissedTheirHeartbeats()
+    {
+        var metrics = new FakeQueueMetrics
+        {
+            Data = { ["celery"] = new QueueMetricsData { Queue = "celery" } },
+        };
+        var workers = new WorkerRegistry(_storage, timeProvider: _time);
+        await workers.RegisterWorkerAsync(CreateWorker("worker-1", "celery"));
+        _time.Advance(TimeSpan.FromSeconds(1));
+        await workers.CleanupStaleWorkersAsync(TimeSpan.Zero);
+        var provider = new DashboardQueueStatsProvider(metrics, workers);
+
+        var all = new List<QueueStats>();
+        await foreach (var stats in provider.GetAllQueueStatsAsync())
+        {
+            all.Add(stats);
+        }
+
+        Assert.Equal(0, Assert.Single(all).ConsumerCount);
     }
 
     [Fact]
@@ -227,6 +278,16 @@ public sealed class DashboardProviderTests
             await Task.Delay(10, timeout.Token);
         }
     }
+
+    private WorkerInfo CreateWorker(string workerId, params string[] queues) =>
+        new()
+        {
+            WorkerId = workerId,
+            Hostname = "test-host",
+            Queues = queues,
+            StartedAt = _time.GetUtcNow(),
+            LastHeartbeat = _time.GetUtcNow(),
+        };
 
     private sealed class FakeQueueMetrics : IQueueMetrics
     {
