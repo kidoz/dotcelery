@@ -95,14 +95,16 @@ public sealed class Group : CanvasPrimitive
     }
 
     /// <summary>
-    /// Creates a chain where this group is followed by a signature.
+    /// Creates a chord where this group runs, then the signature follows it: the workflow-named
+    /// form of <see cref="WithCallback"/>.
     /// </summary>
-    /// <param name="signature">The next task to execute.</param>
-    /// <returns>A chain containing this group followed by the signature.</returns>
-    public Chain Then(Signature signature)
+    /// <param name="signature">The task to run after the group.</param>
+    /// <returns>A chord combining the group and the signature.</returns>
+    public Chord Then(Signature signature)
     {
-        // This is effectively a chord - run group, then run signature with results
-        return new Chain([GroupSignature.Create(this), signature]);
+        // A group is followed by a task through the batch callback that waits for its members, so
+        // this is a chord and not a chain: a chain step would have to publish the group itself
+        return WithCallback(signature);
     }
 
     /// <summary>
@@ -137,23 +139,4 @@ public sealed class Group : CanvasPrimitive
     {
         return _members.SelectMany(m => m.GetSignatures());
     }
-}
-
-/// <summary>
-/// Internal signature representing a group result.
-/// </summary>
-internal sealed class GroupSignature : Signature
-{
-    public GroupSignature(Group group)
-        : base()
-    {
-        Group = group;
-    }
-
-    public Group Group { get; }
-
-    /// <summary>
-    /// Creates a new GroupSignature.
-    /// </summary>
-    public static GroupSignature Create(Group group) => new(group) { TaskName = "__group__" };
 }

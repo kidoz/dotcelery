@@ -82,6 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Signature` is a canvas primitive: it derives from `CanvasPrimitive`, its `Type` is `CanvasType.Signature` (not serialized, so a signature carried on a message still holds only its inputs), and it yields itself from `GetSignatures()`, so a signature, a chain, and a group can be mixed in one `Group`. The `Group(IEnumerable<Signature>)`, `Group(params ReadOnlySpan<Signature>)`, and `Group.And(Signature)` overloads are gone, subsumed by their `CanvasPrimitive` counterparts. Sending a group or a chord whose members are chains or nested groups no longer throws `NotSupportedException`; a chord that is a member of a group still does
 - `AddDotCeleryDashboard` registers its in-process `InMemoryWorkerRegistry` only when the application has not registered a registry, so a shared one registered by a provider is used whichever order the two registrations happen in
 - Recording an enqueue is the broker's job: an application no longer calls `IQueueMetrics.RecordEnqueuedAsync` for what the broker publishes, which would count a message twice. The method stays for a queue filled outside a broker, and its documentation says so
+- `Group.Then` builds a chord, as `WithCallback` does, instead of a chain whose first step was an internal group placeholder that the client published as a `__group__` task no worker could run; the placeholder is gone
 
 ### Removed
 - `AutoCreateTables` from every PostgreSQL store's options

@@ -118,15 +118,17 @@ public class GroupTests
     }
 
     [Fact]
-    public void Group_Then_Signature_CreatesChain()
+    public void Group_Then_Signature_CreatesChord()
     {
         var group = new Group([new Signature { TaskName = "task1" }]);
         var sig = new Signature { TaskName = "task2" };
 
-        var chain = group.Then(sig);
+        var chord = group.Then(sig);
 
-        Assert.Equal(CanvasType.Chain, chain.Type);
-        Assert.Equal(2, chain.Tasks.Count);
+        // The group is followed by the task through the chord's callback, which waits for it
+        Assert.Equal(CanvasType.Chord, chord.Type);
+        Assert.Same(group, chord.Header);
+        Assert.Same(sig, chord.Callback);
     }
 
     [Fact]

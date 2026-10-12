@@ -231,6 +231,37 @@ public sealed class CanvasExecutionTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Group_Then_RunsTheCallbackOnceTheGroupFinished()
+    {
+        CollectTask.Received.Clear();
+        var client = CreateClient();
+        // Then is the workflow-named form of WithCallback: the task follows the group
+        var chord = new Group(
+            new Signature<IncrementTask, NumberInput, NumberInput>
+            {
+                Input = new NumberInput { Value = 1 },
+            },
+            new Signature<IncrementTask, NumberInput, NumberInput>
+            {
+                Input = new NumberInput { Value = 2 },
+            }
+        ).Then(new Signature<CollectTask, NumberInput> { Input = new NumberInput { Value = 9 } });
+
+        var result = await client.SendChordAsync(chord);
+        await _worker.StartAsync(CancellationToken.None);
+
+        var callbackResult = await WaitForResultAsync(result.CallbackTaskId);
+
+        Assert.Equal(TaskState.Success, callbackResult.State);
+        Assert.Equal(9, Assert.Single(CollectTask.Received));
+
+        var batch = await _batchStore.GetAsync(result.Id);
+        Assert.NotNull(batch);
+        Assert.True(batch.IsFinished);
+        Assert.Equal(2, batch.CompletedCount);
+    }
+
+    [Fact]
     public async Task Chain_WithACallback_RunsItWhenTheChainsLastStepFinished()
     {
         CollectTask.Received.Clear();

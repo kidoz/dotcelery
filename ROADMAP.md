@@ -47,7 +47,7 @@ but do not yet behave as documented.
 - Hard time limits are cooperative; a task that ignores its cancellation token keeps its worker slot
 
 ### Incomplete Documented Features
-- Canvas: a chord cannot be a member of a group, and a group cannot be a step of a chain — `Group.Then` builds a chain whose first step is the internal group placeholder, which the client publishes as a `__group__` task no worker can run. Following a group with a task is written as a chord (`WithCallback`)
+- Canvas: a chord cannot be a member of a group; following a group with a task is a chord, written with `WithCallback` or its workflow-named form `Then`
 - Dashboard: the default worker registry is in-process, and so are the consumer counts taken from it, so a deployment whose workers run elsewhere registers a registry on shared storage; listing tasks by name scans the retained records (only listing by state is indexed); historical metrics have no per-task breakdown, so the metrics panel's per-task view only fills live from the task records
 
 ### Security Hardening

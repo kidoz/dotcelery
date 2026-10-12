@@ -245,8 +245,9 @@ Canvases nest. A member of a group is any canvas primitive — a signature, a ch
 its steps in order), or another group (flattened into its members) — so `new Group(chain, signature)`
 mixes them, and a chord's header may do the same. A chain member completes with its last step,
 which is what the group's result and a chord's batch track, so
-`new Group(chain1, chain2).WithCallback(callback)` runs the callback once both chains finished.
-A chord cannot itself be a member of a group; see [ROADMAP.md](ROADMAP.md#known-gaps).
+`new Group(chain1, chain2).WithCallback(callback)` runs the callback once both chains finished,
+and `group.Then(callback)` is that same chord under the workflow name. A chord cannot itself be a
+member of a group; see [ROADMAP.md](ROADMAP.md#known-gaps).
 
 ## Saga State Machine
 
