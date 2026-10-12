@@ -162,6 +162,106 @@ public sealed class CanvasExecutionTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Group_WithAChainMember_RunsTheChainAlongsideTheOtherMembers()
+    {
+        var client = CreateClient();
+        // The chain member's result is its last step, which is what the group tracks
+        var group = new Group(
+            new Chain(
+                new Signature<IncrementTask, NumberInput, NumberInput>
+                {
+                    Input = new NumberInput { Value = 1 },
+                },
+                new Signature<DoubleTask, NumberInput, NumberInput>()
+            ),
+            new Signature<IncrementTask, NumberInput, NumberInput>
+            {
+                Input = new NumberInput { Value = 10 },
+            }
+        );
+
+        var result = await client.SendGroupAsync(group);
+        await _worker.StartAsync(CancellationToken.None);
+
+        var chainLast = await WaitForResultAsync(result.TaskIds[0]);
+        var single = await WaitForResultAsync(result.TaskIds[1]);
+
+        // 1 -> increment 2 -> double 4, and the single member is unaffected by the chain
+        Assert.Equal(TaskState.Success, chainLast.State);
+        Assert.Equal(4, _serializer.Deserialize<NumberInput>(chainLast.Result!)!.Value);
+        Assert.Equal(TaskState.Success, single.State);
+        Assert.Equal(11, _serializer.Deserialize<NumberInput>(single.Result!)!.Value);
+    }
+
+    [Fact]
+    public async Task Chord_WithAChainInItsHeader_RunsItsCallbackWhenTheChainsLastStepFinished()
+    {
+        CollectTask.Received.Clear();
+        var client = CreateClient();
+        var chord = new Group(
+            new Chain(
+                new Signature<IncrementTask, NumberInput, NumberInput>
+                {
+                    Input = new NumberInput { Value = 1 },
+                },
+                new Signature<DoubleTask, NumberInput, NumberInput>()
+            ),
+            new Signature<IncrementTask, NumberInput, NumberInput>
+            {
+                Input = new NumberInput { Value = 5 },
+            }
+        ).WithCallback(
+            new Signature<CollectTask, NumberInput> { Input = new NumberInput { Value = 9 } }
+        );
+
+        var result = await client.SendChordAsync(chord);
+        await _worker.StartAsync(CancellationToken.None);
+
+        var callbackResult = await WaitForResultAsync(result.CallbackTaskId);
+
+        // The callback waits for the chain's last step, and runs once
+        Assert.Equal(TaskState.Success, callbackResult.State);
+        Assert.Equal(9, Assert.Single(CollectTask.Received));
+
+        var batch = await _batchStore.GetAsync(result.Id);
+        Assert.NotNull(batch);
+        Assert.True(batch.IsFinished);
+        Assert.Equal(2, batch.TotalTasks);
+        Assert.Equal(2, batch.CompletedCount);
+    }
+
+    [Fact]
+    public async Task Chain_WithACallback_RunsItWhenTheChainsLastStepFinished()
+    {
+        CollectTask.Received.Clear();
+        var client = CreateClient();
+        var chord = new Chain(
+            new Signature<IncrementTask, NumberInput, NumberInput>
+            {
+                Input = new NumberInput { Value = 2 },
+            },
+            new Signature<DoubleTask, NumberInput, NumberInput>()
+        ).WithCallback(
+            new Signature<CollectTask, NumberInput> { Input = new NumberInput { Value = 9 } }
+        );
+
+        var result = await client.SendChordAsync(chord);
+        await _worker.StartAsync(CancellationToken.None);
+
+        var callbackResult = await WaitForResultAsync(result.CallbackTaskId);
+
+        // 2 -> increment 3 -> double 6, then the callback runs once
+        Assert.Equal(TaskState.Success, callbackResult.State);
+        Assert.Equal(9, Assert.Single(CollectTask.Received));
+
+        var batch = await _batchStore.GetAsync(result.Id);
+        Assert.NotNull(batch);
+        Assert.True(batch.IsFinished);
+        Assert.Equal(1, batch.TotalTasks);
+        Assert.Equal(1, batch.CompletedCount);
+    }
+
+    [Fact]
     public async Task Link_RunsWithTheTaskResultWhenTheTaskSucceeds()
     {
         CollectTask.Received.Clear();

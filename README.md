@@ -239,8 +239,14 @@ signature, and the batch ID is on its message, so it can read the header results
 A signature can also carry callbacks of its own: `Link` runs when the task succeeds, with the
 task's result as its input, and `LinkError` runs when it fails, with a `TaskErrorInfo` payload
 (the failed task's ID, name, and error). A chain carries each step's callbacks to that step, and
-a message is settled only after its callback is published, so a callback is not lost. Groups of
-chains, groups, or chords are not supported; see [ROADMAP.md](ROADMAP.md#known-gaps).
+a message is settled only after its callback is published, so a callback is not lost.
+
+Canvases nest. A member of a group is any canvas primitive — a signature, a chain (which runs
+its steps in order), or another group (flattened into its members) — so `new Group(chain, signature)`
+mixes them, and a chord's header may do the same. A chain member completes with its last step,
+which is what the group's result and a chord's batch track, so
+`new Group(chain1, chain2).WithCallback(callback)` runs the callback once both chains finished.
+A chord cannot itself be a member of a group; see [ROADMAP.md](ROADMAP.md#known-gaps).
 
 ## Saga State Machine
 

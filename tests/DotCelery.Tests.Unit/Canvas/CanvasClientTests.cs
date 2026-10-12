@@ -104,18 +104,89 @@ public sealed class CanvasClientTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task SendGroupAsync_WithANestedCanvas_IsRefused()
+    public async Task SendGroupAsync_WithAChainMember_RunsTheChainAndTracksItsLastTask()
     {
         var client = CreateClient();
         var group = new Group(
             new Chain(
-                new Signature { TaskName = "first.task" },
-                new Signature { TaskName = "second.task" }
-            )
+                new Signature { TaskName = "chain.first" },
+                new Signature { TaskName = "chain.last" }
+            ),
+            new Signature { TaskName = "single.task" }
+        );
+
+        var result = await client.SendGroupAsync(group);
+
+        // The chain's first task carries the remaining step, and the single member is its own
+        var published = _broker.Published.ToList();
+        Assert.Equal(2, published.Count);
+        var chainFirst = Assert.Single(published, message => message.Task == "chain.first");
+        var carried = Assert.Single(chainFirst.Chain!);
+        Assert.Equal("chain.last", carried.Signature.TaskName);
+
+        // The group completes with the chain's last step and the single task
+        Assert.Equal(
+            [carried.TaskId, published.Single(m => m.Task == "single.task").Id],
+            result.TaskIds
+        );
+    }
+
+    [Fact]
+    public async Task SendGroupAsync_WithANestedGroup_FlattensIt()
+    {
+        var client = CreateClient();
+        var group = new Group(
+            new Group(new Signature { TaskName = "nested.task" }),
+            new Signature { TaskName = "flat.task" }
+        );
+
+        var result = await client.SendGroupAsync(group);
+
+        Assert.Equal(2, result.TaskIds.Count);
+        Assert.Equal(
+            ["nested.task", "flat.task"],
+            _broker.Published.Select(message => message.Task)
+        );
+    }
+
+    [Fact]
+    public async Task SendChordAsync_WithChainMembers_RecordsEachChainsLastTask()
+    {
+        var client = CreateClient();
+        var chord = new Group(
+            new Chain(
+                new Signature { TaskName = "chain.first" },
+                new Signature { TaskName = "chain.last" }
+            ),
+            new Signature { TaskName = "single.task" }
+        ).WithCallback(new Signature { TaskName = "callback.task", Args = "{}"u8.ToArray() });
+
+        var result = await client.SendChordAsync(chord);
+
+        var batch = await _batchStore.GetAsync(result.Id);
+        Assert.NotNull(batch);
+
+        var chainFirst = _broker.Published.Single(message => message.Task == "chain.first");
+        var chainLast = Assert.Single(chainFirst.Chain!).TaskId;
+
+        // The chord waits for the chain's last step, not its first
+        Assert.Equal(
+            [chainLast, _broker.Published.Single(m => m.Task == "single.task").Id],
+            batch.TaskIds
+        );
+        Assert.Equal(batch.TaskIds, result.Header.TaskIds);
+    }
+
+    [Fact]
+    public async Task SendGroupAsync_WithAChordMember_IsRefused()
+    {
+        var client = CreateClient();
+        var nestedChord = new Group(new Signature { TaskName = "inner.task" }).WithCallback(
+            new Signature { TaskName = "inner.callback" }
         );
 
         await Assert.ThrowsAsync<NotSupportedException>(async () =>
-            await client.SendGroupAsync(group)
+            await client.SendGroupAsync(new Group(nestedChord))
         );
     }
 

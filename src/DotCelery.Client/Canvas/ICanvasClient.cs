@@ -20,11 +20,13 @@ public interface ICanvasClient
     );
 
     /// <summary>
-    /// Sends a group: its signatures run in parallel.
+    /// Sends a group: its members run in parallel. A member may be a signature, a chain (which
+    /// runs its steps in order), or a nested group (flattened); the result holds the task each
+    /// member completes with, which for a chain is its last step.
     /// </summary>
     /// <param name="group">The group to send.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The group's ID and the task IDs it runs with.</returns>
+    /// <returns>The group's ID and the task each member completes with.</returns>
     ValueTask<GroupResult> SendGroupAsync(
         Group group,
         CancellationToken cancellationToken = default
@@ -32,7 +34,9 @@ public interface ICanvasClient
 
     /// <summary>
     /// Sends a chord: its header runs in parallel and its callback runs once when every header
-    /// task finished, however it finished. Requires an <c>IBatchStore</c> registration.
+    /// member finished, however it finished. A header member may be a signature, a chain (the
+    /// callback waits for its last step), or a nested group. Requires an <c>IBatchStore</c>
+    /// registration.
     /// </summary>
     /// <param name="chord">The chord to send.</param>
     /// <param name="cancellationToken">Cancellation token.</param>

@@ -60,13 +60,7 @@ public sealed class CanvasClient : ICanvasClient
         ArgumentNullException.ThrowIfNull(chain);
 
         var canvasId = Guid.NewGuid().ToString("N");
-        var steps = chain
-            .Tasks.Select(signature => new ChainStep
-            {
-                TaskId = Guid.NewGuid().ToString("N"),
-                Signature = ToMessageSignature(signature),
-            })
-            .ToList();
+        var steps = BuildChainSteps(chain.Tasks);
 
         await PublishSignatureAsync(
                 steps[0].Signature,
@@ -103,23 +97,14 @@ public sealed class CanvasClient : ICanvasClient
         ArgumentNullException.ThrowIfNull(group);
 
         var canvasId = Guid.NewGuid().ToString("N");
-        var taskIds = new List<string>();
 
-        foreach (var signature in RequireSignatures(group))
-        {
-            var taskId = Guid.NewGuid().ToString("N");
-            taskIds.Add(taskId);
+        // A member chain completes with its last task, and a nested group with each of its
+        // members, so the result tracks what a caller waits on
+        var publishes = BuildMemberPublishes(group);
+        var taskIds = publishes.Select(publish => publish.CompletionId).ToList();
 
-            await PublishSignatureAsync(
-                    signature,
-                    taskId,
-                    canvasId,
-                    parentId: null,
-                    chain: null,
-                    cancellationToken
-                )
-                .ConfigureAwait(false);
-        }
+        await PublishMembersAsync(publishes, canvasId, batchId: null, cancellationToken)
+            .ConfigureAwait(false);
 
         _logger.LogInformation("Sent group {CanvasId} with {Count} tasks", canvasId, taskIds.Count);
 
@@ -145,10 +130,12 @@ public sealed class CanvasClient : ICanvasClient
         var canvasId = Guid.NewGuid().ToString("N");
         var callback = ToMessageSignature(chord.Callback);
         var callbackTaskId = Guid.NewGuid().ToString("N");
-        var signatures = RequireSignatures(chord.Header);
-        var taskIds = signatures.Select(_ => Guid.NewGuid().ToString("N")).ToList();
 
-        // The record goes first, so a header task that finishes immediately is still counted
+        // The record goes first, so a header task that finishes immediately is still counted;
+        // it holds the task each header member completes with, which for a chain is its last step
+        var publishes = BuildMemberPublishes(chord.Header);
+        var taskIds = publishes.Select(publish => publish.CompletionId).ToList();
+
         await _batchStore
             .CreateAsync(
                 new Batch
@@ -174,19 +161,8 @@ public sealed class CanvasClient : ICanvasClient
             )
             .ConfigureAwait(false);
 
-        for (var index = 0; index < signatures.Count; index++)
-        {
-            await PublishSignatureAsync(
-                    signatures[index],
-                    taskIds[index],
-                    canvasId,
-                    parentId: null,
-                    chain: null,
-                    cancellationToken,
-                    batchId: canvasId
-                )
-                .ConfigureAwait(false);
-        }
+        await PublishMembersAsync(publishes, canvasId, batchId: canvasId, cancellationToken)
+            .ConfigureAwait(false);
 
         _logger.LogInformation(
             "Sent chord {CanvasId} with {Count} header tasks and callback {CallbackTaskId}",
@@ -280,17 +256,98 @@ public sealed class CanvasClient : ICanvasClient
         };
     }
 
-    private List<Signature> RequireSignatures(Group group)
+    // Builds what a group's members publish, so their task ids are known before anything is
+    // sent and a chord can record them first. A signature is one task; a chain is its first
+    // task with the remaining steps carried on its message, and completes with its last step;
+    // a nested group flattens into its members. A chord cannot be a member of a group.
+    private List<MemberPublish> BuildMemberPublishes(Group group)
     {
-        if (group.Members.Any(member => member.Type != CanvasType.Signature))
+        var publishes = new List<MemberPublish>();
+
+        foreach (var member in group.Members)
         {
-            throw new NotSupportedException(
-                "A group of chains, groups, or chords is not supported; send its members "
-                    + "separately or as a chord."
-            );
+            switch (member.Type)
+            {
+                case CanvasType.Signature:
+                {
+                    var taskId = Guid.NewGuid().ToString("N");
+                    publishes.Add(
+                        new MemberPublish(
+                            ToMessageSignature((Signature)member),
+                            taskId,
+                            Chain: null,
+                            CompletionId: taskId
+                        )
+                    );
+                    break;
+                }
+
+                case CanvasType.Chain:
+                {
+                    var steps = BuildChainSteps(member.GetSignatures().ToList());
+                    publishes.Add(
+                        new MemberPublish(
+                            steps[0].Signature,
+                            steps[0].TaskId,
+                            Chain: [.. steps.Skip(1)],
+                            CompletionId: steps[^1].TaskId
+                        )
+                    );
+                    break;
+                }
+
+                case CanvasType.Group:
+                    publishes.AddRange(BuildMemberPublishes((Group)member));
+                    break;
+
+                default:
+                    throw new NotSupportedException(
+                        "A chord cannot be a member of a group; send the chord separately."
+                    );
+            }
         }
 
-        // Members travel as bytes too, so a typed input is serialized before publishing
-        return [.. group.GetSignatures().Select(ToMessageSignature)];
+        return publishes;
     }
+
+    private async Task PublishMembersAsync(
+        IReadOnlyList<MemberPublish> publishes,
+        string canvasId,
+        string? batchId,
+        CancellationToken cancellationToken
+    )
+    {
+        foreach (var publish in publishes)
+        {
+            await PublishSignatureAsync(
+                    publish.Signature,
+                    publish.TaskId,
+                    canvasId,
+                    parentId: null,
+                    publish.Chain is { Count: > 0 } ? publish.Chain : null,
+                    cancellationToken,
+                    batchId
+                )
+                .ConfigureAwait(false);
+        }
+    }
+
+    // A chain travels as its first task with the remaining steps on its message, so the worker
+    // that runs a step publishes the next one
+    private List<ChainStep> BuildChainSteps(IReadOnlyList<Signature> signatures) =>
+        [
+            .. signatures.Select(signature => new ChainStep
+            {
+                TaskId = Guid.NewGuid().ToString("N"),
+                Signature = ToMessageSignature(signature),
+            }),
+        ];
+
+    // What a group member publishes, and the task it completes with
+    private sealed record MemberPublish(
+        Signature Signature,
+        string TaskId,
+        IReadOnlyList<ChainStep>? Chain,
+        string CompletionId
+    );
 }
