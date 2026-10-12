@@ -24,6 +24,7 @@ but do not yet behave as documented.
 
 ### Security
 - HMAC message signing across InMemory, RabbitMQ, and Redis brokers
+- A message over a broker's maximum size is refused as it is published, and the worker refuses a payload over `MessageSecurityOptions.MaxPayloadSizeBytes` before the task input is deserialized
 - The worker validates signatures, the task-name allowlist, schema version, payload size, and message age before the task input is deserialized and before the task is recorded as started; a refused message is dead-lettered
 - Tenant validation against a configured tenant list, with the tenant context visible to the task
 - Dashboard authorization runs before model binding and applies to controllers, the SignalR hub, and the middleware; state-changing API requests must carry the dashboard request header and an allowed origin, and paging and bulk operations are bounded
@@ -71,9 +72,6 @@ but do not yet behave as documented.
 ### Worker/Execution
 - Connection pooling controls for brokers: separate publish and consume connections with channel pooling for RabbitMQ
 - Batch execution tasks (single-task processing of input batches)
-
-### Security
-- Message size limits enforced at publish time and before deserialization
 
 ### CLI
 - `dotcelery` command-line tool (worker, beat, inspect, task management, queue ops)
