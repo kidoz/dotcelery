@@ -40,7 +40,9 @@ public abstract class BrokerConformanceTests : IAsyncLifetime
         var queue = Unique("preserve");
         var sent = CreateMessage(queue) with
         {
-            Eta = DateTimeOffset.UtcNow.AddMinutes(1),
+            // A past ETA travels like any other field; a future one is broker-specific, since a
+            // broker with native delay (SQS) holds the message until it is due
+            Eta = DateTimeOffset.UtcNow.AddMinutes(-1),
             Expires = DateTimeOffset.UtcNow.AddHours(1),
             Retries = 2,
             MaxRetries = 5,
@@ -182,7 +184,7 @@ public abstract class BrokerConformanceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ConcurrentPublishes_AreAllDeliveredOnce()
+    public async Task ConcurrentPublishes_AreAllDelivered()
     {
         const int count = 20;
         var queue = Unique("concurrent");
@@ -195,7 +197,9 @@ public abstract class BrokerConformanceTests : IAsyncLifetime
                 )
         );
 
-        var ids = new List<string>();
+        // Delivery is at-least-once, so a repeated delivery is settled and counted rather than
+        // failing the case; every published message must arrive
+        var ids = new HashSet<string>(StringComparer.Ordinal);
         using var timeout = new CancellationTokenSource(Timeout);
 
         await foreach (var message in Broker.ConsumeAsync([queue], timeout.Token))
@@ -209,7 +213,7 @@ public abstract class BrokerConformanceTests : IAsyncLifetime
             }
         }
 
-        Assert.Equal(count, ids.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(count, ids.Count);
     }
 
     protected static TaskMessage CreateMessage(string queue) =>

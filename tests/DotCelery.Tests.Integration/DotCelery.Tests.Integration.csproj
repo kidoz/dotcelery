@@ -11,11 +11,15 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\DotCelery.Core\DotCelery.Core.csproj" />
     <ProjectReference Include="..\..\src\DotCelery.Broker.RabbitMQ\DotCelery.Broker.RabbitMQ.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Broker.Sqs\DotCelery.Broker.Sqs.csproj" />
     <ProjectReference Include="..\..\src\DotCelery.Broker.Redis\DotCelery.Broker.Redis.csproj" />
     <ProjectReference Include="..\..\src\DotCelery.Backend.Redis\DotCelery.Backend.Redis.csproj" />
     <ProjectReference Include="..\..\src\DotCelery.Backend.Postgres\DotCelery.Backend.Postgres.csproj" />
     <ProjectReference Include="..\..\src\DotCelery.Backend.SqlServer\DotCelery.Backend.SqlServer.csproj" />
     <ProjectReference Include="..\..\src\DotCelery.Backend.Mongo\DotCelery.Backend.Mongo.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Backend.InMemory\DotCelery.Backend.InMemory.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Client\DotCelery.Client.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Worker\DotCelery.Worker.csproj" />
     <ProjectReference Include="..\DotCelery.Tests.Conformance\DotCelery.Tests.Conformance.csproj" />
   </ItemGroup>
 
