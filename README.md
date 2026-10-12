@@ -97,6 +97,11 @@ builder.Services.AddDotCelery(celery =>
         .UseRabbitMQ(options =>
         {
             options.ConnectionString = "amqp://localhost";
+
+            // Queues are declared with these arguments (a priority queue by default). Set
+            // x-queue-type, x-dead-letter-exchange, x-message-ttl, x-max-length and the like
+            // to match your deployment.
+            options.QueueArguments["x-queue-type"] = "quorum";
         })
         .UseRedis(options =>
         {
@@ -110,6 +115,13 @@ builder.Services.AddDotCelery(celery =>
 var host = builder.Build();
 await host.RunAsync();
 ```
+
+Every broker is held to one delivery contract — message fields round-trip, delivery is addressed,
+settlement settles, and an unsettled message whose consumer stops is delivered again — which a
+shared conformance suite checks on each broker. `IBrokerCapabilities` (implemented by every
+bundled broker) declares what a broker guarantees beyond that contract: priority delivery,
+native delayed delivery, redelivery when a consumer stops, and the maximum message size it
+accepts.
 
 ### Send Tasks
 

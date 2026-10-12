@@ -14,7 +14,8 @@ but do not yet behave as documented.
 
 ### Brokers
 - Redis broker (Redis Streams with consumer groups)
-- RabbitMQ publisher confirms and mandatory routing
+- RabbitMQ publisher confirms, mandatory routing, and configurable queue arguments (queue type, dead-lettering, TTL, length, overflow, priority depth)
+- One broker contract, held to the same behavior by every broker through a shared conformance suite (in-memory in the unit suite, RabbitMQ and Redis against containers), and `IBrokerCapabilities` for what a broker guarantees beyond it
 
 ### Serialization
 - Source-generated JSON contexts for core message types (`DotCeleryJsonContext`)
@@ -42,8 +43,6 @@ but do not yet behave as documented.
 ## Known Gaps
 
 ### Delivery and Reliability
-- RabbitMQ broker: queue arguments (priority, queue type, dead-letter exchange) are fixed and cannot be configured
-- Without a delay store, a message with a future ETA holds the worker's consume loop for up to 5 seconds before it is requeued
 - Hard time limits are cooperative; a task that ignores its cancellation token keeps its worker slot
 
 ### Incomplete Documented Features
@@ -53,16 +52,12 @@ but do not yet behave as documented.
 ### Security Hardening
 - A signed message can be replayed after `MessageSecurityOptions.MaxMessageAge` and the inbox retention have passed; an ID cannot be refused once its inbox record expires
 
-### Test Coverage
-- The in-memory broker does not model redelivery or serialization round-trips; broker contract tests should run against real brokers
-- Analyzer DCEL001 reports task names that are not string literals (for example, constants) as empty
-
 ## Planned Features
 
 ### Brokers
 - Azure Service Bus broker
 - Amazon SQS broker
-- Broker contract extensions these require: lease renewal for long-running tasks, native delayed delivery, explicit dead-letter versus discard, and capability flags (priority, ordering, maximum message size)
+- Broker contract extensions these require: lease renewal for long-running tasks, native delayed delivery, and explicit dead-letter versus discard; the shared contract suite and `IBrokerCapabilities` they build on are in place
 
 ### Serialization
 - Pluggable serializers (MessagePack/Protobuf); brokers currently hard-code the JSON envelope
