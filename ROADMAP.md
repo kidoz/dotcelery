@@ -1,7 +1,7 @@
 # Roadmap
 
 This document tracks shipped features, known gaps in them, and planned work.
-Status and scope may change as the project evolves. Last reviewed: 2026-10-08.
+Status and scope may change as the project evolves. Last reviewed: 2026-10-12.
 
 Known gaps take priority over new features: several capabilities are exposed in the public API
 but do not yet behave as documented.
@@ -24,7 +24,7 @@ but do not yet behave as documented.
 - HMAC message signing across InMemory, RabbitMQ, and Redis brokers
 - The worker validates signatures, the task-name allowlist, schema version, payload size, and message age before the task input is deserialized and before the task is recorded as started; a refused message is dead-lettered
 - Tenant validation against a configured tenant list, with the tenant context visible to the task
-- Dashboard authorization filter applied to controllers, SignalR hub, and middleware
+- Dashboard authorization runs before model binding and applies to controllers, the SignalR hub, and the middleware; state-changing API requests must carry the dashboard request header and an allowed origin, and paging and bulk operations are bounded
 - Dashboard route prefixing via `DashboardRoutePrefixConvention`
 
 ### Task Registration and Dispatch
@@ -52,7 +52,6 @@ but do not yet behave as documented.
 
 ### Security Hardening
 - A signed message can be replayed after `MessageSecurityOptions.MaxMessageAge` and the inbox retention have passed; an ID cannot be refused once its inbox record expires
-- Dashboard: authorization before model binding, CSRF/origin checks on state-changing endpoints, and bounds on paging and bulk operations
 
 ### Test Coverage
 - The in-memory broker does not model redelivery or serialization round-trips; broker contract tests should run against real brokers

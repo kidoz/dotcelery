@@ -527,6 +527,14 @@ The middleware serves the UI page only; paths under the prefix that belong to th
 or the hub (`/hub`) pass through to their endpoints, so `MapDotCeleryDashboard` works whether the
 middleware runs before or after routing.
 
+The API is fail-secure: authorization runs before a request body is bound, and until
+`AuthorizationCallback` is wired to your app's auth every request is denied
+(`RequireAuthorization` defaults to true). State-changing requests (revoke, retry, bulk
+operations, filter previews) must also carry the dashboard request header, which a browser
+cannot send cross-site, and an allowed origin — the bundled UI does this for you; script
+clients set `X-DotCelery-Dashboard: 1` (see `VerifyRequestOrigin` and `AllowedOrigins`).
+Paging and bulk operations are bounded by `PageSize` and `MaxBulkOperationSize`.
+
 ## Redis Storage
 
 Every Redis store keeps its data under one key prefix. Register the result backend with `UseRedis` and each other store with its `AddRedis...` method; every registration configures the same `RedisStorageOptions` and shares one connection per connection string.

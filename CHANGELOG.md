@@ -44,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `DashboardMetricsCollector` records per-queue success and failure deltas into `IHistoricalDataStore` every `DashboardOptions.MetricsSnapshotInterval` and applies its retention hourly, so a dashboard's metrics survive the task record retention
 - The dashboard raises its SignalR notifications: task signals record the task and push `TaskStateChanged` and `OverviewChanged`, and `DashboardWorkerMonitor` announces worker status changes and marks workers that missed `DashboardOptions.WorkerOfflineTimeout` unresponsive and then removes them
 - `TaskSummary` is part of the source-generated JSON context, so task records serialize without reflection
+- State-changing dashboard API requests must carry the dashboard request header (`X-DotCelery-Dashboard`, which the bundled UI sends and script clients set) and, when they carry an `Origin`, come from the dashboard's own origin or one of `DashboardOptions.AllowedOrigins`; `DashboardOptions.VerifyRequestOrigin` turns the check off
+- `DashboardOptions.MaxBulkOperationSize` caps how many tasks one bulk operation may affect: a request with more explicit task IDs is refused, and a filter resolves at most that many. Task paging is clamped into `1..DashboardOptions.PageSize` with a bounded offset
 
 ### Changed
 - PostgreSQL stores no longer create their tables on first use; run migrations first (automatic with a generic host)
@@ -86,6 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Signal handlers dispatched in process are resolved from a scope per dispatch, so scoped handlers are disposed with it instead of living in the root provider
 - The tenant context of a task is now visible to the task itself: the executor enters the tenant scope around the task, because a value written to an `AsyncLocal` by `TenantContextFilter` (which runs inside the filter pipeline) never flowed back to its caller. The filter still rejects tasks whose tenant is not allowed and does not enter the scope for them
 - The queue metrics waiting count no longer goes negative when tasks start without a recorded enqueue (nothing in the library records enqueues), so the dashboard shows zero instead of a negative queue depth
+- Dashboard authorization runs in the authorization stage, before model binding, so a refused request is never bound or executed; it ran as an action filter, after the request body was bound
 - Starting compensation for a saga whose step failed no longer returns early: the store marks such a saga `Compensating` while its compensation is still to run, which the orchestrator mistook for compensation already underway, so compensated steps were never compensated
 - The Redis broker renews the claim on a message it is still processing, every third of `RedisBrokerOptions.ClaimTimeout`, so a task that runs longer than the claim timeout is no longer reclaimed by another consumer and executed twice. A message whose consumer stopped is still reclaimed after the timeout
 - The Redis broker deletes a stream entry when it is settled, so a stream stays proportional to the work in flight instead of growing for the lifetime of the queue
