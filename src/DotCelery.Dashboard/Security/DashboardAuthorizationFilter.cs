@@ -1,11 +1,16 @@
 using DotCelery.Dashboard.Controllers;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.Options;
 
 namespace DotCelery.Dashboard.Security;
 
-internal sealed class DashboardAuthorizationFilter : IAsyncActionFilter
+/// <summary>
+/// Authorizes dashboard API requests in the authorization stage, before model binding, so a
+/// refused request is never bound or executed.
+/// </summary>
+internal sealed class DashboardAuthorizationFilter : IAsyncAuthorizationFilter
 {
     private readonly DashboardOptions _options;
 
@@ -14,14 +19,10 @@ internal sealed class DashboardAuthorizationFilter : IAsyncActionFilter
         _options = options.Value;
     }
 
-    public async Task OnActionExecutionAsync(
-        ActionExecutingContext context,
-        ActionExecutionDelegate next
-    )
+    public async Task OnAuthorizationAsync(AuthorizationFilterContext context)
     {
-        if (context.Controller is not DashboardApiController)
+        if (!IsDashboardAction(context))
         {
-            await next().ConfigureAwait(false);
             return;
         }
 
@@ -32,9 +33,12 @@ internal sealed class DashboardAuthorizationFilter : IAsyncActionFilter
         if (!isAuthorized)
         {
             context.Result = new StatusCodeResult(StatusCodes.Status403Forbidden);
-            return;
         }
-
-        await next().ConfigureAwait(false);
     }
+
+    // At the authorization stage the controller is not created yet, so the action descriptor
+    // identifies a dashboard action
+    internal static bool IsDashboardAction(FilterContext context) =>
+        context.ActionDescriptor is ControllerActionDescriptor descriptor
+        && descriptor.ControllerTypeInfo.AsType() == typeof(DashboardApiController);
 }

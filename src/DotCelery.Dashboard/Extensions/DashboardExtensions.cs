@@ -77,6 +77,7 @@ public static class DashboardExtensions
         services.AddScoped<IDashboardDataProvider, DashboardDataService>();
         services.AddSingleton<DashboardNotificationService>();
         services.AddScoped<DashboardAuthorizationFilter>();
+        services.AddScoped<DashboardRequestVerificationFilter>();
 
         // The task record store indexes the tasks this host runs, so the dashboard can list and
         // count them; the providers serve queue stats, task queries, and metrics from the
@@ -114,6 +115,7 @@ public static class DashboardExtensions
                 options.Conventions.Add(
                     new DashboardRoutePrefixConvention(routeOptions.PathPrefix)
                 );
+                options.Filters.AddService<DashboardRequestVerificationFilter>();
                 options.Filters.AddService<DashboardAuthorizationFilter>();
             })
             .AddApplicationPart(typeof(DashboardExtensions).Assembly);

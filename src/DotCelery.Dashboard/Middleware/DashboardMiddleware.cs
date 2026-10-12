@@ -344,7 +344,17 @@ public sealed class DashboardMiddleware
 
     <script>
         const API_BASE = '{{safePathPrefix}}/api';
+        const REQUEST_HEADER = '{{DashboardRequestVerificationFilter.RequestHeaderName}}';
         let currentState = '';
+
+        // State-changing endpoints refuse requests without this header (their cross-site
+        // protection), so every call carries it
+        function apiFetch(url, options = {}) {
+            return fetch(url, {
+                ...options,
+                headers: { [REQUEST_HEADER]: '1', ...(options.headers || {}) }
+            });
+        }
 
         // HTML escape function to prevent XSS
         function escapeHtml(text) {
@@ -357,9 +367,9 @@ public sealed class DashboardMiddleware
         async function loadData() {
             try {
                 const [overview, workers, tasks] = await Promise.all([
-                    fetch(`${API_BASE}/overview`).then(r => r.json()),
-                    fetch(`${API_BASE}/workers`).then(r => r.json()),
-                    fetch(`${API_BASE}/tasks${currentState ? `?state=${currentState}` : ''}`).then(r => r.json())
+                    apiFetch(`${API_BASE}/overview`).then(r => r.json()),
+                    apiFetch(`${API_BASE}/workers`).then(r => r.json()),
+                    apiFetch(`${API_BASE}/tasks${currentState ? `?state=${currentState}` : ''}`).then(r => r.json())
                 ]);
 
                 renderStats(overview);
@@ -466,7 +476,7 @@ public sealed class DashboardMiddleware
             if (!confirm('Are you sure you want to revoke this task?')) return;
 
             try {
-                await fetch(`${API_BASE}/tasks/${taskId}/revoke`, {
+                await apiFetch(`${API_BASE}/tasks/${taskId}/revoke`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ terminate: true })

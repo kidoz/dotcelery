@@ -81,6 +81,29 @@ public sealed class DashboardOptions
     public bool RequireAuthorization { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets whether state-changing requests (POST, PUT, PATCH, DELETE) to the dashboard
+    /// API must prove they come from a dashboard client. Such a request must carry the dashboard
+    /// request header (a browser cannot set a custom header on a cross-site request without a
+    /// preflight), and when it carries an Origin header the origin must be the dashboard's own
+    /// or one in <see cref="AllowedOrigins"/>. Script clients call the API with the header.
+    /// Default is true.
+    /// </summary>
+    public bool VerifyRequestOrigin { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the origins besides the dashboard's own that may make state-changing
+    /// requests, such as a dashboard UI hosted separately from the API. Default is empty.
+    /// </summary>
+    public IReadOnlyCollection<string> AllowedOrigins { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets the maximum number of tasks one bulk operation may affect. A request with
+    /// more explicit task IDs is refused, and a task filter resolves at most this many tasks.
+    /// Default is 1000.
+    /// </summary>
+    public int MaxBulkOperationSize { get; set; } = 1000;
+
+    /// <summary>
     /// Gets or sets whether to expose full exception details in the dashboard.
     /// When false (default), only the exception type and a generic message are shown.
     /// When true, full exception messages are exposed (use with caution in production).
