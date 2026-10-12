@@ -17,9 +17,14 @@ namespace DotCelery.Dashboard.Services;
 /// <para>
 /// Records live on the storage primitives' documents, so they work on every provider the
 /// application already uses. They expire after <see cref="DashboardOptions.TaskRecordRetention"/>
-/// and are indexed by state (and sorted by the time they were last updated), so listing by
-/// state and counting states do not scan. Listing by task name scans the retained records,
-/// bounded by <see cref="NameScanLimit"/>.
+/// and are indexed by state and by task name (each sorted by the time it was last updated), so
+/// listing by state, listing by name, and counting states do not scan: each write stores the
+/// record and its name index entry, and both expire with the retention.
+/// </para>
+/// <para>
+/// The list of task names the dashboard offers is read from the most recently updated records,
+/// bounded by <see cref="NameScanLimit"/>, so a name whose records all expired from that window
+/// is not offered until one is updated again.
 /// </para>
 /// <para>
 /// Without a registered storage provider the store is unavailable and every read returns empty,
@@ -33,6 +38,7 @@ public sealed class TaskRecordStore
     private readonly IDocumentStore? _documents;
     private readonly DashboardOptions _options;
     private readonly string _collection;
+    private readonly string _names;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TaskRecordStore"/> class.
@@ -51,6 +57,7 @@ public sealed class TaskRecordStore
 
         var prefix = (storeOptions?.Value ?? new StorageStoreOptions()).Prefix;
         _collection = $"{prefix}.dashboard.tasks";
+        _names = $"{prefix}.dashboard.task-names";
     }
 
     /// <summary>
@@ -77,19 +84,37 @@ public sealed class TaskRecordStore
 
         var updatedAt =
             summary.CompletedAt ?? summary.StartedAt ?? summary.SentAt ?? DateTimeOffset.UtcNow;
+        var value = JsonSerializer.SerializeToUtf8Bytes(
+            summary,
+            DotCeleryJsonContext.Default.TaskSummary
+        );
 
         await _documents
             .UpsertAsync(
                 _collection,
                 summary.TaskId,
-                JsonSerializer.SerializeToUtf8Bytes(
-                    summary,
-                    DotCeleryJsonContext.Default.TaskSummary
-                ),
+                value,
                 new DocumentWriteOptions
                 {
                     TimeToLive = _options.TaskRecordRetention,
                     IndexKey = StateIndexKey(summary.State),
+                    SortKey = updatedAt,
+                },
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+        // The name index holds the same record under the same id, so a name listing reads only
+        // the records of that name and a state change replaces the entry instead of adding one
+        await _documents
+            .UpsertAsync(
+                _names,
+                summary.TaskId,
+                value,
+                new DocumentWriteOptions
+                {
+                    TimeToLive = _options.TaskRecordRetention,
+                    IndexKey = NameIndexKey(summary.TaskName),
                     SortKey = updatedAt,
                 },
                 cancellationToken
@@ -148,53 +173,33 @@ public sealed class TaskRecordStore
         );
 
     /// <summary>
-    /// Queries records by task name, scanning the retained records, most recently updated first.
+    /// Queries records by task name, most recently updated first.
     /// </summary>
     /// <param name="taskName">The task name to match.</param>
     /// <param name="limit">Maximum number of records to return.</param>
     /// <param name="offset">Number of matching records to skip.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The matching records.</returns>
-    public async IAsyncEnumerable<TaskSummary> QueryByNameAsync(
+    public IAsyncEnumerable<TaskSummary> QueryByNameAsync(
         string taskName,
         int limit,
         int offset,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default
+        CancellationToken cancellationToken = default
     )
     {
         ArgumentException.ThrowIfNullOrEmpty(taskName);
 
-        var skipped = 0;
-        var returned = 0;
-
-        await foreach (
-            var summary in QueryAsync(
-                    DocumentFilter.All,
-                    new DocumentPage { Descending = true, Limit = NameScanLimit },
-                    cancellationToken
-                )
-                .ConfigureAwait(false)
-        )
-        {
-            if (!string.Equals(summary.TaskName, taskName, StringComparison.Ordinal))
+        return QueryAsync(
+            _names,
+            new DocumentFilter { IndexKey = NameIndexKey(taskName) },
+            new DocumentPage
             {
-                continue;
-            }
-
-            if (skipped < offset)
-            {
-                skipped++;
-                continue;
-            }
-
-            if (returned >= limit)
-            {
-                yield break;
-            }
-
-            returned++;
-            yield return summary;
-        }
+                Descending = true,
+                Limit = limit,
+                Offset = offset,
+            },
+            cancellationToken
+        );
     }
 
     /// <summary>
@@ -276,7 +281,14 @@ public sealed class TaskRecordStore
         return [.. names];
     }
 
+    private IAsyncEnumerable<TaskSummary> QueryAsync(
+        DocumentFilter filter,
+        DocumentPage? page,
+        CancellationToken cancellationToken
+    ) => QueryAsync(_collection, filter, page, cancellationToken);
+
     private async IAsyncEnumerable<TaskSummary> QueryAsync(
+        string collection,
         DocumentFilter filter,
         DocumentPage? page,
         [EnumeratorCancellation] CancellationToken cancellationToken
@@ -289,7 +301,7 @@ public sealed class TaskRecordStore
 
         await foreach (
             var document in _documents
-                .QueryAsync(_collection, filter, page, cancellationToken)
+                .QueryAsync(collection, filter, page, cancellationToken)
                 .ConfigureAwait(false)
         )
         {
@@ -298,6 +310,8 @@ public sealed class TaskRecordStore
     }
 
     private static string StateIndexKey(string state) => $"state:{state}";
+
+    private static string NameIndexKey(string taskName) => $"name:{taskName}";
 
     private static TaskSummary Deserialize(ReadOnlySpan<byte> value) =>
         JsonSerializer.Deserialize(value, DotCeleryJsonContext.Default.TaskSummary)!;

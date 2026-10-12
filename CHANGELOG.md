@@ -83,6 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AddDotCeleryDashboard` registers its in-process `InMemoryWorkerRegistry` only when the application has not registered a registry, so a shared one registered by a provider is used whichever order the two registrations happen in
 - Recording an enqueue is the broker's job: an application no longer calls `IQueueMetrics.RecordEnqueuedAsync` for what the broker publishes, which would count a message twice. The method stays for a queue filled outside a broker, and its documentation says so
 - `Group.Then` builds a chord, as `WithCallback` does, instead of a chain whose first step was an internal group placeholder that the client published as a `__group__` task no worker could run; the placeholder is gone
+- Task records are indexed by task name as well as by state: every write stores the record and an entry in a name index that expires with it, so listing by name reads the records of that name instead of scanning the retained ones — a name whose records were older than the newest thousand updates is no longer missed, and the listing answers in one query per page. Records written before the upgrade appear under their name once they are updated again or expire
 
 ### Removed
 - `AutoCreateTables` from every PostgreSQL store's options

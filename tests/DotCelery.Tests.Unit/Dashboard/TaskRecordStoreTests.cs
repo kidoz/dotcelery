@@ -4,6 +4,7 @@ using DotCelery.Core.Models;
 using DotCelery.Dashboard;
 using DotCelery.Dashboard.Services;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 
 namespace DotCelery.Tests.Unit.Dashboard;
 
@@ -90,6 +91,93 @@ public sealed class TaskRecordStoreTests
         var alpha = await CollectAsync(_store.QueryByNameAsync("tests.alpha", 50, 0));
         Assert.Equal(2, alpha.Count);
         Assert.All(alpha, summary => Assert.Equal("tests.alpha", summary.TaskName));
+    }
+
+    [Fact]
+    public async Task Tasks_AreFoundByNameBeyondTheNameScanWindow()
+    {
+        var older = DateTimeOffset.UtcNow.AddHours(-1);
+        await _store.RecordAsync(
+            CreateSummary("t1", "tests.alpha", TaskState.Success) with
+            {
+                StartedAt = older,
+                CompletedAt = older,
+            }
+        );
+
+        // More records of another name than the names list scans: the record of the first name is
+        // older than all of them, so a scan of the newest records would miss it
+        for (var index = 0; index < 1000; index++)
+        {
+            await _store.RecordAsync(
+                CreateSummary($"other-{index}", "tests.other", TaskState.Success)
+            );
+        }
+
+        var found = await CollectAsync(_store.QueryByNameAsync("tests.alpha", 50, 0));
+
+        Assert.Equal("t1", Assert.Single(found).TaskId);
+    }
+
+    [Fact]
+    public async Task Tasks_ArePagedByNameNewestFirst()
+    {
+        var now = DateTimeOffset.UtcNow;
+        for (var index = 0; index < 3; index++)
+        {
+            await _store.RecordAsync(
+                CreateSummary($"t{index}", "tests.alpha", TaskState.Success) with
+                {
+                    CompletedAt = now.AddMinutes(index),
+                }
+            );
+        }
+
+        await _store.RecordAsync(
+            CreateSummary("other", "tests.beta", TaskState.Success) with
+            {
+                CompletedAt = now,
+            }
+        );
+
+        var firstPage = await CollectAsync(_store.QueryByNameAsync("tests.alpha", 2, 0));
+        Assert.Equal(["t2", "t1"], firstPage.Select(summary => summary.TaskId));
+
+        var secondPage = await CollectAsync(_store.QueryByNameAsync("tests.alpha", 2, 2));
+        Assert.Equal(["t0"], secondPage.Select(summary => summary.TaskId));
+    }
+
+    [Fact]
+    public async Task ATaskThatChangesState_IsFoundByNameOnce()
+    {
+        await _store.RecordAsync(CreateSummary("t1", "tests.alpha", TaskState.Started));
+        await _store.RecordAsync(
+            CreateSummary("t1", "tests.alpha", TaskState.Success) with
+            {
+                CompletedAt = DateTimeOffset.UtcNow,
+            }
+        );
+
+        var found = await CollectAsync(_store.QueryByNameAsync("tests.alpha", 50, 0));
+
+        Assert.Equal(TaskState.Success.ToString(), Assert.Single(found).State);
+    }
+
+    [Fact]
+    public async Task ANameEntry_ExpiresWithItsRecord()
+    {
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var store = new TaskRecordStore(
+            Options.Create(new DashboardOptions { TaskRecordRetention = TimeSpan.FromMinutes(10) }),
+            new InMemoryStorageProvider(time)
+        );
+        await store.RecordAsync(CreateSummary("t1", "tests.alpha", TaskState.Success));
+        Assert.Single(await CollectAsync(store.QueryByNameAsync("tests.alpha", 50, 0)));
+
+        time.Advance(TimeSpan.FromMinutes(11));
+
+        Assert.Empty(await CollectAsync(store.QueryByNameAsync("tests.alpha", 50, 0)));
+        Assert.Empty(await CollectAsync(store.QueryByStateAsync(TaskState.Success, 50, 0)));
     }
 
     [Fact]
