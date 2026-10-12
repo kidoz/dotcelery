@@ -18,7 +18,7 @@ namespace DotCelery.Broker.Redis;
 /// Redis Streams implementation of <see cref="IMessageBroker"/>.
 /// Uses Redis Streams with consumer groups for reliable message delivery.
 /// </summary>
-public sealed class RedisBroker : IMessageBroker
+public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
 {
     private readonly RedisBrokerOptions _options;
     private readonly ILogger<RedisBroker> _logger;
@@ -175,16 +175,21 @@ public sealed class RedisBroker : IMessageBroker
         // Stops the read loop when the caller stops enumerating, not only on cancellation
         using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
+        // The deliveries of this consumption, so their claims are renewed while it is alive and
+        // left to expire when it stops
+        var session = new ConsumeSession();
+
         // Start background task to read from streams
         var readTask = ReadStreamMessagesAsync(
             db,
             streamKeys,
             messageChannel.Writer,
+            session,
             readCts.Token
         );
 
         // Keeps the claims on messages that are still being processed
-        var renewTask = RenewClaimsAsync(db, readCts.Token);
+        var renewTask = RenewClaimsAsync(db, session, readCts.Token);
 
         // Yield messages from the channel
         try
@@ -223,6 +228,14 @@ public sealed class RedisBroker : IMessageBroker
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "Error in claim renewal task during cleanup");
+            }
+
+            // Deliveries this session left unsettled are no longer in flight: they stay pending
+            // in the group and the next consumer reclaims them once their claim expires, so
+            // stopping a consumption never pins a message forever
+            foreach (var tag in session.Tags)
+            {
+                _deliveries.TryRemove(tag, out _);
             }
 
             var undelivered = new List<BrokerMessage>();
@@ -346,6 +359,14 @@ public sealed class RedisBroker : IMessageBroker
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A message whose consumer stopped is reclaimed and delivered again once its claim
+    /// expires, so redelivery follows <c>RedisBrokerOptions.ClaimTimeout</c>.
+    /// </remarks>
+    public MessageBrokerCapabilities Capabilities { get; } =
+        new() { RedeliveryOnConsumerStop = true };
+
+    /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
@@ -370,6 +391,7 @@ public sealed class RedisBroker : IMessageBroker
         IDatabase db,
         string[] streamKeys,
         ChannelWriter<BrokerMessage> writer,
+        ConsumeSession session,
         CancellationToken cancellationToken
     )
     {
@@ -404,6 +426,7 @@ public sealed class RedisBroker : IMessageBroker
                                 db,
                                 streamKeys,
                                 writer,
+                                session,
                                 cancellationToken
                             )
                             .ConfigureAwait(false);
@@ -418,6 +441,7 @@ public sealed class RedisBroker : IMessageBroker
                                 db,
                                 streamKey,
                                 writer,
+                                session,
                                 cancellationToken
                             )
                             .ConfigureAwait(false);
@@ -481,6 +505,7 @@ public sealed class RedisBroker : IMessageBroker
         IDatabase db,
         string streamKey,
         ChannelWriter<BrokerMessage> writer,
+        ConsumeSession session,
         CancellationToken cancellationToken
     )
     {
@@ -516,7 +541,7 @@ public sealed class RedisBroker : IMessageBroker
             }
         }
 
-        await WriteBatchAsync(writer, batch, cancellationToken).ConfigureAwait(false);
+        await WriteBatchAsync(writer, batch, session, cancellationToken).ConfigureAwait(false);
         return entries.Length;
     }
 
@@ -527,12 +552,13 @@ public sealed class RedisBroker : IMessageBroker
     private async Task WriteBatchAsync(
         ChannelWriter<BrokerMessage> writer,
         List<BrokerMessage> batch,
+        ConsumeSession session,
         CancellationToken cancellationToken
     )
     {
         for (var i = 0; i < batch.Count; i++)
         {
-            TrackDelivery(batch[i]);
+            TrackDelivery(batch[i], session);
 
             try
             {
@@ -550,7 +576,11 @@ public sealed class RedisBroker : IMessageBroker
     // and a pending delivery idle for ClaimTimeout is reclaimed, so the consumer keeps its claim
     // alive while the message is being processed. Without this, a task that runs longer than the
     // claim timeout would be handed to another worker and run twice.
-    private async Task RenewClaimsAsync(IDatabase db, CancellationToken cancellationToken)
+    private async Task RenewClaimsAsync(
+        IDatabase db,
+        ConsumeSession session,
+        CancellationToken cancellationToken
+    )
     {
         var interval = _options.ClaimTimeout / 3;
         if (interval <= TimeSpan.Zero)
@@ -569,12 +599,21 @@ public sealed class RedisBroker : IMessageBroker
                 break;
             }
 
-            if (_deliveries.IsEmpty)
+            var live = new List<RedisDelivery>();
+            foreach (var tag in session.Tags)
+            {
+                if (_deliveries.TryGetValue(tag, out var delivery))
+                {
+                    live.Add(delivery);
+                }
+            }
+
+            if (live.Count == 0)
             {
                 continue;
             }
 
-            foreach (var stream in _deliveries.Values.GroupBy(delivery => delivery.StreamKey))
+            foreach (var stream in live.GroupBy(delivery => delivery.StreamKey))
             {
                 try
                 {
@@ -593,13 +632,24 @@ public sealed class RedisBroker : IMessageBroker
                         continue;
                     }
 
+                    var owned = pending.Select(entry => entry.MessageId).ToHashSet();
+                    var ids = stream
+                        .Select(delivery => (RedisValue)delivery.MessageId)
+                        .Where(owned.Contains)
+                        .ToArray();
+
+                    if (ids.Length == 0)
+                    {
+                        continue;
+                    }
+
                     // Claiming with JUSTID resets the idle time without counting as a delivery
                     await db.StreamClaimIdsOnlyAsync(
                             stream.Key,
                             _options.ConsumerGroupName,
                             _consumerName,
                             0,
-                            pending.Select(entry => entry.MessageId).ToArray()
+                            ids
                         )
                         .ConfigureAwait(false);
                 }
@@ -615,7 +665,7 @@ public sealed class RedisBroker : IMessageBroker
         }
     }
 
-    private void TrackDelivery(BrokerMessage message)
+    private void TrackDelivery(BrokerMessage message, ConsumeSession session)
     {
         if (message.DeliveryTag is not string deliveryTag)
         {
@@ -624,6 +674,19 @@ public sealed class RedisBroker : IMessageBroker
 
         var (streamKey, messageId) = ParseDeliveryTag(deliveryTag);
         _deliveries[deliveryTag] = new RedisDelivery(streamKey, messageId);
+        session.Track(deliveryTag);
+    }
+
+    // The deliveries one consumption session handed to its caller; claims are renewed for
+    // these and only these, so an unsettled delivery of a session that stopped does not keep
+    // its claim alive after the session is gone
+    private sealed class ConsumeSession
+    {
+        private readonly ConcurrentDictionary<string, byte> _tags = new(StringComparer.Ordinal);
+
+        public void Track(string deliveryTag) => _tags.TryAdd(deliveryTag, 0);
+
+        public IReadOnlyCollection<string> Tags => [.. _tags.Keys];
     }
 
     /// <summary>
@@ -669,6 +732,7 @@ public sealed class RedisBroker : IMessageBroker
         IDatabase db,
         string[] streamKeys,
         ChannelWriter<BrokerMessage> writer,
+        ConsumeSession session,
         CancellationToken cancellationToken
     )
     {
@@ -741,7 +805,8 @@ public sealed class RedisBroker : IMessageBroker
                     }
                 }
 
-                await WriteBatchAsync(writer, batch, cancellationToken).ConfigureAwait(false);
+                await WriteBatchAsync(writer, batch, session, cancellationToken)
+                    .ConfigureAwait(false);
                 reclaimed += batch.Count;
             }
             catch (Exception ex) when (!cancellationToken.IsCancellationRequested)

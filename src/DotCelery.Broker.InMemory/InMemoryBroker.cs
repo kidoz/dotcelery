@@ -13,12 +13,23 @@ namespace DotCelery.Broker.InMemory;
 /// <summary>
 /// In-memory message broker for testing and development.
 /// </summary>
-public sealed class InMemoryBroker : IMessageBroker
+/// <remarks>
+/// The broker models what the other brokers do, so tests that run against it exercise realistic
+/// behavior: a delivered message is what its serialized payload says, an unsettled message whose
+/// consumer stops is delivered again, and an acknowledged or rejected message is settled. It
+/// delivers in publish order and holds no message until its ETA, so it declares no priority or
+/// native-delay capability.
+/// </remarks>
+public sealed class InMemoryBroker : IMessageBroker, IBrokerCapabilities
 {
     private readonly ConcurrentDictionary<string, Channel<BrokerMessage>> _queues = new();
     private readonly InMemoryBrokerOptions _options;
     private readonly IMessageSecurityValidator? _messageSecurityValidator;
     private readonly Lock _lock = new();
+
+    // A delivered message that has not been settled, and the consumer it was delivered to
+    private readonly ConcurrentDictionary<BrokerMessage, ConsumerDeliveries> _deliveries = new();
+
     private bool _disposed;
 
     /// <summary>
@@ -76,25 +87,42 @@ public sealed class InMemoryBroker : IMessageBroker
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         var channels = queues.Select(GetOrCreateQueue).ToList();
+        var pending = new ConsumerDeliveries();
 
-        while (!cancellationToken.IsCancellationRequested && !_disposed)
+        try
         {
-            foreach (var channel in channels)
+            while (!cancellationToken.IsCancellationRequested && !_disposed)
             {
-                if (channel.Reader.TryRead(out var message))
+                foreach (var channel in channels)
                 {
-                    yield return message;
+                    if (channel.Reader.TryRead(out var message))
+                    {
+                        var delivered = RoundTrip(message);
+                        _deliveries[delivered] = pending;
+                        pending.Add(delivered);
+                        yield return delivered;
+                    }
+                }
+
+                // Small delay to prevent busy-waiting
+                try
+                {
+                    await Task.Delay(10, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    yield break;
                 }
             }
-
-            // Small delay to prevent busy-waiting
-            try
+        }
+        finally
+        {
+            // A consumer that stops without settling its messages gives them back, as a broker
+            // redelivers them
+            foreach (var message in pending.Drain())
             {
-                await Task.Delay(10, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                yield break;
+                _deliveries.TryRemove(message, out _);
+                Requeue(message);
             }
         }
     }
@@ -102,7 +130,7 @@ public sealed class InMemoryBroker : IMessageBroker
     /// <inheritdoc />
     public ValueTask AckAsync(BrokerMessage message, CancellationToken cancellationToken = default)
     {
-        // In-memory broker doesn't need acknowledgments
+        Settle(message);
         return ValueTask.CompletedTask;
     }
 
@@ -113,6 +141,8 @@ public sealed class InMemoryBroker : IMessageBroker
         CancellationToken cancellationToken = default
     )
     {
+        Settle(message);
+
         if (requeue)
         {
             return PublishAsync(message.Message, cancellationToken);
@@ -125,6 +155,103 @@ public sealed class InMemoryBroker : IMessageBroker
     public ValueTask<bool> IsHealthyAsync(CancellationToken cancellationToken = default)
     {
         return ValueTask.FromResult(!_disposed);
+    }
+
+    /// <inheritdoc />
+    public MessageBrokerCapabilities Capabilities { get; } =
+        new() { RedeliveryOnConsumerStop = true };
+
+    // The delivered message is what its serialized payload says, as with a broker that sends
+    // bytes over the wire, so a message that does not survive serialization fails here instead
+    // of only in production
+    private static BrokerMessage RoundTrip(BrokerMessage message)
+    {
+        var body =
+            message.RawBody
+            ?? JsonSerializer.SerializeToUtf8Bytes(
+                message.Message,
+                DotCeleryJsonContext.Default.TaskMessage
+            );
+
+        return new BrokerMessage
+        {
+            Message = JsonSerializer.Deserialize(body, DotCeleryJsonContext.Default.TaskMessage)!,
+            DeliveryTag = message.DeliveryTag,
+            Queue = message.Queue,
+            ReceivedAt = DateTimeOffset.UtcNow,
+            RawBody = body,
+            Signature = message.Signature,
+        };
+    }
+
+    // Marks a delivered message settled, so stopping its consumer does not deliver it again.
+    // Settling a message that was not delivered (or was already settled) does nothing.
+    private void Settle(BrokerMessage message)
+    {
+        if (_deliveries.TryRemove(message, out var pending))
+        {
+            pending.Remove(message);
+        }
+    }
+
+    // Puts an unsettled message back on its queue for redelivery
+    private void Requeue(BrokerMessage message)
+    {
+        if (_disposed || _queues.TryGetValue(message.Message.Queue, out var channel) is false)
+        {
+            return;
+        }
+
+        var rawBody = message.RawBody;
+        if (rawBody is null)
+        {
+            return;
+        }
+
+        channel.Writer.TryWrite(
+            new BrokerMessage
+            {
+                Message = message.Message,
+                DeliveryTag = Guid.NewGuid(),
+                Queue = message.Queue,
+                ReceivedAt = DateTimeOffset.UtcNow,
+                RawBody = rawBody,
+                Signature = _messageSecurityValidator?.Sign(rawBody),
+            }
+        );
+    }
+
+    // The messages one consumer was given and has not settled
+    private sealed class ConsumerDeliveries
+    {
+        private readonly Lock _lock = new();
+        private readonly List<BrokerMessage> _messages = [];
+
+        public void Add(BrokerMessage message)
+        {
+            lock (_lock)
+            {
+                _messages.Add(message);
+            }
+        }
+
+        public void Remove(BrokerMessage message)
+        {
+            lock (_lock)
+            {
+                _messages.Remove(message);
+            }
+        }
+
+        public List<BrokerMessage> Drain()
+        {
+            lock (_lock)
+            {
+                var drained = new List<BrokerMessage>(_messages);
+                _messages.Clear();
+                return drained;
+            }
+        }
     }
 
     /// <inheritdoc />

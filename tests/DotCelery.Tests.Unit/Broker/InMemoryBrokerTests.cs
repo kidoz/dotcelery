@@ -102,19 +102,14 @@ public class InMemoryBrokerTests : IAsyncDisposable
         var message = CreateTestMessage();
         await _broker.PublishAsync(message);
 
-        // Consume the message
-        BrokerMessage? received = null;
+        // Consume the message and reject it before the consumer stops, so the message is settled
+        // with a requeue instead of being returned by the stop itself
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
         await foreach (var msg in _broker.ConsumeAsync(["celery"], cts.Token))
         {
-            received = msg;
+            await _broker.RejectAsync(msg, requeue: true);
             break;
         }
-
-        Assert.NotNull(received);
-
-        // Reject with requeue
-        await _broker.RejectAsync(received, requeue: true);
 
         // Should be able to consume again
         Assert.Equal(1, _broker.GetQueueLength("celery"));
@@ -126,19 +121,13 @@ public class InMemoryBrokerTests : IAsyncDisposable
         var message = CreateTestMessage();
         await _broker.PublishAsync(message);
 
-        // Consume the message
-        BrokerMessage? received = null;
+        // Consume the message and reject it before the consumer stops
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
         await foreach (var msg in _broker.ConsumeAsync(["celery"], cts.Token))
         {
-            received = msg;
+            await _broker.RejectAsync(msg, requeue: false);
             break;
         }
-
-        Assert.NotNull(received);
-
-        // Reject without requeue
-        await _broker.RejectAsync(received, requeue: false);
 
         Assert.Equal(0, _broker.GetQueueLength("celery"));
     }

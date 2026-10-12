@@ -19,7 +19,7 @@ namespace DotCelery.Broker.RabbitMQ;
 /// <summary>
 /// RabbitMQ message broker implementation.
 /// </summary>
-public sealed class RabbitMQBroker : IMessageBroker
+public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
 {
     private readonly RabbitMQBrokerOptions _options;
     private readonly ILogger<RabbitMQBroker> _logger;
@@ -482,6 +482,16 @@ public sealed class RabbitMQBroker : IMessageBroker
             return false;
         }
     }
+
+    /// <inheritdoc />
+    public MessageBrokerCapabilities Capabilities =>
+        new()
+        {
+            Priority = true,
+            RedeliveryOnConsumerStop = true,
+            MaxMessageSizeBytes =
+                _options.MaxMessageSizeBytes > 0 ? _options.MaxMessageSizeBytes : null,
+        };
 
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
