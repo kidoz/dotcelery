@@ -22,6 +22,7 @@ using DotCelery.Worker.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 
 /// <summary>
 /// Tests for how the worker settles broker messages after failures and during shutdown.
@@ -409,6 +410,89 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
         Assert.Equal(0, activity.ActiveTasks);
     }
 
+    [Fact]
+    public async Task AFutureEta_IsWaitedForInTheWorkerAndThenRun()
+    {
+        var time = CreateFakeTime();
+        var worker = CreateWorker(o => o.MaxEtaWait = TimeSpan.FromMinutes(1), timeProvider: time);
+        _broker.Enqueue(
+            CreateMessage("t1", EchoTask.TaskName) with
+            {
+                Eta = time.GetUtcNow().AddSeconds(30),
+            }
+        );
+
+        await worker.StartAsync(CancellationToken.None);
+
+        // The worker holds the message until its ETA passes, then runs it
+        await WaitForTimeAsync(() => _broker.HasEvent("ack:t1"), time);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(TaskState.Success, (await _backend.GetResultAsync("t1"))?.State);
+        Assert.False(_broker.HasEvent("requeue:t1"));
+    }
+
+    [Fact]
+    public async Task AnEtaBeyondTheWait_IsReturnedToTheBroker()
+    {
+        var time = CreateFakeTime();
+        var worker = CreateWorker(o => o.MaxEtaWait = TimeSpan.FromSeconds(5), timeProvider: time);
+        _broker.Enqueue(
+            CreateMessage("t1", EchoTask.TaskName) with
+            {
+                Eta = time.GetUtcNow().AddMinutes(10),
+            }
+        );
+
+        await worker.StartAsync(CancellationToken.None);
+
+        await WaitForTimeAsync(() => _broker.HasEvent("requeue:t1"), time);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(_broker.HasEvent("ack:t1"));
+        Assert.Null(await _backend.GetResultAsync("t1"));
+    }
+
+    [Fact]
+    public async Task AnEtaThatExpiresWhileWaiting_IsDeadLettered()
+    {
+        var time = CreateFakeTime();
+        var worker = CreateWorker(o => o.MaxEtaWait = TimeSpan.FromMinutes(1), timeProvider: time);
+        _broker.Enqueue(
+            CreateMessage("t1", EchoTask.TaskName) with
+            {
+                Eta = time.GetUtcNow().AddSeconds(30),
+                Expires = time.GetUtcNow().AddSeconds(10),
+            }
+        );
+
+        await worker.StartAsync(CancellationToken.None);
+
+        await WaitForTimeAsync(() => _broker.HasEvent("ack:t1"), time);
+        await worker.StopAsync(CancellationToken.None);
+
+        var deadLetter = Assert.Single(await ReadDeadLettersAsync());
+        Assert.Equal(DeadLetterReason.Expired, deadLetter.Reason);
+        Assert.Null(await _backend.GetResultAsync("t1"));
+    }
+
+    private static FakeTimeProvider CreateFakeTime() =>
+        new(new DateTimeOffset(2026, 10, 12, 12, 0, 0, TimeSpan.Zero));
+
+    /// <summary>
+    /// Waits for a condition while advancing the fake clock, so the worker's ETA wait completes
+    /// without real waiting.
+    /// </summary>
+    private static async Task WaitForTimeAsync(Func<bool> condition, FakeTimeProvider time)
+    {
+        using var timeout = new CancellationTokenSource(WaitTimeout);
+        while (!condition())
+        {
+            time.Advance(TimeSpan.FromSeconds(5));
+            await Task.Delay(10, timeout.Token);
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         _gate.Release.TrySetResult();
@@ -420,7 +504,8 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
         Action<WorkerOptions>? configure = null,
         IMessageSecurityValidator? securityValidator = null,
         ICircuitBreakerFactory? circuitBreakerFactory = null,
-        WorkerActivity? activity = null
+        WorkerActivity? activity = null,
+        TimeProvider? timeProvider = null
     )
     {
         var options = new WorkerOptions
@@ -467,7 +552,8 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
             deadLetterHandler: CreateDeadLetterHandler(),
             securityValidator: securityValidator,
             circuitBreakerFactory: circuitBreakerFactory,
-            activity: activity
+            activity: activity,
+            timeProvider: timeProvider
         );
         return _worker;
     }

@@ -257,47 +257,31 @@ public sealed class CeleryWorkerService : BackgroundService
                 return;
             }
 
-            // Check if ETA is in the future
-            if (message.Message.Eta.HasValue && message.Message.Eta.Value > now)
+            // A message whose ETA is still ahead goes to the delay store when one is configured.
+            // Without one it is handed to a worker, which waits on it (WorkerOptions.MaxEtaWait)
+            // in a task slot instead of holding this intake loop, so other queues keep flowing
+            if (
+                message.Message.Eta.HasValue
+                && message.Message.Eta.Value > now
+                && _options.UseDelayQueue
+                && _delayedMessageStore is not null
+            )
             {
-                if (_options.UseDelayQueue && _delayedMessageStore is not null)
-                {
-                    // Add to delay store for efficient handling
-                    await _delayedMessageStore
-                        .AddAsync(message.Message, message.Message.Eta.Value, intakeToken)
-                        .ConfigureAwait(false);
+                // Add to delay store for efficient handling
+                await _delayedMessageStore
+                    .AddAsync(message.Message, message.Message.Eta.Value, intakeToken)
+                    .ConfigureAwait(false);
 
-                    await AckAsync(message).ConfigureAwait(false);
+                await AckAsync(message).ConfigureAwait(false);
 
-                    _logger.LogDebug(
-                        "Task {TaskId} scheduled for {Eta} via delay store",
-                        message.Message.Id,
-                        message.Message.Eta.Value
-                    );
-                }
-                else
-                {
-                    // Fallback behavior: wait until ETA or a maximum delay to prevent spin loop
-                    var delayUntilEta = message.Message.Eta.Value - now;
-                    var maxFallbackDelay = TimeSpan.FromSeconds(5);
-                    var actualDelay =
-                        delayUntilEta < maxFallbackDelay ? delayUntilEta : maxFallbackDelay;
-
-                    _logger.LogDebug(
-                        "Task {TaskId} has future ETA {Eta}, waiting {Delay} before requeue (no delay store configured)",
-                        message.Message.Id,
-                        message.Message.Eta.Value,
-                        actualDelay
-                    );
-
-                    await Task.Delay(actualDelay, intakeToken).ConfigureAwait(false);
-                    await ReturnToBrokerAsync(message).ConfigureAwait(false);
-                }
+                _logger.LogDebug(
+                    "Task {TaskId} scheduled for {Eta} via delay store",
+                    message.Message.Id,
+                    message.Message.Eta.Value
+                );
 
                 return;
             }
-
-            DotCeleryMetrics.RecordTaskReceived(message.Message.Task, message.Message.Queue);
 
             await _workChannel.Writer.WriteAsync(message, intakeToken).ConfigureAwait(false);
         }
@@ -349,10 +333,6 @@ public sealed class CeleryWorkerService : BackgroundService
     {
         var taskName = message.Message.Task;
         DotCeleryMetrics.IncrementTasksInProgress(taskName);
-        DotCeleryMetrics.RecordQueueTime(
-            taskName,
-            _timeProvider.GetUtcNow() - message.Message.Timestamp
-        );
         _activity?.IncrementActiveTasks();
 
         try
@@ -371,6 +351,19 @@ public sealed class CeleryWorkerService : BackgroundService
         CancellationToken executionToken
     )
     {
+        // A message that arrived before its ETA waits here, in one task slot, instead of in the
+        // intake loop; when the wait does not cover the remaining time it goes back to the broker
+        if (!await WaitForEtaAsync(message, executionToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        DotCeleryMetrics.RecordTaskReceived(message.Message.Task, message.Message.Queue);
+        DotCeleryMetrics.RecordQueueTime(
+            message.Message.Task,
+            _timeProvider.GetUtcNow() - message.Message.Timestamp
+        );
+
         // While a queue's circuit is open (or the global one, after failures that affected
         // every queue), its messages wait in the broker instead of running
         if (OpenCircuitFor(message) is { } openCircuit)
@@ -869,6 +862,57 @@ public sealed class CeleryWorkerService : BackgroundService
         await DelayAsync(_options.InfrastructureFailureRequeueDelay, executionToken)
             .ConfigureAwait(false);
         await ReturnToBrokerAsync(message).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Waits for a message's ETA in this worker. The wait is capped at
+    /// <see cref="WorkerOptions.MaxEtaWait"/>; a message whose ETA is further out goes back to
+    /// the broker to be redelivered, and one that expires while waiting is dead-lettered.
+    /// </summary>
+    /// <returns><c>true</c> when the message should be processed now.</returns>
+    private async Task<bool> WaitForEtaAsync(
+        BrokerMessage message,
+        CancellationToken executionToken
+    )
+    {
+        if (message.Message.Eta is not { } eta || eta <= _timeProvider.GetUtcNow())
+        {
+            return true;
+        }
+
+        var wait = eta - _timeProvider.GetUtcNow();
+        if (wait > _options.MaxEtaWait)
+        {
+            wait = _options.MaxEtaWait;
+        }
+
+        await DelayAsync(wait, executionToken).ConfigureAwait(false);
+
+        if (eta > _timeProvider.GetUtcNow())
+        {
+            _logger.LogDebug(
+                "Task {TaskId} has future ETA {Eta}, returning it to the broker to be redelivered",
+                message.Message.Id,
+                eta
+            );
+            await ReturnToBrokerAsync(message).ConfigureAwait(false);
+            return false;
+        }
+
+        // The wait can carry a message past its expiry, which the intake loop checked before it
+        // handed the message over
+        if (
+            message.Message.Expires.HasValue
+            && message.Message.Expires.Value < _timeProvider.GetUtcNow()
+        )
+        {
+            _logger.LogWarning("Task {TaskId} has expired, skipping", message.Message.Id);
+            await DeadLetterAsync(message.Message, DeadLetterReason.Expired).ConfigureAwait(false);
+            await AckAsync(message).ConfigureAwait(false);
+            return false;
+        }
+
+        return true;
     }
 
     private async Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)

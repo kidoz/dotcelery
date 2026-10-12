@@ -66,6 +66,16 @@ public sealed class WorkerOptions
     /// </summary>
     public TimeSpan DelayedMessageRetryInterval { get; set; } = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// Gets or sets the longest a worker waits on a message whose ETA is still ahead when no
+    /// delay store is configured: it waits in one task slot, runs the task when the ETA passes
+    /// within that wait, and otherwise returns the message to the broker to be redelivered.
+    /// With a delay store the message waits in the store instead. A shorter wait returns
+    /// messages to the broker more often, which can spin; zero returns them at once.
+    /// Default is 5 seconds.
+    /// </summary>
+    public TimeSpan MaxEtaWait { get; set; } = TimeSpan.FromSeconds(5);
+
     // ========== Revocation Settings ==========
 
     /// <summary>
