@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using System.Diagnostics.CodeAnalysis;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Attributes;
 using DotCelery.Core.Filters;
@@ -49,7 +50,9 @@ public sealed class TaskRegistry
     /// <exception cref="InvalidOperationException">
     /// Thrown when a task with the same name is already registered and <see cref="ThrowOnDuplicateRegistration"/> is true.
     /// </exception>
-    public void Register<TTask>()
+    public void Register<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.Interfaces)] TTask
+    >()
         where TTask : ITask
     {
         var taskName = TTask.TaskName;
@@ -155,6 +158,11 @@ public sealed class TaskRegistry
     /// <returns>True if registered.</returns>
     public bool IsRegistered(string taskName) => _tasks.ContainsKey(taskName);
 
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2070",
+        Justification = "Task types reach the registry from AddTask<TTask> registrations, whose type argument preserves the task's interfaces for this inspection; the reflective scan that also reaches it is unavailable under Native AOT."
+    )]
     private static Type? GetInputType(Type taskType)
     {
         var iface = taskType
@@ -170,6 +178,11 @@ public sealed class TaskRegistry
         return iface?.GetGenericArguments().FirstOrDefault();
     }
 
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2070",
+        Justification = "Task types reach the registry from AddTask<TTask> registrations, whose type argument preserves the task's interfaces for this inspection; the reflective scan that also reaches it is unavailable under Native AOT."
+    )]
     private static Type? GetOutputType(Type taskType)
     {
         var iface = taskType
