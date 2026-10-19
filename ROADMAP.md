@@ -52,7 +52,6 @@ but do not yet behave as documented.
 - Hard time limits are cooperative; a task that ignores its cancellation token keeps its worker slot
 
 ### Incomplete Documented Features
-- Canvas: a chord cannot be a member of a group; following a group with a task is a chord, written with `WithCallback` or its workflow-named form `Then`
 - Dashboard: the default worker registry is in-process, and so are the consumer counts taken from it, so a deployment whose workers run elsewhere registers a registry on shared storage
 
 ## Planned Features

@@ -746,6 +746,21 @@ DotCelery's own model types keep coming from the built-in `DotCeleryJsonContext`
 
 `samples/DotCelery.AotSmoke` is a complete example; `just aot-smoke` publishes it for the host platform and runs it, as does CI.
 
+## Production Checklist
+
+- **Durable providers.** Use a shared broker (RabbitMQ, Redis, or SQS), a shared result backend, and storage-backed stores configured on storage every host shares. The in-memory broker, backend, and stores keep their data in the process and are meant for tests and samples.
+- **Schema migrations.** PostgreSQL and SQL Server register their migrations with a generic host and apply them at startup under a database lock. A deployment that applies schema changes itself runs `SqlMigrator.GenerateScript()` once and applies the output through its migration process before rolling out.
+- **Shared worker data.** Workers register themselves with `IWorkerRegistry`. A dashboard running in another process needs a registry on shared storage (`AddRedisWorkerRegistry`, `AddPostgresWorkerRegistry`, `AddSqlServerWorkerRegistry`, or `AddMongoWorkerRegistry`), not the in-process default.
+- **Dashboard access.** The dashboard denies requests until `AuthorizationCallback` is wired and `RequireAuthorization` is enabled (the default), and state-changing requests must carry the dashboard request header and come from an allowed origin. Serve it over HTTPS.
+- **Message security.** Enable `MessageSecurityOptions.EnableMessageSigning` with a `SigningKey`, keep `RejectUnsignedMessages` on, set `MaxMessageAge` to the longest acceptable redelivery delay, bound `MaxPayloadSizeBytes`, and enable the task allowlist (`EnforceTaskAllowlist` and `AllowedTaskNames`). `JsonMessageSerializerOptions.EnforceDeserializationTypeAllowlist` additionally restricts payload types.
+- **Retention.** Size `StorageStoreOptions.ResultExpiry`, `InboxRetention`, `RevocationRetention`, and `WorkerRetention` to the replay window and dashboard history you need, and keep `AddStoragePurge()` registered so expired entries are deleted every `PurgeInterval`.
+- **Dead letters.** Monitor the dead-letter store and configure broker and worker dead-lettering for the deployment; a rejected or exhausted message is not retried silently.
+- **Observability.** Register health checks with `AddDotCelery()` on the `IHealthChecksBuilder`, and export metrics and traces with `AddDotCeleryInstrumentation()` on the meter and tracer providers.
+- **Scheduling.** Run one Beat scheduler per schedule: with shared storage the schedulers elect one leader per `SchedulerName`. Enable `PersistState` so last-run times survive a restart, and decide `RunMissedOnStartup`.
+- **Time limits.** Hard time limits are cooperative: a task that ignores its cancellation token keeps its worker slot, so bound such work inside the task.
+- **Native AOT.** Only Core, Worker, Client, the in-memory broker and backend, and the generated registration and JSON contexts are verified for AOT and trimming; the dashboard and the driver-based providers are not.
+- **Versions.** DotCelery targets .NET 10 and follows semantic versioning for its public API, which the packages track in `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt`.
+
 ## Project Structure
 
 ```
