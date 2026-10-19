@@ -26,6 +26,20 @@ if [ -z "${version}" ] || [ "${version}" = "$(basename "${core_package}")" ]; th
   exit 1
 fi
 
+expected="$(grep -vE '^#|^[[:space:]]*$' "${repo_root}/eng/packages.txt" | sort)"
+actual="$(
+  find "${packages_dir}" -maxdepth 1 -name '*.nupkg' -print | while IFS= read -r package; do
+    name="$(basename "${package}")"
+    printf '%s\n' "${name%.${version}.nupkg}"
+  done | sort
+)"
+
+if [ "${expected}" != "${actual}" ]; then
+  echo "The packed package set does not match eng/packages.txt:" >&2
+  diff <(printf '%s\n' "${expected}") <(printf '%s\n' "${actual}") >&2 || true
+  exit 1
+fi
+
 echo "Verifying DotCelery ${version} from ${packages_dir}"
 
 cd "${repo_root}"

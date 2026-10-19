@@ -68,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The packaging and release workflows restore the packed packages from the local feed into a console app and run a task end to end, so a package with a missing dependency or without its analyzer assets fails before it is published; the release gate also runs the generated-task tests and the Native AOT smoke test, and the installation docs list every package, including `DotCelery.Analyzers`
 - Every shipped library tracks its public surface with `Microsoft.CodeAnalysis.PublicApiAnalyzers`: `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt` record every package's API, so an accidental addition, removal, or signature change fails the build until it is declared. `just api-format` declares an intentional change, and the initial baseline covers all 18 packages, including the members the JSON source generator adds to `DotCeleryJsonContext`
 - The README has a production checklist covering durable providers and migrations, the shared worker registry and dashboard access, message security and retention, dead letters, observability, Beat election and state, cooperative time limits, AOT scope, and versioning
+- The release verifies that the packed package set matches `eng/packages.txt`, so a package that stops shipping, or one that unexpectedly ships, fails before anything is published
 
 ### Changed
 - PostgreSQL stores no longer create their tables on first use; run migrations first (automatic with a generic host)

@@ -1,0 +1,20 @@
+# The packages a release publishes, one per line. eng/verify-packages.sh fails when the
+# packed set is missing one of them or contains one that is not listed.
+DotCelery.Analyzers
+DotCelery.Backend.InMemory
+DotCelery.Backend.Mongo
+DotCelery.Backend.Postgres
+DotCelery.Backend.Redis
+DotCelery.Backend.SqlServer
+DotCelery.Beat
+DotCelery.Broker.InMemory
+DotCelery.Broker.RabbitMQ
+DotCelery.Broker.Redis
+DotCelery.Broker.Sqs
+DotCelery.Client
+DotCelery.Core
+DotCelery.Cron
+DotCelery.Dashboard
+DotCelery.Storage.Sql
+DotCelery.Telemetry
+DotCelery.Worker
