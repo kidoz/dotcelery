@@ -225,10 +225,17 @@ public sealed class DotCeleryBuilder
     /// </summary>
     /// <param name="assembly">The assembly to scan.</param>
     /// <returns>The builder.</returns>
+    /// <remarks>
+    /// The scan reads the assembly's types through reflection, so a Native AOT or trimmed
+    /// application registers its tasks with the source-generated registration instead.
+    /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// Thrown when a discovered task type's static <see cref="ITask.TaskName"/> is missing,
     /// null, or empty.
     /// </exception>
+    [RequiresUnreferencedCode(
+        "Scanning an assembly for task types needs reflection; a Native AOT or trimmed application uses the source-generated task registration."
+    )]
     public DotCeleryBuilder AddTasksFromAssembly(System.Reflection.Assembly assembly)
     {
         ArgumentNullException.ThrowIfNull(assembly);
