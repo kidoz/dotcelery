@@ -198,11 +198,21 @@ public sealed class DotCeleryBuilder
     /// <remarks>
     /// A source-generated registration calls this overload with the task's static
     /// <see cref="ITask.TaskName"/>, so the name is known without reading it through reflection,
-    /// and with the generated adapter that invokes the task without expression compilation.
+    /// with the generated adapter that invokes the task without expression compilation, and
+    /// with the input and output types it knows at generation time, so the worker's registry
+    /// does not inspect the task's interfaces.
     /// </remarks>
     /// <typeparam name="TTask">The task type.</typeparam>
     /// <param name="taskName">The name the task routes by.</param>
     /// <param name="invoker">The typed adapter that invokes the task, when one was generated.</param>
+    /// <param name="inputType">
+    /// The input type, when it is known without inspecting the task type; null lets the registry
+    /// resolve it.
+    /// </param>
+    /// <param name="outputType">
+    /// The output type, when it is known without inspecting the task type; null lets the registry
+    /// resolve it.
+    /// </param>
     /// <returns>The builder.</returns>
     public DotCeleryBuilder AddTask<
         [DynamicallyAccessedMembers(
@@ -210,13 +220,20 @@ public sealed class DotCeleryBuilder
                 | DynamicallyAccessedMemberTypes.Interfaces
         )]
             TTask
-    >(string taskName, ITaskInvoker? invoker = null)
+    >(
+        string taskName,
+        ITaskInvoker? invoker = null,
+        Type? inputType = null,
+        Type? outputType = null
+    )
         where TTask : class, ITask
     {
         ArgumentException.ThrowIfNullOrEmpty(taskName);
 
         Services.AddTransient<TTask>();
-        _taskTypes.Add(new TaskTypeRegistration(typeof(TTask), taskName, invoker));
+        _taskTypes.Add(
+            new TaskTypeRegistration(typeof(TTask), taskName, invoker, inputType, outputType)
+        );
         return this;
     }
 

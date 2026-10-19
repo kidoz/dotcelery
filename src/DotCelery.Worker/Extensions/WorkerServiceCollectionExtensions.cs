@@ -69,7 +69,13 @@ public static class WorkerServiceCollectionExtensions
 
             foreach (var task in builder.TaskRegistrations)
             {
-                registry.Register(task.TaskType, task.TaskName, task.Invoker);
+                registry.Register(
+                    task.TaskType,
+                    task.TaskName,
+                    task.Invoker,
+                    task.InputType,
+                    task.OutputType
+                );
             }
 
             return registry;

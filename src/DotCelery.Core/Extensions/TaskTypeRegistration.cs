@@ -8,8 +8,18 @@ namespace DotCelery.Core.Extensions;
 /// <param name="TaskType">The task type.</param>
 /// <param name="TaskName">The name the task routes by.</param>
 /// <param name="Invoker">The typed adapter that invokes the task, when one was generated.</param>
+/// <param name="InputType">
+/// The input type, when it is known without inspecting the task type; null lets the registry
+/// resolve it.
+/// </param>
+/// <param name="OutputType">
+/// The output type, when it is known without inspecting the task type; null lets the registry
+/// resolve it.
+/// </param>
 public sealed record TaskTypeRegistration(
     Type TaskType,
     string TaskName,
-    ITaskInvoker? Invoker = null
+    ITaskInvoker? Invoker = null,
+    Type? InputType = null,
+    Type? OutputType = null
 );

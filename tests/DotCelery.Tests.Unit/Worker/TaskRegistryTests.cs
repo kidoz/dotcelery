@@ -119,6 +119,37 @@ public class TaskRegistryTests
     }
 
     [Fact]
+    public void Register_WithKnownTypes_UsesThemInsteadOfInspectingTheTask()
+    {
+        var registry = new TaskRegistry();
+
+        registry.Register(
+            typeof(TestTask),
+            "custom.task.name",
+            inputType: typeof(string),
+            outputType: typeof(int)
+        );
+
+        var registration = registry.GetTask("custom.task.name");
+        Assert.NotNull(registration);
+        Assert.Equal(typeof(string), registration.InputType);
+        Assert.Equal(typeof(int), registration.OutputType);
+    }
+
+    [Fact]
+    public void Register_WithKnownInputType_ResolvesTheOutputType()
+    {
+        var registry = new TaskRegistry();
+
+        registry.Register(typeof(TestTask), "custom.task.name", inputType: typeof(string));
+
+        var registration = registry.GetTask("custom.task.name");
+        Assert.NotNull(registration);
+        Assert.Equal(typeof(string), registration.InputType);
+        Assert.Equal(typeof(TestOutput), registration.OutputType);
+    }
+
+    [Fact]
     public void Register_ByType_RejectsNonITaskType()
     {
         var registry = new TaskRegistry();

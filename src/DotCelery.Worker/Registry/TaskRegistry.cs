@@ -58,7 +58,7 @@ public sealed class TaskRegistry
         var taskName = TTask.TaskName;
         var taskType = typeof(TTask);
 
-        RegisterInternal(taskType, taskName, invoker: null);
+        RegisterInternal(taskType, taskName, invoker: null, inputType: null, outputType: null);
     }
 
     /// <summary>
@@ -67,10 +67,24 @@ public sealed class TaskRegistry
     /// <param name="taskType">The task type.</param>
     /// <param name="taskName">The task name.</param>
     /// <param name="invoker">The typed adapter that invokes the task, when one was generated.</param>
+    /// <param name="inputType">
+    /// The input type, when it is known without inspecting the task type; null inspects the task's
+    /// interfaces.
+    /// </param>
+    /// <param name="outputType">
+    /// The output type, when it is known without inspecting the task type; null inspects the
+    /// task's interfaces.
+    /// </param>
     /// <exception cref="InvalidOperationException">
     /// Thrown when a task with the same name is already registered and <see cref="ThrowOnDuplicateRegistration"/> is true.
     /// </exception>
-    public void Register(Type taskType, string taskName, ITaskInvoker? invoker = null)
+    public void Register(
+        Type taskType,
+        string taskName,
+        ITaskInvoker? invoker = null,
+        Type? inputType = null,
+        Type? outputType = null
+    )
     {
         ArgumentNullException.ThrowIfNull(taskType);
         ArgumentException.ThrowIfNullOrEmpty(taskName);
@@ -87,16 +101,24 @@ public sealed class TaskRegistry
             );
         }
 
-        RegisterInternal(taskType, taskName, invoker);
+        RegisterInternal(taskType, taskName, invoker, inputType, outputType);
     }
 
-    private void RegisterInternal(Type taskType, string taskName, ITaskInvoker? invoker)
+    private void RegisterInternal(
+        Type taskType,
+        string taskName,
+        ITaskInvoker? invoker,
+        Type? inputType,
+        Type? outputType
+    )
     {
+        // A generated registration supplies the types it knows, so the registry reflects only
+        // when they are absent, as they are for the reflective scan and a manual registration
         var registration = new TaskRegistration(
             TaskName: taskName,
             TaskType: taskType,
-            InputType: GetInputType(taskType),
-            OutputType: GetOutputType(taskType),
+            InputType: inputType ?? GetInputType(taskType),
+            OutputType: outputType ?? GetOutputType(taskType),
             RateLimitPolicy: GetRateLimitPolicy(taskType),
             FilterTypes: GetFilterTypes(taskType),
             Queue: GetQueue(taskType),
