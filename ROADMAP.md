@@ -39,7 +39,7 @@ but do not yet behave as documented.
 
 ### Dashboard
 - Workers register themselves with the dashboard's registry and heartbeat their live active and processed task counts; the registry marks workers that miss their heartbeat budget unresponsive and then removes them. It is in-process by default, and `AddRedisWorkerRegistry`, `AddPostgresWorkerRegistry`, `AddSqlServerWorkerRegistry`, `AddMongoWorkerRegistry`, and `AddInMemoryWorkerRegistry` register one built on the storage primitives, which every host sharing that storage sees and which the same conformance tests hold to the same behavior on every provider
-- Built-in data providers: queue statistics from the queue metrics store — whose waiting counts the brokers record as they publish, and whose consumers are counted from the worker registry — a task record store (written from task signals, expiring on a retention, and indexed by state and by task name) behind the task list, state counts, and task names, and metrics from the historical data store or computed live from the records, with a collector recording per-queue snapshots
+- Built-in data providers: queue statistics from the queue metrics store — whose waiting counts the brokers record as they publish, and whose consumers are counted from the worker registry — a task record store (written from task signals, expiring on a retention, and indexed by state and by task name) behind the task list, state counts, and task names, and metrics from the historical data store or computed live from the records, with a collector recording per-queue and per-task snapshots from the queue metrics and the per-task totals the signal handler keeps
 - Task state changes and worker status changes are pushed over SignalR; the middleware passes API and hub paths through to their endpoints
 
 ## Known Gaps
@@ -49,7 +49,7 @@ but do not yet behave as documented.
 
 ### Incomplete Documented Features
 - Canvas: a chord cannot be a member of a group; following a group with a task is a chord, written with `WithCallback` or its workflow-named form `Then`
-- Dashboard: the default worker registry is in-process, and so are the consumer counts taken from it, so a deployment whose workers run elsewhere registers a registry on shared storage; the list of task names the dashboard offers comes from the most recently updated records, so a name whose records all expired from that window is not offered until one is updated again; historical metrics have no per-task breakdown, so the metrics panel's per-task view only fills live from the task records
+- Dashboard: the default worker registry is in-process, and so are the consumer counts taken from it, so a deployment whose workers run elsewhere registers a registry on shared storage; the list of task names the dashboard offers comes from the most recently updated records, so a name whose records all expired from that window is not offered until one is updated again
 
 ### Security Hardening
 - A signed message can be replayed after `MessageSecurityOptions.MaxMessageAge` and the inbox retention have passed; an ID cannot be refused once its inbox record expires

@@ -23,6 +23,7 @@ public sealed class DashboardTaskSignalHandler
         ITaskSignalHandler<TaskRejectedSignal>
 {
     private readonly TaskRecordStore _records;
+    private readonly TaskMetricsStore? _taskMetrics;
     private readonly DashboardNotificationService? _notifications;
     private readonly DashboardOptions _options;
     private readonly ILogger<DashboardTaskSignalHandler> _logger;
@@ -34,17 +35,20 @@ public sealed class DashboardTaskSignalHandler
     /// <param name="options">The dashboard options.</param>
     /// <param name="logger">The logger.</param>
     /// <param name="notifications">The SignalR notifications, when the hub is mapped.</param>
+    /// <param name="taskMetrics">The task metrics the settled tasks are counted in, when one is registered.</param>
     public DashboardTaskSignalHandler(
         TaskRecordStore records,
         IOptions<DashboardOptions> options,
         ILogger<DashboardTaskSignalHandler> logger,
-        DashboardNotificationService? notifications = null
+        DashboardNotificationService? notifications = null,
+        TaskMetricsStore? taskMetrics = null
     )
     {
         _records = records;
         _options = options.Value;
         _logger = logger;
         _notifications = notifications;
+        _taskMetrics = taskMetrics;
     }
 
     /// <inheritdoc />
@@ -106,6 +110,19 @@ public sealed class DashboardTaskSignalHandler
                 cancellationToken
             )
             .ConfigureAwait(false);
+
+        // Only a terminal state settled the task; a retry runs it again and is counted then
+        if (completedAt is not null && _taskMetrics is not null)
+        {
+            await _taskMetrics
+                .RecordCompletedAsync(
+                    signal.TaskName,
+                    success: signal.State == TaskState.Success,
+                    signal.Duration,
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+        }
 
         await NotifyAsync(signal.TaskId, signal.State.ToString(), cancellationToken)
             .ConfigureAwait(false);

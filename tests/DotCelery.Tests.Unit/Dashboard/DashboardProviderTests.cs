@@ -239,6 +239,42 @@ public sealed class DashboardProviderTests
         await collector.StopAsync(CancellationToken.None);
     }
 
+    [Fact]
+    public async Task PerTaskSnapshots_AreRecordedFromTheTaskMetrics()
+    {
+        var metrics = new TaskMetricsStore(_storage, timeProvider: _time);
+        var history = new FakeHistoricalDataStore();
+        var collector = new DashboardMetricsCollector(
+            Options.Create(new DashboardOptions()),
+            NullLogger<DashboardMetricsCollector>.Instance,
+            history: history,
+            metrics: null,
+            timeProvider: _time,
+            taskMetrics: metrics
+        );
+
+        await metrics.RecordCompletedAsync("tests.alpha", success: true, TimeSpan.FromSeconds(2));
+
+        // The first poll only establishes the baseline
+        await collector.SnapshotAsync(CancellationToken.None);
+        Assert.Empty(history.Snapshots);
+
+        await metrics.RecordCompletedAsync("tests.alpha", success: true, TimeSpan.FromSeconds(4));
+        await metrics.RecordCompletedAsync("tests.alpha", success: false, TimeSpan.FromSeconds(6));
+        await collector.SnapshotAsync(CancellationToken.None);
+
+        var snapshot = Assert.Single(history.Snapshots);
+        Assert.Equal("tests.alpha", snapshot.TaskName);
+        Assert.Null(snapshot.Queue);
+        Assert.Equal(1, snapshot.SuccessCount);
+        Assert.Equal(1, snapshot.FailureCount);
+        Assert.Equal(TimeSpan.FromSeconds(5), snapshot.AverageExecutionTime);
+
+        // Nothing changed, so no further snapshot is recorded
+        await collector.SnapshotAsync(CancellationToken.None);
+        Assert.Single(history.Snapshots);
+    }
+
     /// <summary>
     /// Waits for a condition while advancing the fake clock, so the collector's timer ticks
     /// without real waiting.

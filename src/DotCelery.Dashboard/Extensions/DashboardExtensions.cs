@@ -82,9 +82,11 @@ public static class DashboardExtensions
         services.AddScoped<DashboardRequestVerificationFilter>();
 
         // The task record store indexes the tasks this host runs, so the dashboard can list and
-        // count them; the providers serve queue stats, task queries, and metrics from the
-        // stores the application already has (it does not need to implement them)
+        // count them, and the task metrics store keeps their per-name totals for the history;
+        // the providers serve queue stats, task queries, and metrics from the stores the
+        // application already has (it does not need to implement them)
         services.AddSingleton<TaskRecordStore>();
+        services.AddSingleton<TaskMetricsStore>();
         services.AddSingleton<ITaskSummaryProvider, DashboardTaskSummaryProvider>();
         services.AddSingleton<IQueueStatsProvider, DashboardQueueStatsProvider>();
         services.AddSingleton<IMetricsProvider, DashboardMetricsProvider>();

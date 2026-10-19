@@ -150,12 +150,56 @@ public sealed class DashboardTaskSignalHandlerTests
             .SendCoreAsync("OverviewChanged", Arg.Any<object?[]>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task OnlyTerminalPostRunSignals_CountTowardTheTaskName()
+    {
+        var metrics = new TaskMetricsStore(_storage, timeProvider: _time);
+        var handler = new DashboardTaskSignalHandler(
+            _records,
+            Options.Create(new DashboardOptions()),
+            NullLogger<DashboardTaskSignalHandler>.Instance,
+            taskMetrics: metrics
+        );
+
+        // Starting and retrying do not settle the task, so they are not counted
+        await handler.HandleAsync(CreatePreRun("t1", _time.GetUtcNow()));
+        await handler.HandleAsync(CreatePostRun("t1", TaskState.Retry, TimeSpan.FromSeconds(1)));
+        Assert.Empty(await metrics.GetTotalsAsync());
+
+        await handler.HandleAsync(CreatePostRun("t1", TaskState.Success, TimeSpan.FromSeconds(2)));
+        await handler.HandleAsync(CreatePreRun("t2", _time.GetUtcNow()));
+        await handler.HandleAsync(CreatePostRun("t2", TaskState.Failure, TimeSpan.FromSeconds(3)));
+
+        var totals = (await metrics.GetTotalsAsync())["tests.alpha"];
+        Assert.Equal(1, totals.Succeeded);
+        Assert.Equal(1, totals.Failed);
+        Assert.Equal(
+            TimeSpan.FromSeconds(2).Ticks + TimeSpan.FromSeconds(3).Ticks,
+            totals.DurationTicks
+        );
+    }
+
     private static TaskPreRunSignal CreatePreRun(string taskId, DateTimeOffset timestamp) =>
         new()
         {
             TaskId = taskId,
             TaskName = "tests.alpha",
             Timestamp = timestamp,
+            Worker = "worker-1",
+        };
+
+    private static TaskPostRunSignal CreatePostRun(
+        string taskId,
+        TaskState state,
+        TimeSpan duration
+    ) =>
+        new()
+        {
+            TaskId = taskId,
+            TaskName = "tests.alpha",
+            Timestamp = DateTimeOffset.UtcNow,
+            State = state,
+            Duration = duration,
             Worker = "worker-1",
         };
 }

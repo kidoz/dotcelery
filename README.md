@@ -545,9 +545,9 @@ What the dashboard shows out of the box:
   queues contain it (a queue no online worker lists keeps what the metrics store reports, which
   is zero for the bundled stores).
 - **Metrics** — the window aggregated from the historical data store when one is registered
-  (`DashboardMetricsCollector` records per-queue snapshots every
-  `DashboardOptions.MetricsSnapshotInterval`), and otherwise computed live from the task
-  records, which also break the metrics down by task name.
+  (`DashboardMetricsCollector` records per-queue and per-task snapshots every
+  `DashboardOptions.MetricsSnapshotInterval`, so the per-task breakdown outlives the task
+  records), and otherwise computed live from the task records.
 - **Live updates** — task state changes and worker status are pushed over SignalR. The
   `DashboardNotificationService` is the extension point for your own events.
 
