@@ -2,6 +2,7 @@
   <PropertyGroup>
     <RootNamespace>DotCelery.Broker.InMemory</RootNamespace>
     <Description>In-memory message broker for DotCelery (testing and development)</Description>
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>

@@ -2,6 +2,7 @@
   <PropertyGroup>
     <RootNamespace>DotCelery.Core</RootNamespace>
     <Description>Core abstractions and interfaces for DotCelery distributed task queue</Description>
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>

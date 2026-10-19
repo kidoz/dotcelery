@@ -2,6 +2,7 @@
   <PropertyGroup>
     <RootNamespace>DotCelery.Worker</RootNamespace>
     <Description>Worker implementation for DotCelery distributed task queue</Description>
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>

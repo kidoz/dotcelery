@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using DotCelery.Client.Batches;
 using DotCelery.Client.Canvas;
 using DotCelery.Core.Abstractions;
@@ -61,9 +62,10 @@ public static class ClientServiceCollectionExtensions
     /// <typeparam name="THandler">The handler implementation type.</typeparam>
     /// <param name="builder">The DotCelery builder.</param>
     /// <returns>The builder.</returns>
-    public static DotCeleryBuilder AddSignalHandler<TSignal, THandler>(
-        this DotCeleryBuilder builder
-    )
+    public static DotCeleryBuilder AddSignalHandler<
+        TSignal,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] THandler
+    >(this DotCeleryBuilder builder)
         where TSignal : ITaskSignal
         where THandler : class, ITaskSignalHandler<TSignal>
     {

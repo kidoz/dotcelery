@@ -2,6 +2,7 @@
   <PropertyGroup>
     <RootNamespace>DotCelery.Client</RootNamespace>
     <Description>Client library for sending tasks to DotCelery distributed task queue</Description>
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>
