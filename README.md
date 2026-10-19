@@ -87,6 +87,24 @@ public record EmailInput(string To, string Subject, string Body);
 public record EmailResult(bool Success);
 ```
 
+The analyzer package also contains a source generator: for every assembly that defines tasks it
+emits an internal `DotCelery.Generated.DotCeleryTasks.RegisterTasks()` extension that registers
+each of them under its static `TaskName` through a typed reference, with no reflection. Call it
+from the same assembly instead of scanning:
+
+```csharp
+using DotCelery.Generated;
+
+builder.Services.AddDotCelery(celery =>
+    celery
+        .AddWorker()
+        .RegisterTasks());
+```
+
+A library that ships tasks calls the generated method from its own public registration method,
+since the generated class is internal to the assembly that defines the tasks.
+`AddTasksFromAssembly` stays available for the reflective scan.
+
 ### Configure Services
 
 ```csharp

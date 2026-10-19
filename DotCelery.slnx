@@ -22,6 +22,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/DotCelery.Analyzers.Tests/DotCelery.Analyzers.Tests.csproj" />
     <Project Path="tests/DotCelery.Tests.Conformance/DotCelery.Tests.Conformance.csproj" />
+    <Project Path="tests/DotCelery.Tests.Generated/DotCelery.Tests.Generated.csproj" />
     <Project Path="tests/DotCelery.Tests.Integration/DotCelery.Tests.Integration.csproj" />
     <Project Path="tests/DotCelery.Tests.Unit/DotCelery.Tests.Unit.csproj" />
   </Folder>
