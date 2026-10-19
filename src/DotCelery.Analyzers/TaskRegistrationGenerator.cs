@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 
@@ -84,14 +85,16 @@ public sealed class TaskRegistrationGenerator : IIncrementalGenerator
         {
             // The registry picks one of them, and the adapter cannot know which, so the task keeps
             // the compiled invoker instead
-            return new TaskModel(typeName, AdapterName: null, InputTypeName: null);
+            return new TaskModel(typeName, taskType.Name, AdapterName: null, InputTypeName: null);
         }
 
         if (taskInterfaces.Count == 1)
         {
             var taskInterface = taskInterfaces[0];
+            var returnsResult = taskInterface.Arity == 2;
             return new TaskModel(
                 typeName,
+                taskType.Name,
                 adapterName,
                 InputTypeName: taskInterface
                     .TypeArguments[0]
@@ -99,7 +102,12 @@ public sealed class TaskRegistrationGenerator : IIncrementalGenerator
                 InterfaceName: taskInterface.ToDisplayString(
                     SymbolDisplayFormat.FullyQualifiedFormat
                 ),
-                ReturnsResult: taskInterface.Arity == 2
+                ReturnsResult: returnsResult,
+                OutputTypeName: returnsResult
+                    ? taskInterface
+                        .TypeArguments[1]
+                        .ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                    : null
             );
         }
 
@@ -107,15 +115,22 @@ public sealed class TaskRegistrationGenerator : IIncrementalGenerator
         var method = FindInputlessExecuteAsync(taskType);
         if (method is null)
         {
-            return new TaskModel(typeName, AdapterName: null, InputTypeName: null);
+            return new TaskModel(typeName, taskType.Name, AdapterName: null, InputTypeName: null);
         }
 
+        var returnType = method.ReturnType as INamedTypeSymbol;
         return new TaskModel(
             typeName,
+            taskType.Name,
             adapterName,
             InputTypeName: null,
             InterfaceName: null,
-            ReturnsResult: method.ReturnType is INamedTypeSymbol { Arity: 1 }
+            ReturnsResult: returnType is { Arity: 1 },
+            OutputTypeName: returnType is { Arity: 1 }
+                ? returnType
+                    .TypeArguments[0]
+                    .ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                : null
         );
     }
 
@@ -206,7 +221,7 @@ public sealed class TaskRegistrationGenerator : IIncrementalGenerator
             AppendAdapter(source, task);
         }
 
-        AppendRegistration(source, ordered);
+        AppendRegistration(source, ordered, AssignHelperNames(ordered));
 
         context.AddSource(
             $"{GeneratedClassName}.g.cs",
@@ -257,7 +272,11 @@ public sealed class TaskRegistrationGenerator : IIncrementalGenerator
         source.AppendLine();
     }
 
-    private static void AppendRegistration(StringBuilder source, List<TaskModel> tasks)
+    private static void AppendRegistration(
+        StringBuilder source,
+        List<TaskModel> tasks,
+        Dictionary<string, string?> helperNames
+    )
     {
         source.AppendLine("/// <summary>");
         source.AppendLine(
@@ -281,25 +300,131 @@ public sealed class TaskRegistrationGenerator : IIncrementalGenerator
 
         foreach (var task in tasks)
         {
-            var invoker = task.AdapterName is null ? string.Empty : $", new {task.AdapterName}()";
+            if (task.AdapterName is null)
+            {
+                // The generator cannot tell which interface the registry will pick, so it leaves
+                // the input and output type to the registry's inspection
+                source.AppendLine(
+                    $"        builder.AddTask<{task.TypeName}>({task.TypeName}.TaskName);"
+                );
+                continue;
+            }
+
+            var inputType = task.InputTypeName is null ? "null" : $"typeof({task.InputTypeName})";
+            var outputType = task.OutputTypeName is null
+                ? "null"
+                : $"typeof({task.OutputTypeName})";
             source.AppendLine(
-                $"        builder.AddTask<{task.TypeName}>({task.TypeName}.TaskName{invoker});"
+                $"        builder.AddTask<{task.TypeName}>({task.TypeName}.TaskName, new {task.AdapterName}(), {inputType}, {outputType});"
             );
         }
 
         source.AppendLine("        return builder;");
         source.AppendLine("    }");
+
+        foreach (var task in tasks)
+        {
+            if (
+                helperNames.TryGetValue(task.TypeName, out var helperName) && helperName is not null
+            )
+            {
+                AppendSignatureHelper(source, task, helperName);
+            }
+        }
+
         source.AppendLine("}");
     }
+
+    private static void AppendSignatureHelper(
+        StringBuilder source,
+        TaskModel task,
+        string helperName
+    )
+    {
+        source.AppendLine();
+        source.AppendLine("    /// <summary>");
+        source.AppendLine($"    /// Creates a signature for the task {task.SimpleName}.");
+        source.AppendLine("    /// </summary>");
+
+        if (task.InputTypeName is null)
+        {
+            source.AppendLine(
+                $"    public static global::DotCelery.Core.Canvas.Signature {helperName}() =>"
+            );
+            source.AppendLine($"        new() {{ TaskName = {task.TypeName}.TaskName }};");
+            return;
+        }
+
+        source.AppendLine("    /// <param name=\"input\">The input of the task.</param>");
+        source.AppendLine("    /// <returns>The signature.</returns>");
+
+        var signatureType = task.OutputTypeName is null
+            ? $"global::DotCelery.Core.Canvas.Signature<{task.TypeName}, {task.InputTypeName}>"
+            : $"global::DotCelery.Core.Canvas.Signature<{task.TypeName}, {task.InputTypeName}, {task.OutputTypeName}>";
+        source.AppendLine(
+            $"    public static {signatureType} {helperName}({task.InputTypeName} input) =>"
+        );
+        source.AppendLine("        new() { Input = input };");
+    }
+
+    // A helper is named after the task type without its Task suffix, and falls back to the
+    // flattened type name when that name is ambiguous, reserved, or already taken
+    private static Dictionary<string, string?> AssignHelperNames(List<TaskModel> tasks)
+    {
+        var names = new Dictionary<string, string?>(StringComparer.Ordinal);
+        var used = new HashSet<string>(StringComparer.Ordinal) { RegisterMethodName };
+        var eligible = tasks.Where(task => task.AdapterName is not null).ToList();
+        var candidateCounts = eligible
+            .GroupBy(task => TrimTaskSuffix(task.SimpleName), StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+
+        foreach (var task in eligible)
+        {
+            var candidate = TrimTaskSuffix(task.SimpleName);
+            if (candidateCounts[candidate] > 1 || used.Contains(candidate))
+            {
+                candidate = FlattenTypeName(task.TypeName);
+            }
+
+            candidate = EscapeIdentifier(candidate);
+            if (!used.Add(candidate))
+            {
+                var baseName = candidate;
+                var suffix = 2;
+                do
+                {
+                    candidate = $"{baseName}_{suffix}";
+                    suffix++;
+                } while (!used.Add(candidate));
+            }
+
+            names[task.TypeName] = candidate;
+        }
+
+        return names;
+    }
+
+    private static string EscapeIdentifier(string name) =>
+        SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None ? "@" + name : name;
+
+    private static string TrimTaskSuffix(string simpleName) =>
+        simpleName.EndsWith("Task", StringComparison.Ordinal) && simpleName.Length > "Task".Length
+            ? simpleName.Substring(0, simpleName.Length - "Task".Length)
+            : simpleName;
+
+    private static string FlattenTypeName(string typeName) =>
+        typeName.Replace("global::", string.Empty).Replace('.', '_');
 
     /// <summary>
     /// A task of the compilation: its routing name access, and the adapter that invokes it.
     /// </summary>
     private readonly record struct TaskModel(
         string TypeName,
+        string SimpleName,
         string? AdapterName,
         string? InputTypeName,
         string? InterfaceName = null,
-        bool ReturnsResult = false
+        bool ReturnsResult = false,
+        string? OutputTypeName = null
     );
 }

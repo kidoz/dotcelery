@@ -99,6 +99,63 @@ public sealed class TaskRegistrationTests
     }
 
     [Fact]
+    public void GeneratedRegistration_CarriesTheInputAndOutputTypes()
+    {
+        var registrations = Register();
+
+        var echo = registrations.Single(task => task.TaskName == EchoTask.TaskName);
+        Assert.Equal(typeof(OrderInput), echo.InputType);
+        Assert.Equal(typeof(OrderInput), echo.OutputType);
+
+        var first = registrations.Single(task => task.TaskName == FirstTask.TaskName);
+        Assert.Equal(typeof(OrderInput), first.InputType);
+        Assert.Null(first.OutputType);
+
+        var noInput = registrations.Single(task => task.TaskName == NoInputTask.TaskName);
+        Assert.Null(noInput.InputType);
+        Assert.Equal(typeof(OrderInput), noInput.OutputType);
+    }
+
+    [Fact]
+    public void AddWorker_BuildsTheRegistryWithTheGeneratedTypes()
+    {
+        var services = new ServiceCollection();
+
+        services.AddDotCelery(builder => builder.RegisterTasks().AddWorker());
+
+        using var provider = services.BuildServiceProvider();
+        var registry = provider.GetRequiredService<TaskRegistry>();
+
+        var echo = registry.GetTask(EchoTask.TaskName);
+        Assert.NotNull(echo);
+        Assert.Equal(typeof(OrderInput), echo.InputType);
+        Assert.Equal(typeof(OrderInput), echo.OutputType);
+
+        var noInput = registry.GetTask(NoInputTask.TaskName);
+        Assert.NotNull(noInput);
+        Assert.Null(noInput.InputType);
+        Assert.Equal(typeof(OrderInput), noInput.OutputType);
+    }
+
+    [Fact]
+    public void TheGeneratedHelpers_CreateTypedSignatures()
+    {
+        var input = new OrderInput { Value = 7 };
+
+        var echo = DotCeleryTasks.Echo(input);
+        Assert.Equal(EchoTask.TaskName, echo.TaskName);
+        Assert.Same(input, echo.Input);
+
+        var first = DotCeleryTasks.First(input);
+        Assert.Equal(FirstTask.TaskName, first.TaskName);
+        Assert.Same(input, first.Input);
+
+        var noInput = DotCeleryTasks.NoInput();
+        Assert.Equal(NoInputTask.TaskName, noInput.TaskName);
+        Assert.Null(noInput.GetInput());
+    }
+
+    [Fact]
     public async Task TheGeneratedInvoker_InvokesATaskAndReturnsItsResult()
     {
         var registration = Register().Single(task => task.TaskName == EchoTask.TaskName);

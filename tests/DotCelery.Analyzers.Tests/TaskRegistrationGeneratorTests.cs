@@ -45,12 +45,12 @@ public class TaskRegistrationGeneratorTests
         Assert.Empty(run.Errors);
         var generated = Assert.Single(run.Sources);
         Assert.Contains(
-            "builder.AddTask<global::Sample.AlphaTask>(global::Sample.AlphaTask.TaskName, new Sample_AlphaTask_DotCeleryInvoker());",
+            "builder.AddTask<global::Sample.AlphaTask>(global::Sample.AlphaTask.TaskName, new Sample_AlphaTask_DotCeleryInvoker(), typeof(global::Sample.AlphaInput), typeof(global::Sample.AlphaOutput));",
             generated,
             StringComparison.Ordinal
         );
         Assert.Contains(
-            "builder.AddTask<global::Sample.BetaTask>(global::Sample.BetaTask.TaskName, new Sample_BetaTask_DotCeleryInvoker());",
+            "builder.AddTask<global::Sample.BetaTask>(global::Sample.BetaTask.TaskName, new Sample_BetaTask_DotCeleryInvoker(), typeof(global::Sample.BetaInput), null);",
             generated,
             StringComparison.Ordinal
         );
@@ -68,6 +68,18 @@ public class TaskRegistrationGeneratorTests
         );
         Assert.Contains("namespace DotCelery.Generated;", generated, StringComparison.Ordinal);
         Assert.Contains("RegisterTasks(", generated, StringComparison.Ordinal);
+
+        // A typed helper creates the signature from the input alone
+        Assert.Contains(
+            "global::DotCelery.Core.Canvas.Signature<global::Sample.AlphaTask, global::Sample.AlphaInput, global::Sample.AlphaOutput> Alpha(global::Sample.AlphaInput input) =>",
+            generated,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "global::DotCelery.Core.Canvas.Signature<global::Sample.BetaTask, global::Sample.BetaInput> Beta(global::Sample.BetaInput input) =>",
+            generated,
+            StringComparison.Ordinal
+        );
     }
 
     [Fact]
@@ -98,7 +110,12 @@ public class TaskRegistrationGeneratorTests
         Assert.Empty(run.Errors);
         var generated = Assert.Single(run.Sources);
         Assert.Contains(
-            "builder.AddTask<global::Sample.Host.NestedTask>(global::Sample.Host.NestedTask.TaskName, new Sample_Host_NestedTask_DotCeleryInvoker());",
+            "builder.AddTask<global::Sample.Host.NestedTask>(global::Sample.Host.NestedTask.TaskName, new Sample_Host_NestedTask_DotCeleryInvoker(), typeof(global::Sample.Input), null);",
+            generated,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "global::DotCelery.Core.Canvas.Signature<global::Sample.Host.NestedTask, global::Sample.Input> Nested(global::Sample.Input input) =>",
             generated,
             StringComparison.Ordinal
         );
@@ -134,7 +151,12 @@ public class TaskRegistrationGeneratorTests
         Assert.Empty(run.Errors);
         var generated = Assert.Single(run.Sources);
         Assert.Contains(
-            "builder.AddTask<global::Sample.StartupTask>(global::Sample.StartupTask.TaskName, new Sample_StartupTask_DotCeleryInvoker());",
+            "builder.AddTask<global::Sample.StartupTask>(global::Sample.StartupTask.TaskName, new Sample_StartupTask_DotCeleryInvoker(), null, typeof(global::Sample.Input));",
+            generated,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "public static global::DotCelery.Core.Canvas.Signature Startup() =>",
             generated,
             StringComparison.Ordinal
         );
@@ -181,6 +203,9 @@ public class TaskRegistrationGeneratorTests
             generated,
             StringComparison.Ordinal
         );
+
+        // Without an adapter the generator cannot know the task's input, so it has no helper either
+        Assert.DoesNotContain(" TwoShapes(", generated, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -247,6 +272,87 @@ public class TaskRegistrationGeneratorTests
         Assert.DoesNotContain("HiddenTask", generated, StringComparison.Ordinal);
         Assert.DoesNotContain("FileTask", generated, StringComparison.Ordinal);
         Assert.DoesNotContain("NotATask", generated, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Generator_GivesCollidingHelperNamesTheFlattenedTypeName()
+    {
+        const string source = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using DotCelery.Core.Abstractions;
+
+            namespace One
+            {
+                public sealed class SendTask : ITask<Shared.Input>
+                {
+                    public static string TaskName => "one.send";
+
+                    public Task ExecuteAsync(Shared.Input input, ITaskContext context, CancellationToken cancellationToken = default) => Task.CompletedTask;
+                }
+            }
+
+            namespace Two
+            {
+                public sealed class SendTask : ITask<Shared.Input>
+                {
+                    public static string TaskName => "two.send";
+
+                    public Task ExecuteAsync(Shared.Input input, ITaskContext context, CancellationToken cancellationToken = default) => Task.CompletedTask;
+                }
+            }
+
+            namespace Shared
+            {
+                public sealed class Input { }
+            }
+            """;
+
+        var run = CSharpGeneratorVerifier<TaskRegistrationGenerator>.Run(source);
+
+        Assert.Empty(run.Errors);
+        var generated = Assert.Single(run.Sources);
+        Assert.Contains(
+            "One_SendTask(global::Shared.Input input) =>",
+            generated,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "Two_SendTask(global::Shared.Input input) =>",
+            generated,
+            StringComparison.Ordinal
+        );
+    }
+
+    [Fact]
+    public void Generator_DoesNotNameAHelperLikeTheRegistrationMethod()
+    {
+        const string source = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using DotCelery.Core.Abstractions;
+
+            namespace Sample;
+
+            public sealed class RegisterTasks : ITask<Input>
+            {
+                public static string TaskName => "sample.reserved";
+
+                public Task ExecuteAsync(Input input, ITaskContext context, CancellationToken cancellationToken = default) => Task.CompletedTask;
+            }
+
+            public sealed class Input { }
+            """;
+
+        var run = CSharpGeneratorVerifier<TaskRegistrationGenerator>.Run(source);
+
+        Assert.Empty(run.Errors);
+        var generated = Assert.Single(run.Sources);
+        Assert.Contains(
+            "Sample_RegisterTasks(global::Sample.Input input) =>",
+            generated,
+            StringComparison.Ordinal
+        );
     }
 
     [Fact]
