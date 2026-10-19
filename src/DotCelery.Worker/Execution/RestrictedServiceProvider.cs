@@ -79,10 +79,10 @@ internal sealed class RestrictedServiceProvider : IServiceProvider
             }
         }
 
-        // Check interfaces that the service type implements
-        foreach (var iface in serviceType.GetInterfaces())
+        // Check the blocked types the service type implements or derives from
+        foreach (var blockedType in _blockedTypes)
         {
-            if (_blockedTypes.Contains(iface))
+            if (blockedType.IsAssignableFrom(serviceType))
             {
                 return true;
             }
