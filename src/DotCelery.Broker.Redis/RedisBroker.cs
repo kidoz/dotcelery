@@ -1012,6 +1012,8 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
 
     private static (string StreamKey, string MessageId) ParseDeliveryTag(string deliveryTag)
     {
+        // The tag is "{stream key}:{message id}". The stream key can contain colons, but a
+        // stream message id ("timestamp-sequence") never does, so the boundary is the last colon.
         var lastColonIndex = deliveryTag.LastIndexOf(':');
         if (lastColonIndex < 0)
         {
@@ -1021,35 +1023,15 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
             );
         }
 
-        // Find the second-to-last colon (stream key can contain colons)
-        var messageIdPart = deliveryTag[(lastColonIndex + 1)..];
-
-        // If messageId looks like a stream ID (contains a dash), the last colon was correct
-        // Otherwise, we need to find the stream:messageId boundary differently
-        // Stream IDs are in format: timestamp-sequence (e.g., "1234567890123-0")
-        if (messageIdPart.Contains('-'))
+        var messageId = deliveryTag[(lastColonIndex + 1)..];
+        if (!messageId.Contains('-'))
         {
-            var streamKey = deliveryTag[..lastColonIndex];
-            return (streamKey, messageIdPart);
+            throw new ArgumentException(
+                $"Could not parse delivery tag: {deliveryTag}",
+                nameof(deliveryTag)
+            );
         }
 
-        // Handle edge case where stream key might end with the full message ID
-        // Search for pattern like ":1234567890123-0" at the end
-        for (var i = deliveryTag.Length - 1; i >= 0; i--)
-        {
-            if (deliveryTag[i] == ':')
-            {
-                var potentialMessageId = deliveryTag[(i + 1)..];
-                if (potentialMessageId.Contains('-'))
-                {
-                    return (deliveryTag[..i], potentialMessageId);
-                }
-            }
-        }
-
-        throw new ArgumentException(
-            $"Could not parse delivery tag: {deliveryTag}",
-            nameof(deliveryTag)
-        );
+        return (deliveryTag[..lastColonIndex], messageId);
     }
 }
