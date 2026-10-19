@@ -59,12 +59,14 @@ public sealed class HistoricalDataStore : IHistoricalDataStore
             return;
         }
 
+        // The key carries both dimensions, so a snapshot of a queue and one of a task name at the
+        // same instant are kept apart, and only a snapshot of the same queue and task replaces
         await _documents
             .UpsertAsync(
                 _collection,
                 string.Create(
                     CultureInfo.InvariantCulture,
-                    $"{snapshot.Timestamp.UtcTicks:D19}/{snapshot.TaskName}"
+                    $"{snapshot.Timestamp.UtcTicks:D19}/q/{snapshot.Queue}/t/{snapshot.TaskName}"
                 ),
                 snapshot,
                 SnapshotTypeInfo,

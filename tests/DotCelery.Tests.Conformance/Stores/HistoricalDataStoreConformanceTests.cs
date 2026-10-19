@@ -132,6 +132,22 @@ public abstract class HistoricalDataStoreConformanceTests : StoreConformanceTest
     }
 
     [Fact]
+    public async Task RecordMetricsAsync_SameTimestampDifferentQueues_KeepsBothSnapshots()
+    {
+        var store = CreateStore();
+
+        // A collector records every queue's delta at one instant; each queue is its own snapshot
+        await store.RecordMetricsAsync(Snapshot(Start, null, 3, 1, 0) with { Queue = "first" });
+        await store.RecordMetricsAsync(Snapshot(Start, null, 5, 0, 0) with { Queue = "second" });
+
+        Assert.Equal(2, await store.GetSnapshotCountAsync());
+
+        var metrics = await store.GetMetricsAsync(Start.AddMinutes(-1), Start.AddMinutes(1));
+        Assert.Equal(8, metrics.SuccessCount);
+        Assert.Equal(1, metrics.FailureCount);
+    }
+
+    [Fact]
     public async Task RecordMetricsAsync_SameTimestampAndTask_ReplacesTheSnapshot()
     {
         var store = CreateStore();
