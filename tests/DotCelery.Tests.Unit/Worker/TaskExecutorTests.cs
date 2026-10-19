@@ -31,6 +31,7 @@ public class TaskExecutorTests : IAsyncDisposable
 
         var services = new ServiceCollection();
         services.AddTransient<TestTaskWithInput>();
+        services.AddTransient<InvokedTask>();
         services.AddTransient<TestTaskNoInput>();
         services.AddTransient<TestTaskReturnsNull>();
         services.AddTransient<ThrowingTask>();
@@ -108,6 +109,26 @@ public class TaskExecutorTests : IAsyncDisposable
 
         Assert.Equal(TaskState.Success, result.State);
         Assert.Null(result.Result);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UsesTheRegistrationInvoker_WhenOneIsAttached()
+    {
+        // A generated registration attaches a typed adapter; the executor must use it instead of
+        // compiling a delegate for the task
+        var invoker = new RecordingInvoker(new TestOutput { Result = 999 });
+        _registry.Register(typeof(InvokedTask), InvokedTask.TaskName, invoker);
+        var message = CreateBrokerMessage(
+            "task-invoked",
+            InvokedTask.TaskName,
+            new TestInput { Value = 1 }
+        );
+
+        var result = await _executor.ExecuteAsync(message, "worker-1", CancellationToken.None);
+
+        Assert.True(invoker.Called);
+        var output = _serializer.Deserialize<TestOutput>(result.Result!)!;
+        Assert.Equal(999, output.Result);
     }
 
     [Fact]
@@ -254,6 +275,33 @@ public class TaskExecutorTests : IAsyncDisposable
         await _backend.DisposeAsync();
         await _serviceProvider.DisposeAsync();
         _revocationManager.Dispose();
+    }
+
+    private sealed class InvokedTask : ITask<TestInput, TestOutput>
+    {
+        public static string TaskName => "test.task.invoked";
+
+        public Task<TestOutput> ExecuteAsync(
+            TestInput input,
+            ITaskContext context,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult(new TestOutput { Result = 1 });
+    }
+
+    private sealed class RecordingInvoker(TestOutput output) : ITaskInvoker
+    {
+        public bool Called { get; private set; }
+
+        public Task<object?> InvokeAsync(
+            object task,
+            object? input,
+            ITaskContext context,
+            CancellationToken cancellationToken = default
+        )
+        {
+            Called = true;
+            return Task.FromResult<object?>(output);
+        }
     }
 
     private sealed class TestTaskWithInput : ITask<TestInput, TestOutput>

@@ -647,9 +647,14 @@ public sealed class TaskExecutor
         CancellationToken cancellationToken
     )
     {
-        // Use compiled delegate invoker for type-safe and efficient task invocation.
-        // This validates method signatures at compile time and caches delegates,
-        // avoiding repeated reflection overhead and ensuring correct method binding.
+        // A generated registration carries a typed adapter, so invoking it needs neither
+        // reflection nor expression compilation; the compiled invoker remains for the
+        // registrations that came from a reflective scan or a manual registration
+        if (registration.Invoker is { } invoker)
+        {
+            return invoker.InvokeAsync(task, input, context, cancellationToken);
+        }
+
         return _taskInvoker.InvokeAsync(task, input, context, registration, cancellationToken);
     }
 

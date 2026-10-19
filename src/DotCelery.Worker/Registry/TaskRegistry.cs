@@ -55,7 +55,7 @@ public sealed class TaskRegistry
         var taskName = TTask.TaskName;
         var taskType = typeof(TTask);
 
-        RegisterInternal(taskType, taskName);
+        RegisterInternal(taskType, taskName, invoker: null);
     }
 
     /// <summary>
@@ -63,10 +63,11 @@ public sealed class TaskRegistry
     /// </summary>
     /// <param name="taskType">The task type.</param>
     /// <param name="taskName">The task name.</param>
+    /// <param name="invoker">The typed adapter that invokes the task, when one was generated.</param>
     /// <exception cref="InvalidOperationException">
     /// Thrown when a task with the same name is already registered and <see cref="ThrowOnDuplicateRegistration"/> is true.
     /// </exception>
-    public void Register(Type taskType, string taskName)
+    public void Register(Type taskType, string taskName, ITaskInvoker? invoker = null)
     {
         ArgumentNullException.ThrowIfNull(taskType);
         ArgumentException.ThrowIfNullOrEmpty(taskName);
@@ -83,10 +84,10 @@ public sealed class TaskRegistry
             );
         }
 
-        RegisterInternal(taskType, taskName);
+        RegisterInternal(taskType, taskName, invoker);
     }
 
-    private void RegisterInternal(Type taskType, string taskName)
+    private void RegisterInternal(Type taskType, string taskName, ITaskInvoker? invoker)
     {
         var registration = new TaskRegistration(
             TaskName: taskName,
@@ -96,7 +97,8 @@ public sealed class TaskRegistry
             RateLimitPolicy: GetRateLimitPolicy(taskType),
             FilterTypes: GetFilterTypes(taskType),
             Queue: GetQueue(taskType),
-            TimeLimitPolicy: GetTimeLimitPolicy(taskType)
+            TimeLimitPolicy: GetTimeLimitPolicy(taskType),
+            Invoker: invoker
         );
 
         lock (_lock)

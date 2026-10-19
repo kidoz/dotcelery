@@ -184,18 +184,20 @@ public sealed class DotCeleryBuilder
     /// </summary>
     /// <remarks>
     /// A source-generated registration calls this overload with the task's static
-    /// <see cref="ITask.TaskName"/>, so the name is known without reading it through reflection.
+    /// <see cref="ITask.TaskName"/>, so the name is known without reading it through reflection,
+    /// and with the generated adapter that invokes the task without expression compilation.
     /// </remarks>
     /// <typeparam name="TTask">The task type.</typeparam>
     /// <param name="taskName">The name the task routes by.</param>
+    /// <param name="invoker">The typed adapter that invokes the task, when one was generated.</param>
     /// <returns>The builder.</returns>
-    public DotCeleryBuilder AddTask<TTask>(string taskName)
+    public DotCeleryBuilder AddTask<TTask>(string taskName, ITaskInvoker? invoker = null)
         where TTask : class, ITask
     {
         ArgumentException.ThrowIfNullOrEmpty(taskName);
 
         Services.AddTransient<TTask>();
-        _taskTypes.Add(new TaskTypeRegistration(typeof(TTask), taskName));
+        _taskTypes.Add(new TaskTypeRegistration(typeof(TTask), taskName, invoker));
         return this;
     }
 

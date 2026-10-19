@@ -1,3 +1,4 @@
+using DotCelery.Core.Abstractions;
 using DotCelery.Core.RateLimiting;
 using DotCelery.Core.TimeLimits;
 
@@ -14,6 +15,7 @@ namespace DotCelery.Worker.Registry;
 /// <param name="FilterTypes">The filter types to apply to this task (null if none).</param>
 /// <param name="Queue">The default queue for this task (null to use default).</param>
 /// <param name="TimeLimitPolicy">The time limit policy for this task (null if no time limits).</param>
+/// <param name="Invoker">The typed adapter that invokes the task, when one was generated.</param>
 public sealed record TaskRegistration(
     string TaskName,
     Type TaskType,
@@ -22,5 +24,6 @@ public sealed record TaskRegistration(
     RateLimitPolicy? RateLimitPolicy = null,
     IReadOnlyList<Type>? FilterTypes = null,
     string? Queue = null,
-    TimeLimitPolicy? TimeLimitPolicy = null
+    TimeLimitPolicy? TimeLimitPolicy = null,
+    ITaskInvoker? Invoker = null
 );
