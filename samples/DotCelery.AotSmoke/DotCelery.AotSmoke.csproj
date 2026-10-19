@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>DotCelery.AotSmoke</RootNamespace>
+    <Description>Native AOT smoke test for DotCelery</Description>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DotCelery.Core\DotCelery.Core.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Client\DotCelery.Client.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Worker\DotCelery.Worker.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Broker.InMemory\DotCelery.Broker.InMemory.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Backend.InMemory\DotCelery.Backend.InMemory.csproj" />
+    <ProjectReference
+      Include="..\..\src\DotCelery.Analyzers\DotCelery.Analyzers.csproj"
+      OutputItemType="Analyzer"
+      ReferenceOutputAssembly="false"
+    />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.401" />
+  </ItemGroup>
+</Project>

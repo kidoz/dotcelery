@@ -56,3 +56,12 @@ jobs:
           dotnet test tests/DotCelery.Tests.Unit --configuration Release --no-build
           dotnet test tests/DotCelery.Tests.Generated --configuration Release --no-build
           dotnet test tests/DotCelery.Analyzers.Tests --configuration Release --no-build
+
+      # The smoke sample is published as a native binary and run, so the AOT-compatible
+      # libraries are exercised without a runtime.
+      - name: Native AOT smoke test
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+          dotnet publish samples/DotCelery.AotSmoke --configuration Release --runtime linux-x64
+          samples/DotCelery.AotSmoke/bin/Release/net10.0/linux-x64/publish/DotCelery.AotSmoke

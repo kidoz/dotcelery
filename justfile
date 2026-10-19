@@ -49,6 +49,14 @@ install-tools:
 run-demo:
     dotnet run --project samples/DotCelery.Demo
 
+# Publish the Native AOT smoke test for the host platform and run it
+aot-smoke:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rid=$(dotnet --info | awk '/RID:/ {print $2; exit}')
+    dotnet publish samples/DotCelery.AotSmoke --configuration Release --runtime "$rid"
+    "samples/DotCelery.AotSmoke/bin/Release/net10.0/$rid/publish/DotCelery.AotSmoke"
+
 # Start local dependencies used by the Redis/Postgres example
 compose-up:
     docker compose up -d redis postgres
