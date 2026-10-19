@@ -201,7 +201,11 @@ static async Task DemoLongRunningTask(ICeleryClient client)
         var deadline = DateTimeOffset.UtcNow.AddSeconds(3);
         while (DateTimeOffset.UtcNow < deadline && !cts.Token.IsCancellationRequested)
         {
-            if (Console.KeyAvailable && Console.ReadKey(intercept: true).Key == ConsoleKey.C)
+            if (
+                !Console.IsInputRedirected
+                && Console.KeyAvailable
+                && Console.ReadKey(intercept: true).Key == ConsoleKey.C
+            )
             {
                 Console.WriteLine();
                 Console.WriteLine("Cancellation requested. Revoking task...");

@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `samples/DotCelery.CanvasExample` sends a chain, a group, a chord with a callback, and a nested canvas end to end
 
+### Fixed
+- The Demo sample's long-running scenario no longer throws when standard input is redirected, so it can run non-interactively
+
 ## [1.0.0] - 2026-10-19
 
 ### Added
