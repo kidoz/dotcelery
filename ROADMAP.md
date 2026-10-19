@@ -21,6 +21,7 @@ but do not yet behave as documented.
 ### Serialization
 - Source-generated JSON contexts for core message types (`DotCeleryJsonContext`)
 - Opt-in deserialization type allowlist (`JsonMessageSerializerOptions.EnforceDeserializationTypeAllowlist`)
+- AOT and trimming compatibility: Core, Worker, Client, and the in-memory broker and backend are `IsAotCompatible` and free of AOT and trim warnings. A Native AOT application registers tasks through the source generator, registers its payload types with `JsonMessageSerializerOptions.Context`, and the storage stores serialize through a generated context; `samples/DotCelery.AotSmoke` is published natively by `just aot-smoke` and CI. The dashboard and the driver-based providers are not covered by this verification
 
 ### Security
 - HMAC message signing across InMemory, RabbitMQ, and Redis brokers
@@ -61,10 +62,9 @@ but do not yet behave as documented.
 ### Serialization
 - Pluggable serializers (MessagePack/Protobuf); brokers currently hard-code the JSON envelope
 - Message compression
-- Verified AOT and trimming compatibility (`IsAotCompatible`, no reflection-based task invocation)
 
 ### Task Registration and Dispatch
-- A source generator for strongly-typed client helpers, so a typed task is sent without writing its `Signature<TTask, TInput>` by hand; the worker still resolves the remaining input and output types through reflection, which the AOT verification replaces
+- A source generator for strongly-typed client helpers, so a typed task is sent without writing its `Signature<TTask, TInput>` by hand; the worker still resolves the input and output types through reflection
 - Interceptors to reduce dispatch overhead
 - Extension members for fluent task signatures (after Canvas execution ships)
 

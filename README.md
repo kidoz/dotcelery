@@ -687,6 +687,33 @@ The record is written on the transaction's connection and is dispatched or count
 
 The worker uses the same mechanism for task outcomes. With `UseInboxDeduplication()` and a result backend and inbox store that share a PostgreSQL or SQL Server provider, a successful task's result and its inbox record commit in one transaction, so the message is acked only after both are durable and a redelivery after a crash does not run the task again (exactly-once processing, as long as the task's own effects do not need to join the transaction). Without an inbox store, or when the stores cannot share a transaction, the result is stored first and the record afterwards, which gives at-least-once delivery.
 
+## Native AOT and Trimming
+
+`DotCelery.Core`, `DotCelery.Worker`, `DotCelery.Client`, `DotCelery.Broker.InMemory`, and `DotCelery.Backend.InMemory` are marked `IsAotCompatible` and compile without AOT or trim warnings. The dashboard and the driver-based providers (RabbitMQ, Redis, SQS, PostgreSQL, SQL Server, MongoDB) are not covered by this verification.
+
+A Native AOT application registers its tasks through the source generator, which supplies a typed invoker for each task so none is invoked through `Expression.Compile`, and registers its payload types with a source-generated `JsonSerializerContext`:
+
+```csharp
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(MyInput))]
+[JsonSerializable(typeof(MyOutput))]
+internal sealed partial class MyJsonContext : JsonSerializerContext;
+
+builder.Services.Configure<JsonMessageSerializerOptions>(options =>
+    options.Context = MyJsonContext.Default);
+
+builder.Services.AddDotCelery(celery => celery
+    .UseInMemoryBroker()
+    .UseInMemoryBackend()
+    .RegisterTasks() // Extension in the generated DotCelery.Generated namespace
+    .AddClient()
+    .AddWorker());
+```
+
+DotCelery's own model types keep coming from the built-in `DotCeleryJsonContext`, so the application's context only registers its inputs and results. A payload type that neither context registers is an error at runtime, not a reflection fallback. The reflective scan (`AddTasksFromAssembly`) is annotated `[RequiresUnreferencedCode]`, and `UsePreventOverlapping` (keying by input), `UseAdvancedPatternFilters`, and `UseQueuedSignalDispatch` carry `[RequiresUnreferencedCode]` and `[RequiresDynamicCode]`, so an AOT or trimmed build warns when it uses a path that needs reflection.
+
+`samples/DotCelery.AotSmoke` is a complete example; `just aot-smoke` publishes it for the host platform and runs it, as does CI.
+
 ## Project Structure
 
 ```
