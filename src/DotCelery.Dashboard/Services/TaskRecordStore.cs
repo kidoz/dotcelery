@@ -22,9 +22,8 @@ namespace DotCelery.Dashboard.Services;
 /// record and its name index entry, and both expire with the retention.
 /// </para>
 /// <para>
-/// The list of task names the dashboard offers is read from the most recently updated records,
-/// bounded by <see cref="NameScanLimit"/>, so a name whose records all expired from that window
-/// is not offered until one is updated again.
+/// The list of task names the dashboard offers is kept in a marker per name, written with the
+/// record and expiring with it, so a name is offered while any of its records is retained.
 /// </para>
 /// <para>
 /// Without a registered storage provider the store is unavailable and every read returns empty,
@@ -33,12 +32,11 @@ namespace DotCelery.Dashboard.Services;
 /// </remarks>
 public sealed class TaskRecordStore
 {
-    private const int NameScanLimit = 1000;
-
     private readonly IDocumentStore? _documents;
     private readonly DashboardOptions _options;
     private readonly string _collection;
     private readonly string _names;
+    private readonly string _nameMarkers;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TaskRecordStore"/> class.
@@ -58,6 +56,7 @@ public sealed class TaskRecordStore
         var prefix = (storeOptions?.Value ?? new StorageStoreOptions()).Prefix;
         _collection = $"{prefix}.dashboard.tasks";
         _names = $"{prefix}.dashboard.task-names";
+        _nameMarkers = $"{prefix}.dashboard.task-name-markers";
     }
 
     /// <summary>
@@ -115,6 +114,22 @@ public sealed class TaskRecordStore
                 {
                     TimeToLive = _options.TaskRecordRetention,
                     IndexKey = NameIndexKey(summary.TaskName),
+                    SortKey = updatedAt,
+                },
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+        // The marker keeps the name in the dashboard's list while any of its records is retained;
+        // its value is unused
+        await _documents
+            .UpsertAsync(
+                _nameMarkers,
+                summary.TaskName,
+                Array.Empty<byte>(),
+                new DocumentWriteOptions
+                {
+                    TimeToLive = _options.TaskRecordRetention,
                     SortKey = updatedAt,
                 },
                 cancellationToken
@@ -254,7 +269,7 @@ public sealed class TaskRecordStore
     /// Gets the task names among the retained records.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The distinct task names.</returns>
+    /// <returns>The task names, sorted.</returns>
     public async ValueTask<IReadOnlyList<string>> GetTaskNamesAsync(
         CancellationToken cancellationToken = default
     )
@@ -264,21 +279,20 @@ public sealed class TaskRecordStore
             return [];
         }
 
-        var names = new HashSet<string>(StringComparer.Ordinal);
+        var names = new List<string>();
 
         await foreach (
-            var summary in QueryAsync(
-                    DocumentFilter.All,
-                    new DocumentPage { Descending = true, Limit = NameScanLimit },
-                    cancellationToken
-                )
+            var marker in _documents
+                .QueryAsync(_nameMarkers, DocumentFilter.All, cancellationToken: cancellationToken)
                 .ConfigureAwait(false)
         )
         {
-            names.Add(summary.TaskName);
+            names.Add(marker.Id);
         }
 
-        return [.. names];
+        names.Sort(StringComparer.Ordinal);
+
+        return names;
     }
 
     private IAsyncEnumerable<TaskSummary> QueryAsync(

@@ -181,6 +181,47 @@ public sealed class TaskRecordStoreTests
     }
 
     [Fact]
+    public async Task TaskNames_IncludeANameBeyondTheNameScanWindow()
+    {
+        var older = DateTimeOffset.UtcNow.AddHours(-1);
+        await _store.RecordAsync(
+            CreateSummary("t1", "tests.alpha", TaskState.Success) with
+            {
+                StartedAt = older,
+                CompletedAt = older,
+            }
+        );
+
+        // More records of another name than a scan of the newest records would cover
+        for (var index = 0; index < 1000; index++)
+        {
+            await _store.RecordAsync(
+                CreateSummary($"other-{index}", "tests.other", TaskState.Success)
+            );
+        }
+
+        var names = await _store.GetTaskNamesAsync();
+
+        Assert.Equal(["tests.alpha", "tests.other"], names);
+    }
+
+    [Fact]
+    public async Task TaskNames_ExpireWithTheRecords()
+    {
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var store = new TaskRecordStore(
+            Options.Create(new DashboardOptions { TaskRecordRetention = TimeSpan.FromMinutes(10) }),
+            new InMemoryStorageProvider(time)
+        );
+        await store.RecordAsync(CreateSummary("t1", "tests.alpha", TaskState.Success));
+        Assert.Equal(["tests.alpha"], await store.GetTaskNamesAsync());
+
+        time.Advance(TimeSpan.FromMinutes(11));
+
+        Assert.Empty(await store.GetTaskNamesAsync());
+    }
+
+    [Fact]
     public async Task StateCounts_AndTaskNames_CoverTheRecords()
     {
         await _store.RecordAsync(CreateSummary("t1", "tests.alpha", TaskState.Success));

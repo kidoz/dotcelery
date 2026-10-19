@@ -535,8 +535,8 @@ What the dashboard shows out of the box:
   `StorageStoreOptions.WorkerRetention` when a shared registry is used.
 - **Tasks** — every task a dashboard host runs is recorded (id, name, state, worker, timings,
   error) and expires after `DashboardOptions.TaskRecordRetention`. Listing by state, listing by
-  name, and counting states are indexed; the list of task names the filter offers comes from the
-  most recently updated records.
+  name, and counting states are indexed, and the list of task names the filter offers is kept in
+  a marker per name that expires with the records.
 - **Queues** — waiting/running/processed counts from the queue metrics store. The bundled
   brokers record each message they publish as it enters its queue and `UseQueueMetrics()` records
   the tasks that start and finish, so a queue's waiting count follows the messages in it; a host
