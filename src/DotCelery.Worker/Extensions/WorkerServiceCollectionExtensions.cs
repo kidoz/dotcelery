@@ -475,6 +475,12 @@ public static class WorkerServiceCollectionExtensions
     /// Requires an ISignalStore implementation to be registered (e.g., AddInMemorySignalQueue
     /// or AddRedisSignalQueue).
     /// </remarks>
+    [RequiresUnreferencedCode(
+        "Queued signal dispatch deserializes signal payloads and dispatches them to handlers through reflection; a Native AOT or trimmed application uses inline signal dispatch."
+    )]
+    [RequiresDynamicCode(
+        "Queued signal dispatch closes the handler dispatch method over the runtime signal type; a Native AOT application uses inline signal dispatch."
+    )]
     public static DotCeleryBuilder UseQueuedSignalDispatch(
         this DotCeleryBuilder builder,
         Action<SignalQueueProcessorOptions>? configure = null

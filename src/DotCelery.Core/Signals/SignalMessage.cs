@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 
 namespace DotCelery.Core.Signals;
@@ -44,6 +45,12 @@ public sealed record SignalMessage
     /// <param name="signal">The signal instance.</param>
     /// <param name="jsonOptions">Optional JSON serializer options.</param>
     /// <returns>A signal message.</returns>
+    [RequiresUnreferencedCode(
+        "A signal payload is serialized polymorphically, which needs the signal type's metadata; an AOT application dispatches signals inline."
+    )]
+    [RequiresDynamicCode(
+        "A signal payload is serialized polymorphically, which may need runtime code generation; an AOT application dispatches signals inline."
+    )]
     public static SignalMessage Create<TSignal>(
         TSignal signal,
         JsonSerializerOptions? jsonOptions = null
@@ -69,6 +76,17 @@ public sealed record SignalMessage
     /// <param name="jsonOptions">Optional JSON serializer options.</param>
     /// <returns>The deserialized signal.</returns>
     /// <exception cref="InvalidOperationException">If the signal type cannot be resolved.</exception>
+    [RequiresUnreferencedCode(
+        "A signal payload is deserialized polymorphically from its type name, which needs the signal type's metadata; an AOT application dispatches signals inline."
+    )]
+    [RequiresDynamicCode(
+        "A signal payload is deserialized polymorphically from its type name, which may need runtime code generation; an AOT application dispatches signals inline."
+    )]
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2057",
+        Justification = "The type name comes from the signal envelope written by Create, and a type it cannot resolve is refused before the payload is deserialized."
+    )]
     public ITaskSignal Deserialize(JsonSerializerOptions? jsonOptions = null)
     {
         var type =

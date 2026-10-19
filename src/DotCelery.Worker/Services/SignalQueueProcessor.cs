@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Text.Json;
 using DotCelery.Core.Abstractions;
@@ -131,6 +132,16 @@ public sealed class SignalQueueProcessor : BackgroundService
         }
     }
 
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2026",
+        Justification = "Queued signal dispatch deserializes the queued signal payload with reflection; UseQueuedSignalDispatch is annotated as requiring unreferenced code, so a Native AOT application uses inline signal dispatch."
+    )]
+    [UnconditionalSuppressMessage(
+        "AOT",
+        "IL3050",
+        Justification = "Queued signal dispatch deserializes the queued signal payload with reflection; UseQueuedSignalDispatch is annotated as requiring dynamic code, so a Native AOT application uses inline signal dispatch."
+    )]
     private async Task ProcessMessageAsync(
         SignalMessage message,
         CancellationToken cancellationToken
@@ -161,6 +172,11 @@ public sealed class SignalQueueProcessor : BackgroundService
         }
     }
 
+    [UnconditionalSuppressMessage(
+        "AOT",
+        "IL3050",
+        Justification = "Queued signal dispatch closes the handler dispatch method over the runtime signal type; UseQueuedSignalDispatch is annotated as requiring dynamic code, so a Native AOT application uses inline signal dispatch."
+    )]
     private async Task DispatchToHandlersAsync(
         ITaskSignal signal,
         CancellationToken cancellationToken

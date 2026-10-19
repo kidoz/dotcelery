@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using DotCelery.Core.Abstractions;
 using Microsoft.Extensions.Logging;
@@ -33,6 +34,20 @@ public sealed class QueuedTaskSignalDispatcher : ITaskSignalDispatcher
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Queued signals serialize their payload polymorphically, which a Native AOT application
+    /// cannot do; it dispatches signals inline instead.
+    /// </remarks>
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2026",
+        Justification = "Queued signal payloads are serialized polymorphically; a Native AOT application dispatches signals inline."
+    )]
+    [UnconditionalSuppressMessage(
+        "AOT",
+        "IL3050",
+        Justification = "Queued signal payloads are serialized polymorphically; a Native AOT application dispatches signals inline."
+    )]
     public async ValueTask DispatchAsync<TSignal>(
         TSignal signal,
         CancellationToken cancellationToken = default
