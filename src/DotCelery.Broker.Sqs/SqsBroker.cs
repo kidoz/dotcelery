@@ -297,16 +297,16 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         if (_disposed)
         {
-            return;
+            return ValueTask.CompletedTask;
         }
 
         _disposed = true;
         _client.Dispose();
-        await Task.CompletedTask.ConfigureAwait(false);
+        return ValueTask.CompletedTask;
     }
 
     // The seconds a publish hides a scheduled message: SQS delays at most 15 minutes, and a

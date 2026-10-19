@@ -26,7 +26,6 @@ public sealed class InMemoryBroker : IMessageBroker, IBrokerCapabilities
     private readonly InMemoryBrokerOptions _options;
     private readonly IMessageSecurityValidator? _messageSecurityValidator;
     private readonly IQueueMetrics? _queueMetrics;
-    private readonly Lock _lock = new();
 
     // A delivered message that has not been settled, and the consumer it was delivered to
     private readonly ConcurrentDictionary<BrokerMessage, ConsumerDeliveries> _deliveries = new();
