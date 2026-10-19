@@ -327,4 +327,77 @@ public sealed class CircuitBreakerTests : IDisposable
 
         Assert.Equal(CircuitState.Open, circuitBreaker.State);
     }
+
+    [Fact]
+    public async Task StateChanged_HandlerReadingBreakerState_DoesNotDeadlock()
+    {
+        var handlerRan = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+
+        _circuitBreaker.StateChanged += (_, _) =>
+        {
+            // Call back into the breaker while the event is raised; this deadlocks if the
+            // event is invoked while the breaker still holds its lock
+            _ = _circuitBreaker.State;
+            _ = _circuitBreaker.IsAllowed;
+            _ = _circuitBreaker.FailureCount;
+            _ = _circuitBreaker.LastOpenedAt;
+            handlerRan.TrySetResult();
+        };
+
+        var recording = Task.Run(() =>
+        {
+            for (var i = 0; i < 3; i++)
+            {
+                _circuitBreaker.RecordFailure();
+            }
+        });
+
+        await AssertCompletesAsync(
+            recording,
+            "RecordFailure deadlocked while raising StateChanged"
+        );
+        await AssertCompletesAsync(handlerRan.Task, "StateChanged handler did not run");
+        Assert.Equal(CircuitState.Open, _circuitBreaker.State);
+    }
+
+    [Fact]
+    public async Task StateChanged_HandlerResettingBreaker_DoesNotDeadlock()
+    {
+        _circuitBreaker.StateChanged += (_, args) =>
+        {
+            if (args.NewState == CircuitState.Open)
+            {
+                _circuitBreaker.Reset();
+            }
+        };
+
+        var recording = Task.Run(() =>
+        {
+            for (var i = 0; i < 3; i++)
+            {
+                _circuitBreaker.RecordFailure();
+            }
+        });
+
+        await AssertCompletesAsync(
+            recording,
+            "RecordFailure deadlocked while raising StateChanged"
+        );
+        Assert.Equal(CircuitState.Closed, _circuitBreaker.State);
+    }
+
+    // A test method must not block, so the wait races the operation against a delay and only
+    // ends the test when the operation hangs
+    private static async Task AssertCompletesAsync(Task task, string message)
+    {
+        var completed = await Task.WhenAny(
+            task,
+            Task.Delay(TimeSpan.FromSeconds(10), CancellationToken.None)
+        );
+
+        Assert.True(completed == task, message);
+        await task;
+    }
 }

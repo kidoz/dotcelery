@@ -107,6 +107,8 @@ public sealed class CircuitBreaker : ICircuitBreaker, IDisposable
     /// <inheritdoc />
     public void RecordSuccess()
     {
+        CircuitStateChangedEventArgs? stateChangeEvent = null;
+
         lock (_lock)
         {
             switch (_state)
@@ -127,7 +129,7 @@ public sealed class CircuitBreaker : ICircuitBreaker, IDisposable
 
                     if (_successCount >= _options.SuccessThreshold)
                     {
-                        TransitionTo(CircuitState.Closed, null);
+                        stateChangeEvent = TransitionToAndGetEvent(CircuitState.Closed, null);
                     }
                     break;
 
@@ -136,11 +138,19 @@ public sealed class CircuitBreaker : ICircuitBreaker, IDisposable
                     break;
             }
         }
+
+        // Raise event outside lock to prevent deadlock
+        if (stateChangeEvent is not null)
+        {
+            RaiseStateChanged(stateChangeEvent);
+        }
     }
 
     /// <inheritdoc />
     public void RecordFailure(Exception? exception = null)
     {
+        CircuitStateChangedEventArgs? stateChangeEvent = null;
+
         lock (_lock)
         {
             // Check if this exception should be ignored
@@ -181,7 +191,7 @@ public sealed class CircuitBreaker : ICircuitBreaker, IDisposable
 
                     if (_failureCount >= _options.FailureThreshold)
                     {
-                        TransitionTo(CircuitState.Open, exception);
+                        stateChangeEvent = TransitionToAndGetEvent(CircuitState.Open, exception);
                     }
                     break;
 
@@ -191,13 +201,19 @@ public sealed class CircuitBreaker : ICircuitBreaker, IDisposable
                         "Circuit '{Name}' failed in half-open state, reopening",
                         Name
                     );
-                    TransitionTo(CircuitState.Open, exception);
+                    stateChangeEvent = TransitionToAndGetEvent(CircuitState.Open, exception);
                     break;
 
                 case CircuitState.Open:
                     // Already open, ignore
                     break;
             }
+        }
+
+        // Raise event outside lock to prevent deadlock
+        if (stateChangeEvent is not null)
+        {
+            RaiseStateChanged(stateChangeEvent);
         }
     }
 
@@ -234,18 +250,28 @@ public sealed class CircuitBreaker : ICircuitBreaker, IDisposable
     /// <inheritdoc />
     public void Trip()
     {
+        CircuitStateChangedEventArgs? stateChangeEvent = null;
+
         lock (_lock)
         {
             if (_state != CircuitState.Open)
             {
-                TransitionTo(CircuitState.Open, null);
+                stateChangeEvent = TransitionToAndGetEvent(CircuitState.Open, null);
             }
+        }
+
+        // Raise event outside lock to prevent deadlock
+        if (stateChangeEvent is not null)
+        {
+            RaiseStateChanged(stateChangeEvent);
         }
     }
 
     /// <inheritdoc />
     public void Reset()
     {
+        CircuitStateChangedEventArgs? stateChangeEvent = null;
+
         lock (_lock)
         {
             var oldState = _state;
@@ -256,8 +282,14 @@ public sealed class CircuitBreaker : ICircuitBreaker, IDisposable
             if (oldState != CircuitState.Closed)
             {
                 _logger.LogInformation("Circuit '{Name}' manually reset to closed", Name);
-                RaiseStateChanged(oldState, CircuitState.Closed, null);
+                stateChangeEvent = CreateStateChangedEvent(oldState, CircuitState.Closed, null);
             }
+        }
+
+        // Raise event outside lock to prevent deadlock
+        if (stateChangeEvent is not null)
+        {
+            RaiseStateChanged(stateChangeEvent);
         }
     }
 
@@ -268,7 +300,14 @@ public sealed class CircuitBreaker : ICircuitBreaker, IDisposable
         _disposeCts.Dispose();
     }
 
-    private void TransitionTo(CircuitState newState, Exception? exception)
+    /// <summary>
+    /// Transitions to a new state and returns an event to raise outside the lock.
+    /// Must be called while holding _lock.
+    /// </summary>
+    private CircuitStateChangedEventArgs TransitionToAndGetEvent(
+        CircuitState newState,
+        Exception? exception
+    )
     {
         var oldState = _state;
         _state = newState;
@@ -302,7 +341,7 @@ public sealed class CircuitBreaker : ICircuitBreaker, IDisposable
                 break;
         }
 
-        RaiseStateChanged(oldState, newState, exception);
+        return CreateStateChangedEvent(oldState, newState, exception);
     }
 
     private async Task ScheduleHalfOpenAsync()
@@ -311,12 +350,20 @@ public sealed class CircuitBreaker : ICircuitBreaker, IDisposable
         {
             await Task.Delay(_options.OpenDuration, _disposeCts.Token).ConfigureAwait(false);
 
+            CircuitStateChangedEventArgs? stateChangeEvent = null;
+
             lock (_lock)
             {
                 if (_state == CircuitState.Open)
                 {
-                    TransitionTo(CircuitState.HalfOpen, null);
+                    stateChangeEvent = TransitionToAndGetEvent(CircuitState.HalfOpen, null);
                 }
+            }
+
+            // Raise event outside lock to prevent deadlock
+            if (stateChangeEvent is not null)
+            {
+                RaiseStateChanged(stateChangeEvent);
             }
         }
         catch (OperationCanceledException)
@@ -348,26 +395,28 @@ public sealed class CircuitBreaker : ICircuitBreaker, IDisposable
         return _options.TripOnExceptions.Any(t => t.IsAssignableFrom(exceptionType));
     }
 
-    private void RaiseStateChanged(
+    private CircuitStateChangedEventArgs CreateStateChangedEvent(
         CircuitState oldState,
         CircuitState newState,
         Exception? exception
     )
     {
+        return new CircuitStateChangedEventArgs
+        {
+            CircuitName = Name,
+            OldState = oldState,
+            NewState = newState,
+            Timestamp = _timeProvider.GetUtcNow(),
+            TriggeringException = exception,
+            FailureCount = _failureCount,
+        };
+    }
+
+    private void RaiseStateChanged(CircuitStateChangedEventArgs eventArgs)
+    {
         try
         {
-            StateChanged?.Invoke(
-                this,
-                new CircuitStateChangedEventArgs
-                {
-                    CircuitName = Name,
-                    OldState = oldState,
-                    NewState = newState,
-                    Timestamp = _timeProvider.GetUtcNow(),
-                    TriggeringException = exception,
-                    FailureCount = _failureCount,
-                }
-            );
+            StateChanged?.Invoke(this, eventArgs);
         }
         catch (Exception ex)
         {
