@@ -80,12 +80,24 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(message);
 
+        await PublishCoreAsync(message, cancellationToken).ConfigureAwait(false);
+
+        // The entry is in the stream, so the queue's waiting count follows what was published
+        await _queueMetrics
+            .RecordEnqueueAsync(message.Queue, _logger, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    // Publishes without recording an enqueue: requeues go through here so a returned message is
+    // not counted as a fresh enqueue
+    private async Task PublishCoreAsync(TaskMessage message, CancellationToken cancellationToken)
+    {
         var db = await GetDatabaseAsync(cancellationToken).ConfigureAwait(false);
         var streamKey = GetStreamKey(message.Queue);
 
         // Serialize the message to JSON using AOT-friendly type info
-        var payload = JsonSerializer.Serialize(message, TaskMessageTypeInfo);
-        var signature = _messageSecurityValidator?.Sign(Encoding.UTF8.GetBytes(payload));
+        var payload = JsonSerializer.SerializeToUtf8Bytes(message, TaskMessageTypeInfo);
+        var signature = _messageSecurityValidator?.Sign(payload);
 
         // Validate message size
         if (_options.MaxMessageSizeBytes > 0 && payload.Length > _options.MaxMessageSizeBytes)
@@ -134,11 +146,6 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
         {
             await db.StreamAddAsync(streamKey, entries).ConfigureAwait(false);
         }
-
-        // The entry is in the stream, so the queue's waiting count follows what was published
-        await _queueMetrics
-            .RecordEnqueueAsync(message.Queue, _logger, cancellationToken)
-            .ConfigureAwait(false);
 
         _logger.LogDebug("Published message {MessageId} to stream {Stream}", message.Id, streamKey);
     }
@@ -846,7 +853,7 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
             var signatureText = signature.IsNullOrEmpty ? null : signature.ToString();
             var payloadText = payload.ToString();
             var payloadBytes = Encoding.UTF8.GetBytes(payloadText);
-            if (!IsSignatureValid(payloadBytes, signatureText))
+            if (!_messageSecurityValidator.IsSignatureValid(payloadBytes, signatureText))
             {
                 _logger.LogWarning(
                     "Stream entry {EntryId} failed message signature validation",
@@ -887,34 +894,6 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
             _logger.LogError(ex, "Error parsing stream entry {EntryId}", entry.Id);
             return null;
         }
-    }
-
-    private bool IsSignatureValid(byte[] payload, string? signature)
-    {
-        if (_messageSecurityValidator is null)
-        {
-            return true;
-        }
-
-        var validation = _messageSecurityValidator.Validate(
-            new TaskMessage
-            {
-                Id = "unknown",
-                Task = "unknown",
-                Args = [],
-                ContentType = "application/json",
-                Timestamp = DateTimeOffset.UtcNow,
-            },
-            signature
-        );
-
-        if (validation.ErrorCode == MessageValidationError.MissingSignature)
-        {
-            return false;
-        }
-
-        return string.IsNullOrEmpty(signature)
-            || _messageSecurityValidator.VerifySignature(payload, signature);
     }
 
     private async Task EnsureConsumerGroupAsync(IDatabase db, string streamKey)

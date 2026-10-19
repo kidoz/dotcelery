@@ -330,7 +330,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
                 // Deserialize using AOT-friendly type info
                 var body = ea.Body.ToArray();
                 var signature = GetSignature(ea.BasicProperties);
-                if (!IsSignatureValid(body, signature))
+                if (!_messageSecurityValidator.IsSignatureValid(body, signature))
                 {
                     await HandleSecurityFailureAsync(ea, channel, cancellationToken)
                         .ConfigureAwait(false);
@@ -746,34 +746,6 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
         {
             _logger.LogError(rejectEx, "Failed to reject message {DeliveryTag}", ea.DeliveryTag);
         }
-    }
-
-    private bool IsSignatureValid(byte[] body, string? signature)
-    {
-        if (_messageSecurityValidator is null)
-        {
-            return true;
-        }
-
-        var validation = _messageSecurityValidator.Validate(
-            new TaskMessage
-            {
-                Id = "unknown",
-                Task = "unknown",
-                Args = [],
-                ContentType = "application/json",
-                Timestamp = DateTimeOffset.UtcNow,
-            },
-            signature
-        );
-
-        if (validation.ErrorCode == MessageValidationError.MissingSignature)
-        {
-            return false;
-        }
-
-        return string.IsNullOrEmpty(signature)
-            || _messageSecurityValidator.VerifySignature(body, signature);
     }
 
     private async Task HandleSecurityFailureAsync(

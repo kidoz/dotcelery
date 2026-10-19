@@ -769,8 +769,7 @@ public sealed class CeleryWorkerService : BackgroundService
 
         if (
             message.RawBody is { Length: > 0 } rawBody
-            && !string.IsNullOrEmpty(message.Signature)
-            && !_securityValidator.VerifySignature(rawBody, message.Signature)
+            && !_securityValidator.IsSignatureValid(result, rawBody, message.Signature)
         )
         {
             return MessageValidationResult.Failure(
