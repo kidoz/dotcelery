@@ -199,6 +199,29 @@ public class InMemoryBrokerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task RejectAsync_WithRequeue_DoesNotRecordANewEnqueue()
+    {
+        var metrics = new RecordingQueueMetrics();
+        await using var broker = new InMemoryBroker(
+            Options.Create(new InMemoryBrokerOptions()),
+            queueMetrics: metrics
+        );
+
+        await broker.PublishAsync(CreateTestMessage());
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        await foreach (var msg in broker.ConsumeAsync(["celery"], cts.Token))
+        {
+            await broker.RejectAsync(msg, requeue: true);
+            break;
+        }
+
+        // The message is back in the queue, but was counted only when first published
+        Assert.Equal(1, broker.GetQueueLength("celery"));
+        Assert.Equal(1, metrics.CountOf("celery"));
+    }
+
+    [Fact]
     public async Task PublishAsync_WhenTheMetricsStoreIsDown_StillPublishes()
     {
         var metrics = new RecordingQueueMetrics { Fail = true };

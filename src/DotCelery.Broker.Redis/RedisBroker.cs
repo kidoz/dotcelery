@@ -324,8 +324,9 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
         if (requeue)
         {
             // Add the copy before acknowledging the original: a failure in between leaves a
-            // duplicate delivery instead of losing the message.
-            await PublishAsync(message.Message, cancellationToken).ConfigureAwait(false);
+            // duplicate delivery instead of losing the message. The requeue is not recorded as
+            // a fresh enqueue: the message was counted when it was first published.
+            await PublishCoreAsync(message.Message, cancellationToken).ConfigureAwait(false);
             await db.StreamAcknowledgeAsync(streamKey, _options.ConsumerGroupName, messageId)
                 .ConfigureAwait(false);
             await db.StreamDeleteAsync(streamKey, [(RedisValue)messageId]).ConfigureAwait(false);

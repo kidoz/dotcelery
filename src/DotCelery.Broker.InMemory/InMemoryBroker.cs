@@ -64,6 +64,18 @@ public sealed class InMemoryBroker : IMessageBroker, IBrokerCapabilities
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        await EnqueueAsync(message, cancellationToken).ConfigureAwait(false);
+
+        // The message is in the queue, so the queue's waiting count follows what was published
+        await _queueMetrics
+            .RecordEnqueueAsync(message.Queue, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    // Enqueues without recording an enqueue: requeues go through here so a returned message is
+    // not counted as a fresh enqueue
+    private async ValueTask EnqueueAsync(TaskMessage message, CancellationToken cancellationToken)
+    {
         var channel = GetOrCreateQueue(message.Queue);
         var rawBody = JsonSerializer.SerializeToUtf8Bytes(
             message,
@@ -80,11 +92,6 @@ public sealed class InMemoryBroker : IMessageBroker, IBrokerCapabilities
         };
 
         await channel.Writer.WriteAsync(brokerMessage, cancellationToken).ConfigureAwait(false);
-
-        // The message is in the queue, so the queue's waiting count follows what was published
-        await _queueMetrics
-            .RecordEnqueueAsync(message.Queue, cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -154,7 +161,7 @@ public sealed class InMemoryBroker : IMessageBroker, IBrokerCapabilities
 
         if (requeue)
         {
-            return PublishAsync(message.Message, cancellationToken);
+            return EnqueueAsync(message.Message, cancellationToken);
         }
 
         return ValueTask.CompletedTask;
