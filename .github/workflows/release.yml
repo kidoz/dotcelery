@@ -110,10 +110,23 @@ jobs:
       - name: Test
         run: |
           dotnet test tests/DotCelery.Tests.Unit --configuration Release --no-build
+          dotnet test tests/DotCelery.Tests.Generated --configuration Release --no-build
           dotnet test tests/DotCelery.Analyzers.Tests --configuration Release --no-build
+
+      # Publishing is gated on the libraries running without a runtime, as they do in build.yml.
+      - name: Native AOT smoke test
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+          dotnet publish samples/DotCelery.AotSmoke --configuration Release --runtime linux-x64
+          samples/DotCelery.AotSmoke/bin/Release/net10.0/linux-x64/publish/DotCelery.AotSmoke
 
       - name: Pack
         run: dotnet pack DotCelery.slnx --configuration Release --no-build --output artifacts/packages -p:Version=${{ steps.version.outputs.version }}
+
+      # The release artifacts are consumed the way a user consumes them before they are published.
+      - name: Verify packages
+        run: ./eng/verify-packages.sh artifacts/packages
 
       - name: Attest package provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4

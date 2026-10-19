@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- Passed by eng/verify-packages.sh, which derives it from the packed Core package -->
+    <DotCeleryVersion Condition="'$(DotCeleryVersion)' == ''">0.0.0-local</DotCeleryVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DotCelery.Core" Version="$(DotCeleryVersion)" />
+    <PackageReference Include="DotCelery.Client" Version="$(DotCeleryVersion)" />
+    <PackageReference Include="DotCelery.Worker" Version="$(DotCeleryVersion)" />
+    <PackageReference Include="DotCelery.Broker.InMemory" Version="$(DotCeleryVersion)" />
+    <PackageReference Include="DotCelery.Backend.InMemory" Version="$(DotCeleryVersion)" />
+    <PackageReference
+      Include="DotCelery.Analyzers"
+      Version="$(DotCeleryVersion)"
+      PrivateAssets="all"
+    />
+  </ItemGroup>
+</Project>
