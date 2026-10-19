@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Exceptions;
 using DotCelery.Core.Filters;
@@ -639,6 +641,16 @@ public sealed class TaskExecutor
         return taskResult;
     }
 
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2026",
+        Justification = "The compiled invoker is only reached for a task registered without a generated invoker; a Native AOT application is refused below instead."
+    )]
+    [UnconditionalSuppressMessage(
+        "AOT",
+        "IL3050",
+        Justification = "The compiled invoker compiles an expression tree, which is refused below when the application targets Native AOT."
+    )]
     private Task<object?> InvokeTaskAsync(
         object task,
         object? input,
@@ -653,6 +665,16 @@ public sealed class TaskExecutor
         if (registration.Invoker is { } invoker)
         {
             return invoker.InvokeAsync(task, input, context, cancellationToken);
+        }
+
+        if (!RuntimeFeature.IsDynamicCodeSupported)
+        {
+            throw new InvalidOperationException(
+                $"Task '{registration.TaskName}' has no invoker and the application targets Native AOT, "
+                    + "where reflection-based invocation is unavailable. Register the task through the "
+                    + "source-generated registration, which supplies a typed invoker, or pass one to "
+                    + "AddTask<TTask>(taskName, invoker)."
+            );
         }
 
         return _taskInvoker.InvokeAsync(task, input, context, registration, cancellationToken);

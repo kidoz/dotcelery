@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 using System.Reflection;
 using DotCelery.Core.Abstractions;
@@ -51,6 +52,12 @@ public sealed class CompiledTaskInvoker
     /// <param name="registration">The task registration info.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The task result.</returns>
+    [RequiresUnreferencedCode(
+        "Invoking a task through a compiled delegate needs the task's method metadata."
+    )]
+    [RequiresDynamicCode(
+        "Invoking a task through a compiled delegate needs runtime code generation."
+    )]
     public async Task<object?> InvokeAsync(
         object task,
         object? input,
@@ -99,6 +106,12 @@ public sealed class CompiledTaskInvoker
     /// Pre-compiles the delegate for a task type during registration.
     /// </summary>
     /// <param name="registration">The task registration.</param>
+    [RequiresUnreferencedCode(
+        "Invoking a task through a compiled delegate needs the task's method metadata."
+    )]
+    [RequiresDynamicCode(
+        "Invoking a task through a compiled delegate needs runtime code generation."
+    )]
     public void PreCompile(TaskRegistration registration)
     {
         _delegateCache.GetOrAdd(
@@ -107,6 +120,10 @@ public sealed class CompiledTaskInvoker
         );
     }
 
+    [RequiresUnreferencedCode(
+        "Compiling a task invoker reads the task's method metadata and compiles an expression tree."
+    )]
+    [RequiresDynamicCode("Compiling a task invoker generates code at runtime.")]
     private static CachedInvoker CompileDelegate(Type taskType, Type? inputType, Type? outputType)
     {
         var method = FindExecuteAsyncMethod(taskType, inputType);
@@ -123,6 +140,11 @@ public sealed class CompiledTaskInvoker
         }
     }
 
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2070",
+        Justification = "The compiled invoker is the reflection fallback for tasks registered without a generated invoker; its callers are annotated as requiring unreferenced code, and a Native AOT application refuses this path before it is reached."
+    )]
     private static MethodInfo FindExecuteAsyncMethod(Type taskType, Type? inputType)
     {
         const string methodName = "ExecuteAsync";
@@ -178,6 +200,10 @@ public sealed class CompiledTaskInvoker
         );
     }
 
+    [RequiresUnreferencedCode(
+        "Compiling a task invoker reads the task's method metadata and compiles an expression tree."
+    )]
+    [RequiresDynamicCode("Compiling a task invoker generates code at runtime.")]
     private static TaskWithInputInvoker CompileWithInputDelegate(
         Type taskType,
         MethodInfo method,
@@ -245,6 +271,10 @@ public sealed class CompiledTaskInvoker
         }
     }
 
+    [RequiresUnreferencedCode(
+        "Compiling a task invoker reads the task's method metadata and compiles an expression tree."
+    )]
+    [RequiresDynamicCode("Compiling a task invoker generates code at runtime.")]
     private static TaskWithoutInputInvoker CompileWithoutInputDelegate(
         Type taskType,
         MethodInfo method,
