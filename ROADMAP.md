@@ -24,6 +24,7 @@ but do not yet behave as documented.
 
 ### Security
 - HMAC message signing across InMemory, RabbitMQ, and Redis brokers
+- The inbox keeps a processed message ID at least as long as `MessageSecurityOptions.MaxMessageAge`, so a replay inside the signing window is refused by the inbox even when `InboxRetention` is shorter
 - A message over a broker's maximum size is refused as it is published, and the worker refuses a payload over `MessageSecurityOptions.MaxPayloadSizeBytes` before the task input is deserialized
 - The worker validates signatures, the task-name allowlist, schema version, payload size, and message age before the task input is deserialized and before the task is recorded as started; a refused message is dead-lettered
 - Tenant validation against a configured tenant list, with the tenant context visible to the task
@@ -50,9 +51,6 @@ but do not yet behave as documented.
 ### Incomplete Documented Features
 - Canvas: a chord cannot be a member of a group; following a group with a task is a chord, written with `WithCallback` or its workflow-named form `Then`
 - Dashboard: the default worker registry is in-process, and so are the consumer counts taken from it, so a deployment whose workers run elsewhere registers a registry on shared storage; the list of task names the dashboard offers comes from the most recently updated records, so a name whose records all expired from that window is not offered until one is updated again
-
-### Security Hardening
-- A signed message can be replayed after `MessageSecurityOptions.MaxMessageAge` and the inbox retention have passed; an ID cannot be refused once its inbox record expires
 
 ## Planned Features
 

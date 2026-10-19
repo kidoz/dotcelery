@@ -1,4 +1,5 @@
 using DotCelery.Core.Abstractions;
+using DotCelery.Core.Security;
 using Microsoft.Extensions.Options;
 
 namespace DotCelery.Core.Storage.Stores;
@@ -7,10 +8,17 @@ namespace DotCelery.Core.Storage.Stores;
 /// <see cref="IInboxStore"/> on the storage primitives.
 /// </summary>
 /// <remarks>
-/// Processed messages are remembered for <see cref="StorageStoreOptions.InboxRetention"/>.
-/// A record written with the caller's transaction is written in that transaction, so the
-/// message counts as processed only if the caller commits. Providers that cannot write in a
-/// caller's transaction refuse the record rather than store it outside the transaction.
+/// <para>
+/// Processed messages are remembered for <see cref="StorageStoreOptions.InboxRetention"/> and for
+/// at least as long as a signed message can be fresh
+/// (<see cref="MessageSecurityOptions.MaxMessageAge"/>), so a replay inside the signing window is
+/// refused by the inbox even when the retention is shorter.
+/// </para>
+/// <para>
+/// A record written with the caller's transaction is written in that transaction, so the message
+/// counts as processed only if the caller commits. Providers that cannot write in a caller's
+/// transaction refuse the record rather than store it outside the transaction.
+/// </para>
 /// </remarks>
 public sealed class InboxStore : IInboxStore, IStorageBackedStore
 {
@@ -20,6 +28,7 @@ public sealed class InboxStore : IInboxStore, IStorageBackedStore
     private readonly IDocumentStore _documents;
     private readonly StorageStoreOptions _options;
     private readonly TimeProvider _timeProvider;
+    private readonly TimeSpan _retention;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="InboxStore"/> class.
@@ -27,10 +36,12 @@ public sealed class InboxStore : IInboxStore, IStorageBackedStore
     /// <param name="storage">The storage provider.</param>
     /// <param name="options">The store options.</param>
     /// <param name="timeProvider">The clock for processing times.</param>
+    /// <param name="securityOptions">The security options, whose message age the retention covers.</param>
     public InboxStore(
         IStorageProvider storage,
         IOptions<StorageStoreOptions>? options = null,
-        TimeProvider? timeProvider = null
+        TimeProvider? timeProvider = null,
+        IOptions<MessageSecurityOptions>? securityOptions = null
     )
     {
         ArgumentNullException.ThrowIfNull(storage);
@@ -39,6 +50,10 @@ public sealed class InboxStore : IInboxStore, IStorageBackedStore
         _options = options?.Value ?? new StorageStoreOptions();
         _collection = _options.Name("inbox");
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _retention =
+            securityOptions?.Value.MaxMessageAge is { } maxAge && maxAge > _options.InboxRetention
+                ? maxAge
+                : _options.InboxRetention;
     }
 
     /// <inheritdoc />
@@ -61,7 +76,7 @@ public sealed class InboxStore : IInboxStore, IStorageBackedStore
     {
         var options = new DocumentWriteOptions
         {
-            TimeToLive = _options.InboxRetention,
+            TimeToLive = _retention,
             SortKey = _timeProvider.GetUtcNow(),
         };
 

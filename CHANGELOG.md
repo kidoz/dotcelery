@@ -97,6 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SecurityValidationFilter`, whose validation `UseMessageSecurity()` now performs in the worker before the message reaches the executor
 
 ### Fixed
+- The inbox keeps a processed message ID for at least `MessageSecurityOptions.MaxMessageAge` when one is configured, so a replay inside the signing window is refused by the inbox even when `StorageStoreOptions.InboxRetention` is shorter
 - A historical metrics snapshot is keyed by its queue and task name, so the snapshots a collector records for several queues at one instant are all kept; before, they shared a key and only the last queue of each interval was counted
 - The worker no longer drops a message when the result backend, revocation store, rate limiter, or retry publish fails; it returns the message to the broker
 - Infrastructure failures after a task succeeds are no longer recorded as task failures

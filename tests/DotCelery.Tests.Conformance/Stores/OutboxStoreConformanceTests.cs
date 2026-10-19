@@ -1,5 +1,7 @@
 using DotCelery.Core.Outbox;
+using DotCelery.Core.Security;
 using DotCelery.Core.Storage.Stores;
+using Microsoft.Extensions.Options;
 
 namespace DotCelery.Tests.Conformance.Stores;
 
@@ -158,6 +160,48 @@ public abstract class OutboxStoreConformanceTests : StoreConformanceTests
         Assert.True(await CreateInbox().IsProcessedAsync("a"));
         Assert.Equal(1, await inbox.GetCountAsync());
         Time.Advance(StoreOptions.InboxRetention);
+        Assert.False(await inbox.IsProcessedAsync("a"));
+    }
+
+    [Fact]
+    public async Task Inbox_KeepsAMessageAtLeastAsLongAsASignedOneCanBeFresh()
+    {
+        StoreOptions.InboxRetention = TimeSpan.FromMinutes(30);
+        var inbox = new InboxStore(
+            Provider,
+            CreateOptions(),
+            Time,
+            Options.Create(new MessageSecurityOptions { MaxMessageAge = TimeSpan.FromHours(2) })
+        );
+
+        await inbox.MarkProcessedAsync("a");
+
+        // Past the configured retention, but a signed message can still be fresh, so a replay
+        // inside the signing window must still be refused
+        Time.Advance(TimeSpan.FromMinutes(90));
+        Assert.True(await inbox.IsProcessedAsync("a"));
+
+        // Past the signing window the record goes
+        Time.Advance(TimeSpan.FromMinutes(31));
+        Assert.False(await inbox.IsProcessedAsync("a"));
+    }
+
+    [Fact]
+    public async Task Inbox_KeepsItsRetentionWhenTheSigningWindowIsShorter()
+    {
+        var inbox = new InboxStore(
+            Provider,
+            CreateOptions(),
+            Time,
+            Options.Create(new MessageSecurityOptions { MaxMessageAge = TimeSpan.FromMinutes(1) })
+        );
+
+        await inbox.MarkProcessedAsync("a");
+
+        Time.Advance(StoreOptions.InboxRetention - TimeSpan.FromMinutes(1));
+        Assert.True(await inbox.IsProcessedAsync("a"));
+
+        Time.Advance(TimeSpan.FromMinutes(1));
         Assert.False(await inbox.IsProcessedAsync("a"));
     }
 
