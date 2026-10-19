@@ -35,6 +35,7 @@ but do not yet behave as documented.
 ### Task Registration and Dispatch
 - Analyzer reports duplicate task names at compilation end
 - A source generator registers the tasks an assembly defines under their static names through typed references, with no reflection: `DotCelery.Generated.DotCeleryTasks.RegisterTasks()` calls `AddTask<TTask>(name, invoker)` for each, `AddTask<TTask>()` records the name with the type, so the worker's registry is built without reading names through reflection, and the generated `ITaskInvoker` adapter is used to invoke the task instead of compiling an expression delegate
+- The generator records each task's input and output types with the registration, so the worker's registry does not inspect a generated task's interfaces, and emits a typed signature helper (`Email(input)` returns `Signature<EmailTask, EmailInput, EmailResult>`), named after the task without its `Task` suffix, so canvas code does not spell out the type arguments
 - `SendOptions.TenantId` and `SendOptions.PartitionKey` with tenant-aware queue routing
 
 ### Resilience
@@ -64,7 +65,6 @@ but do not yet behave as documented.
 - Message compression
 
 ### Task Registration and Dispatch
-- A source generator for strongly-typed client helpers, so a typed task is sent without writing its `Signature<TTask, TInput>` by hand; the worker still resolves the input and output types through reflection
 - Interceptors to reduce dispatch overhead
 - Extension members for fluent task signatures (after Canvas execution ships)
 

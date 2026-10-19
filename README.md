@@ -91,7 +91,9 @@ The analyzer package also contains a source generator: for every assembly that d
 emits an internal `DotCelery.Generated.DotCeleryTasks.RegisterTasks()` extension that registers
 each of them under its static `TaskName` through a typed reference and attaches a typed adapter
 that invokes the task, so neither registration nor invocation needs reflection or expression
-compilation. Call it from the same assembly instead of scanning:
+compilation. It also records the input and output types it knows with each registration, so the
+worker's registry does not inspect the task's interfaces. Call it from the same assembly instead
+of scanning:
 
 ```csharp
 using DotCelery.Generated;
@@ -102,8 +104,20 @@ builder.Services.AddDotCelery(celery =>
         .RegisterTasks());
 ```
 
+For each task with a known input, the generator also emits a typed signature helper named after
+the task without its `Task` suffix (`EmailTask` → `Email`), so a canvas is written without
+spelling out the type arguments:
+
+```csharp
+using static DotCelery.Generated.DotCeleryTasks;
+
+var workflow = new Chain(
+    Email(new EmailInput { To = "user@example.com", Subject = "Hello", Body = "..." }),
+    Archive(new ArchiveInput { /* ... */ }));
+```
+
 A library that ships tasks calls the generated method from its own public registration method,
-since the generated class is internal to the assembly that defines the tasks.
+since the generated class and its helpers are internal to the assembly that defines the tasks.
 `AddTasksFromAssembly` stays available for the reflective scan.
 
 ### Configure Services
