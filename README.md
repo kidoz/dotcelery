@@ -89,8 +89,9 @@ public record EmailResult(bool Success);
 
 The analyzer package also contains a source generator: for every assembly that defines tasks it
 emits an internal `DotCelery.Generated.DotCeleryTasks.RegisterTasks()` extension that registers
-each of them under its static `TaskName` through a typed reference, with no reflection. Call it
-from the same assembly instead of scanning:
+each of them under its static `TaskName` through a typed reference and attaches a typed adapter
+that invokes the task, so neither registration nor invocation needs reflection or expression
+compilation. Call it from the same assembly instead of scanning:
 
 ```csharp
 using DotCelery.Generated;

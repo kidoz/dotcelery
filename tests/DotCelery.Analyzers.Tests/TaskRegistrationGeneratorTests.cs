@@ -4,12 +4,13 @@ namespace DotCelery.Analyzers.Tests;
 
 /// <summary>
 /// Tests for the task registration generator, which registers the tasks defined in an assembly
-/// by typed accesses to their names, without reflection.
+/// by typed accesses to their names and generates the typed adapters that invoke them, without
+/// reflection or expression compilation.
 /// </summary>
 public class TaskRegistrationGeneratorTests
 {
     [Fact]
-    public void Generator_RegistersEachTaskByItsStaticName()
+    public void Generator_RegistersEachTaskAndItsInvoker()
     {
         const string source = """
             using System.Threading;
@@ -18,11 +19,11 @@ public class TaskRegistrationGeneratorTests
 
             namespace Sample;
 
-            public sealed class AlphaTask : ITask<AlphaInput>
+            public sealed class AlphaTask : ITask<AlphaInput, AlphaOutput>
             {
                 public static string TaskName => "sample.alpha";
 
-                public Task ExecuteAsync(AlphaInput input, ITaskContext context, CancellationToken cancellationToken = default) => Task.CompletedTask;
+                public Task<AlphaOutput> ExecuteAsync(AlphaInput input, ITaskContext context, CancellationToken cancellationToken = default) => Task.FromResult(new AlphaOutput());
             }
 
             internal sealed class BetaTask : ITask<BetaInput>
@@ -34,6 +35,8 @@ public class TaskRegistrationGeneratorTests
 
             public sealed class AlphaInput { }
 
+            public sealed class AlphaOutput { }
+
             public sealed class BetaInput { }
             """;
 
@@ -42,12 +45,24 @@ public class TaskRegistrationGeneratorTests
         Assert.Empty(run.Errors);
         var generated = Assert.Single(run.Sources);
         Assert.Contains(
-            "builder.AddTask<global::Sample.AlphaTask>(global::Sample.AlphaTask.TaskName);",
+            "builder.AddTask<global::Sample.AlphaTask>(global::Sample.AlphaTask.TaskName, new Sample_AlphaTask_DotCeleryInvoker());",
             generated,
             StringComparison.Ordinal
         );
         Assert.Contains(
-            "builder.AddTask<global::Sample.BetaTask>(global::Sample.BetaTask.TaskName);",
+            "builder.AddTask<global::Sample.BetaTask>(global::Sample.BetaTask.TaskName, new Sample_BetaTask_DotCeleryInvoker());",
+            generated,
+            StringComparison.Ordinal
+        );
+
+        // The adapter of a task with a result returns it; one without a result returns null
+        Assert.Contains(
+            "return await ((global::DotCelery.Core.Abstractions.ITask<global::Sample.AlphaInput, global::Sample.AlphaOutput>)task).ExecuteAsync((global::Sample.AlphaInput)input!, context, cancellationToken).ConfigureAwait(false);",
+            generated,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "await ((global::DotCelery.Core.Abstractions.ITask<global::Sample.BetaInput>)task).ExecuteAsync((global::Sample.BetaInput)input!, context, cancellationToken).ConfigureAwait(false);",
             generated,
             StringComparison.Ordinal
         );
@@ -81,9 +96,89 @@ public class TaskRegistrationGeneratorTests
         var run = CSharpGeneratorVerifier<TaskRegistrationGenerator>.Run(source);
 
         Assert.Empty(run.Errors);
+        var generated = Assert.Single(run.Sources);
         Assert.Contains(
-            "builder.AddTask<global::Sample.Host.NestedTask>(global::Sample.Host.NestedTask.TaskName);",
-            Assert.Single(run.Sources),
+            "builder.AddTask<global::Sample.Host.NestedTask>(global::Sample.Host.NestedTask.TaskName, new Sample_Host_NestedTask_DotCeleryInvoker());",
+            generated,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "internal sealed class Sample_Host_NestedTask_DotCeleryInvoker",
+            generated,
+            StringComparison.Ordinal
+        );
+    }
+
+    [Fact]
+    public void Generator_GeneratesAnInvokerForATaskWithTheInputlessConvention()
+    {
+        const string source = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using DotCelery.Core.Abstractions;
+
+            namespace Sample;
+
+            public sealed class StartupTask : ITask
+            {
+                public static string TaskName => "sample.startup";
+
+                public Task<Input> ExecuteAsync(ITaskContext context, CancellationToken cancellationToken = default) => Task.FromResult(new Input());
+            }
+
+            public sealed class Input { }
+            """;
+
+        var run = CSharpGeneratorVerifier<TaskRegistrationGenerator>.Run(source);
+
+        Assert.Empty(run.Errors);
+        var generated = Assert.Single(run.Sources);
+        Assert.Contains(
+            "builder.AddTask<global::Sample.StartupTask>(global::Sample.StartupTask.TaskName, new Sample_StartupTask_DotCeleryInvoker());",
+            generated,
+            StringComparison.Ordinal
+        );
+        Assert.Contains(
+            "return await ((global::Sample.StartupTask)task).ExecuteAsync(context, cancellationToken).ConfigureAwait(false);",
+            generated,
+            StringComparison.Ordinal
+        );
+    }
+
+    [Fact]
+    public void Generator_RegistersATaskWithAmbiguousInterfacesWithoutAnInvoker()
+    {
+        const string source = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using DotCelery.Core.Abstractions;
+
+            namespace Sample;
+
+            public sealed class TwoShapesTask : ITask<Input>, ITask<Input, Input>
+            {
+                public static string TaskName => "sample.two";
+
+                public Task ExecuteAsync(Input input, ITaskContext context, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+                Task<Input> ITask<Input, Input>.ExecuteAsync(Input input, ITaskContext context, CancellationToken cancellationToken) => Task.FromResult(input);
+            }
+
+            public sealed class Input { }
+            """;
+
+        var run = CSharpGeneratorVerifier<TaskRegistrationGenerator>.Run(source);
+
+        Assert.Empty(run.Errors);
+        var generated = Assert.Single(run.Sources);
+        Assert.Contains(
+            "builder.AddTask<global::Sample.TwoShapesTask>(global::Sample.TwoShapesTask.TaskName);",
+            generated,
+            StringComparison.Ordinal
+        );
+        Assert.DoesNotContain(
+            "TwoShapesTask_DotCeleryInvoker",
+            generated,
             StringComparison.Ordinal
         );
     }
