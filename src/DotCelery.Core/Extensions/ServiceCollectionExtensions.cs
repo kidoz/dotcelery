@@ -55,7 +55,7 @@ public static class ServiceCollectionExtensions
 /// </summary>
 public sealed class DotCeleryBuilder
 {
-    private readonly List<Type> _taskTypes = [];
+    private readonly List<TaskTypeRegistration> _taskTypes = [];
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DotCeleryBuilder"/> class.
@@ -80,7 +80,13 @@ public sealed class DotCeleryBuilder
     /// <summary>
     /// Gets the registered task types.
     /// </summary>
-    public IReadOnlyList<Type> TaskTypes => _taskTypes;
+    public IReadOnlyList<Type> TaskTypes => [.. _taskTypes.Select(task => task.TaskType)];
+
+    /// <summary>
+    /// Gets the registered task types with the names they route by, so the worker's registry is
+    /// built without reading a name through reflection.
+    /// </summary>
+    public IReadOnlyList<TaskTypeRegistration> TaskRegistrations => _taskTypes;
 
     /// <summary>
     /// Configures the message broker.
@@ -170,8 +176,26 @@ public sealed class DotCeleryBuilder
             );
         }
 
+        return AddTask<TTask>(TTask.TaskName);
+    }
+
+    /// <summary>
+    /// Registers a task type under the name it routes by.
+    /// </summary>
+    /// <remarks>
+    /// A source-generated registration calls this overload with the task's static
+    /// <see cref="ITask.TaskName"/>, so the name is known without reading it through reflection.
+    /// </remarks>
+    /// <typeparam name="TTask">The task type.</typeparam>
+    /// <param name="taskName">The name the task routes by.</param>
+    /// <returns>The builder.</returns>
+    public DotCeleryBuilder AddTask<TTask>(string taskName)
+        where TTask : class, ITask
+    {
+        ArgumentException.ThrowIfNullOrEmpty(taskName);
+
         Services.AddTransient<TTask>();
-        _taskTypes.Add(typeof(TTask));
+        _taskTypes.Add(new TaskTypeRegistration(typeof(TTask), taskName));
         return this;
     }
 
@@ -227,7 +251,7 @@ public sealed class DotCeleryBuilder
             }
 
             Services.AddTransient(taskType);
-            _taskTypes.Add(taskType);
+            _taskTypes.Add(new TaskTypeRegistration(taskType, taskName));
         }
 
         return this;

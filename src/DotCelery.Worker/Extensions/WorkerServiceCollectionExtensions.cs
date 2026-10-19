@@ -58,16 +58,17 @@ public static class WorkerServiceCollectionExtensions
         builder.Services.Configure<DeadLetterOptions>(_ => { });
 
         // Register task registry with all registered tasks. The factory reads
-        // builder.TaskTypes when the registry is resolved, not when AddWorker runs, so
-        // task registration order relative to AddWorker does not matter.
+        // builder.TaskRegistrations when the registry is resolved, not when AddWorker runs, so
+        // task registration order relative to AddWorker does not matter, and the names were
+        // recorded with the registrations instead of being read through reflection.
         builder.Services.AddSingleton(sp =>
         {
             var logger = sp.GetService<ILoggerFactory>()?.CreateLogger<TaskRegistry>();
             var registry = new TaskRegistry(logger);
 
-            foreach (var taskType in builder.TaskTypes)
+            foreach (var task in builder.TaskRegistrations)
             {
-                registry.Register(taskType, GetTaskName(taskType));
+                registry.Register(task.TaskType, task.TaskName);
             }
 
             return registry;
@@ -117,32 +118,6 @@ public static class WorkerServiceCollectionExtensions
                 options.ShutdownTimeout = required;
             }
         }
-    }
-
-    // Resolves the routing name of a task type through its static ITask.TaskName property.
-    // AddTask and AddTasksFromAssembly already validate the name at registration; this
-    // guard keeps the registry construction fail-fast instead of silently dropping a task.
-    private static string GetTaskName(Type taskType)
-    {
-        var taskName =
-            taskType
-                .GetProperty(
-                    nameof(ITask.TaskName),
-                    System.Reflection.BindingFlags.Public
-                        | System.Reflection.BindingFlags.Static
-                        | System.Reflection.BindingFlags.FlattenHierarchy
-                )
-                ?.GetValue(null) as string;
-
-        if (string.IsNullOrEmpty(taskName))
-        {
-            throw new InvalidOperationException(
-                $"Task type '{taskType.FullName}' cannot be registered: its static "
-                    + $"{nameof(ITask)}.{nameof(ITask.TaskName)} property must return a non-empty name."
-            );
-        }
-
-        return taskName;
     }
 
     /// <summary>
