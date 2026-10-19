@@ -8,6 +8,7 @@ Thank you for your interest in contributing to DotCelery! This document provides
 - [Development Setup](#development-setup)
 - [Coding Standards](#coding-standards)
 - [C# 14 Features](#c-14-features)
+- [Native AOT and Trimming](#native-aot-and-trimming)
 - [Testing Guidelines](#testing-guidelines)
 - [Pull Request Process](#pull-request-process)
 - [Commit Message Format](#commit-message-format)
@@ -17,9 +18,11 @@ Thank you for your interest in contributing to DotCelery! This document provides
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/dotcelery.git`
 3. Create a feature branch: `git checkout -b feature/your-feature-name`
-4. Make your changes
-5. Run tests: `dotnet test tests/DotCelery.Tests.Unit`
-6. Push and create a Pull Request
+4. Restore the local tools: `dotnet tool restore`
+5. Make your changes
+6. Format the code: `dotnet csharpier format .`
+7. Run the container-free tests: `dotnet test tests/DotCelery.Tests.Unit`
+8. Push and create a Pull Request
 
 ## Development Setup
 
@@ -28,37 +31,76 @@ Thank you for your interest in contributing to DotCelery! This document provides
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
 - [Docker](https://www.docker.com/) (for integration tests)
 - IDE: Visual Studio 2026, JetBrains Rider, or VS Code with C# Dev Kit
+- Optional: [just](https://github.com/casey/just) for the shortcuts in the `justfile`
 
 ### Build
 
 ```bash
-# Restore and build
+# Restore the local tools (CSharpier) and dependencies
+dotnet tool restore
+dotnet restore
+
+# Build
 dotnet build
+
+# Format the code
+dotnet csharpier format .
+
+# Check formatting without changing files
+dotnet csharpier check .
 
 # Run unit tests
 dotnet test tests/DotCelery.Tests.Unit
-
-# Run integration tests (requires Docker)
-dotnet test tests/DotCelery.Tests.Integration
 ```
+
+The `justfile` wraps the common commands:
+
+| Task | Direct command | `just` recipe |
+|------|----------------|---------------|
+| Format | `dotnet csharpier format .` | `just format` |
+| Check formatting | `dotnet csharpier check .` | `just format-check` |
+| Build | `dotnet build` | `just build` |
+| Unit tests | `dotnet test tests/DotCelery.Tests.Unit` | `just test` |
+| All tests | `dotnet test` | `just test-all` |
+| Native AOT smoke test | see [Native AOT and Trimming](#native-aot-and-trimming) | `just aot-smoke` |
+| Benchmarks | `dotnet run --project benchmarks/DotCelery.Benchmarks -c Release` | `just bench` |
 
 ### Project Structure
 
 ```
 dotcelery/
 ├── src/
-│   ├── DotCelery.Core/          # Core abstractions and models
-│   ├── DotCelery.Client/        # Task sending client
-│   ├── DotCelery.Worker/        # Worker implementation
-│   ├── DotCelery.Beat/          # Periodic task scheduler
-│   ├── DotCelery.Cron/          # Cron expression parser
-│   ├── DotCelery.Dashboard/     # Web monitoring UI
-│   ├── DotCelery.Broker.*/      # Message broker implementations
-│   ├── DotCelery.Backend.*/     # Result backend implementations
-│   └── DotCelery.Telemetry/     # OpenTelemetry instrumentation
-└── tests/
-    ├── DotCelery.Tests.Unit/        # Unit tests (xUnit v3)
-    └── DotCelery.Tests.Integration/ # Integration tests (Testcontainers)
+│   ├── DotCelery.Core/              # Core abstractions, models, canvas and storage primitives
+│   ├── DotCelery.Client/            # Task sending client
+│   ├── DotCelery.Worker/            # Worker, task execution, sagas, resilience, progress
+│   ├── DotCelery.Beat/              # Periodic task scheduler
+│   ├── DotCelery.Cron/              # Cron expression parser
+│   ├── DotCelery.Dashboard/         # Web monitoring UI
+│   ├── DotCelery.Analyzers/         # Roslyn analyzers and the task registration source generator
+│   ├── DotCelery.Broker.InMemory/   # In-memory broker (testing)
+│   ├── DotCelery.Broker.RabbitMQ/   # RabbitMQ broker
+│   ├── DotCelery.Broker.Redis/      # Redis Streams broker
+│   ├── DotCelery.Broker.Sqs/        # Amazon SQS broker
+│   ├── DotCelery.Backend.InMemory/  # In-memory result backend and storage (testing)
+│   ├── DotCelery.Backend.Redis/     # Redis result backend and stores
+│   ├── DotCelery.Backend.Postgres/  # PostgreSQL result backend and stores
+│   ├── DotCelery.Backend.SqlServer/ # SQL Server result backend and stores
+│   ├── DotCelery.Backend.Mongo/     # MongoDB result backend and stores
+│   ├── DotCelery.Storage.Sql/       # SQL schema model, migrations, and SQL storage primitives
+│   └── DotCelery.Telemetry/         # OpenTelemetry instrumentation
+├── tests/
+│   ├── DotCelery.Tests.Unit/        # Unit tests (xUnit v3)
+│   ├── DotCelery.Tests.Integration/ # Integration tests (Testcontainers)
+│   ├── DotCelery.Tests.Generated/   # Compiles the source generator against real tasks
+│   ├── DotCelery.Analyzers.Tests/   # Analyzer and generator tests
+│   └── DotCelery.Tests.Conformance/ # Shared conformance suites, referenced by the test projects
+├── samples/
+│   ├── DotCelery.Demo/              # Minimal worker and client example
+│   ├── DotCelery.Dashboard.Demo/    # Dashboard example
+│   ├── DotCelery.RedisPostgresExample/ # Redis broker with a PostgreSQL backend
+│   └── DotCelery.AotSmoke/          # Native AOT smoke test
+└── benchmarks/
+    └── DotCelery.Benchmarks/        # BenchmarkDotNet benchmarks
 ```
 
 ## Coding Standards
@@ -71,6 +113,22 @@ dotcelery/
 | Primary constructors | Use for DI injection where appropriate |
 | Nullable reference types | Always enabled (`<Nullable>enable</Nullable>`) |
 | XML documentation | Required for all public APIs |
+| Source generation over reflection | Prefer generated code for registration, invocation, and serialization |
+| AOT annotations | Annotate reflection with `[RequiresUnreferencedCode]` and, when code is compiled at run time, `[RequiresDynamicCode]` |
+
+### Formatting
+
+Formatting is enforced by [CSharpier](https://csharpier.com/) through the local tool defined in
+`.config/dotnet-tools.json` and configured in `.csharpierrc.yaml` (print width 100, four-space
+indentation, LF line endings). CI fails when `dotnet csharpier check .` reports a difference, so
+run `dotnet csharpier format .` before committing.
+
+The build also enforces code quality:
+
+- `TreatWarningsAsErrors` is enabled, so a warning fails the build.
+- `AnalysisMode` is `Recommended` and `EnforceCodeStyleInBuild` is enabled.
+- Suppressions belong in `Directory.Build.props` only when they apply project-wide and have a
+  stated reason; do not suppress a diagnostic just to make a build pass.
 
 ### Naming Conventions
 
@@ -91,6 +149,8 @@ public const string DefaultQueue = "celery";
 ### Prohibited Patterns
 
 - Reflection in hot paths (use source generators)
+- Runtime reflection in AOT-compatible code without a `[RequiresUnreferencedCode]` annotation
+- `Expression.Compile` on paths that must work under Native AOT (the source generator emits a typed invoker instead)
 - `async void` methods (except event handlers)
 - Blocking calls in async contexts (`Task.Result`, `Task.Wait()`)
 - Public mutable state without synchronization
@@ -139,7 +199,50 @@ public static Chain operator +(Chain chain, Signature sig)
 - Pattern matching for null checks
 - Collection expressions `[item1, item2]`
 
+## Native AOT and Trimming
+
+`DotCelery.Core`, `DotCelery.Worker`, `DotCelery.Client`, `DotCelery.Broker.InMemory`, and
+`DotCelery.Backend.InMemory` are marked `IsAotCompatible` and must compile without AOT or trim
+warnings. The dashboard and the driver-based providers (RabbitMQ, Redis, SQS, PostgreSQL, SQL
+Server, MongoDB) are not covered by this verification.
+
+When changing an AOT-compatible project:
+
+- Avoid reflection. Use the source generator for task registration, typed invocation, and JSON
+  serialization.
+- Annotate a public API that unavoidably needs reflection with `[RequiresUnreferencedCode]` and,
+  when it compiles code at run time, `[RequiresDynamicCode]`, so an AOT or trimmed consumer gets a
+  warning instead of a runtime failure.
+- Register task payload types in a source-generated `JsonSerializerContext`. DotCelery's own model
+  types come from its built-in context; an unregistered payload type is an error, not a reflection
+  fallback.
+- Do not add `IsAotCompatible` to a project until it compiles cleanly with the AOT and trim
+  analyzers.
+- Keep `AddTasksFromAssembly`, `UsePreventOverlapping`, `UseAdvancedPatternFilters`, and
+  `UseQueuedSignalDispatch` annotated; they require reflection or dynamic code.
+
+Verify an AOT change by publishing and running the smoke sample:
+
+```bash
+# Uses the host RID, publishes with PublishAot, and runs the result
+just aot-smoke
+```
+
+CI does the same for `linux-x64` after installing `clang` and `zlib1g-dev`. The sample registers
+its task through the generated `RegisterTasks()`, serializes through a generated JSON context, and
+runs a task end to end.
+
 ## Testing Guidelines
+
+### Test Suites
+
+| Suite | Project | Requirements |
+|-------|---------|--------------|
+| Unit | `tests/DotCelery.Tests.Unit/` | None; uses the in-memory broker and backend |
+| Generated | `tests/DotCelery.Tests.Generated/` | None; runs the source generator over real task types |
+| Analyzers | `tests/DotCelery.Analyzers.Tests/` | None; runs analyzers and the generator against test compilations |
+| Integration | `tests/DotCelery.Tests.Integration/` | Docker (Testcontainers) |
+| Conformance | `tests/DotCelery.Tests.Conformance/` | Not run directly; shared suites referenced by the Unit and Integration projects |
 
 ### Unit Tests
 
@@ -163,22 +266,46 @@ public void Chain_PlusOperator_AppendsSignature()
 }
 ```
 
+Prefer the in-memory broker and backend for tests that do not need a real external service. When a
+store or broker gains behavior, add it to the shared conformance suite rather than only to one
+provider's tests.
+
+### Analyzer and Generator Tests
+
+Changes to `src/DotCelery.Analyzers/` need tests in two places:
+
+- `tests/DotCelery.Analyzers.Tests/` for analyzer diagnostics and generator output. Add both a
+  positive case (the diagnostic is reported) and a negative case (valid code produces nothing).
+- `tests/DotCelery.Tests.Generated/` when the generator's emitted registration or invocation
+  changes. This project compiles the generator over real public, internal, and nested tasks, so it
+  proves the emitted code compiles and registers the tasks.
+
 ### Integration Tests
 
 - Location: `tests/DotCelery.Tests.Integration/`
 - Requires: Docker (Testcontainers)
+- Covers Redis, PostgreSQL, SQL Server, RabbitMQ, MongoDB, and SQS (through LocalStack)
 - Tests real broker/backend interactions
+
+SQL Server images are x86-64 only, so on ARM machines Docker must emulate them (Docker Desktop:
+"Use Rosetta for x86_64/amd64 emulation").
+
+Run the container-free suites and the integration suite one at a time. Starting several
+`dotnet test` processes at once can exhaust the Docker daemon and cause container startup
+timeouts.
 
 ### Running Tests
 
 ```bash
-# Unit tests only (fast, no Docker)
+# Container-free suites
 dotnet test tests/DotCelery.Tests.Unit
+dotnet test tests/DotCelery.Tests.Generated
+dotnet test tests/DotCelery.Analyzers.Tests
 
 # Integration tests (requires Docker)
 dotnet test tests/DotCelery.Tests.Integration
 
-# All tests
+# All tests (requires Docker)
 dotnet test
 
 # Specific test class
@@ -189,63 +316,57 @@ dotnet test --filter "FullyQualifiedName~ChainTests"
 
 ### Before Submitting
 
-1. **Run all unit tests**: `dotnet test tests/DotCelery.Tests.Unit`
-2. **Build without warnings**: `dotnet build --warnaserror`
-3. **Add tests** for new functionality
-4. **Update documentation** if adding public APIs
+1. **Format the code**: `dotnet csharpier format .`
+2. **Build in Release**: `dotnet build -c Release` (warnings are errors)
+3. **Run the container-free suites**: Unit, Generated, and Analyzers
+4. **Run the integration suite** if you changed a broker, backend, storage provider, or worker path
+   that talks to one: `dotnet test tests/DotCelery.Tests.Integration`
+5. **Run the AOT smoke test** if you changed an AOT-compatible project: `just aot-smoke`
+6. **Add tests** for new functionality
+7. **Update documentation** if adding public APIs, and add a `CHANGELOG.md` entry under
+   `[Unreleased]` for user-visible changes
 
 ### PR Requirements
 
-- [ ] All unit tests pass
-- [ ] No new warnings
+- [ ] Formatting passes (`dotnet csharpier check .`)
+- [ ] Build succeeds in Release with no warnings
+- [ ] Unit, Generated, and Analyzer tests pass
+- [ ] Integration tests pass when broker, backend, or storage behavior changes
+- [ ] Native AOT smoke test passes when an AOT-compatible project changes
 - [ ] XML documentation for public APIs
 - [ ] Tests cover new functionality
 - [ ] Follows coding standards
 
+### Continuous Integration
+
+| Workflow | What it runs |
+|----------|--------------|
+| `build.yml` | Tool restore, formatting check, vulnerability audit, Release build, Unit/Generated/Analyzer tests, and a `linux-x64` Native AOT publish and run |
+| `integration.yml` | The Testcontainers integration suite |
+| `packaging.yml` | Release build and `dotnet pack` of the solution |
+| `release.yml` | Strict semver tag and `CHANGELOG.md` validation, the integration suite, tests, packing, provenance attestation, and NuGet publishing |
+
 ### Review Process
 
 1. Create PR against `main` branch
-2. Fill out the PR template
+2. Describe the change and how you verified it
 3. Address reviewer feedback
 4. Squash commits if requested
 5. Maintainer will merge when approved
 
 ## Commit Message Format
 
-Use conventional commits:
+Commits are a single line in the imperative mood, in sentence case, without a trailing period:
 
-```
-<type>(<scope>): <subject>
-
-[optional body]
-
-[optional footer]
+```text
+Add Redis broker reconnect tests
+Fix cron DST gap handling
+Document generated task types and signature helpers
 ```
 
-### Types
-
-| Type | Description |
-|------|-------------|
-| `feat` | New feature |
-| `fix` | Bug fix |
-| `docs` | Documentation only |
-| `style` | Code style (formatting, no logic change) |
-| `refactor` | Code refactoring |
-| `perf` | Performance improvement |
-| `test` | Adding or updating tests |
-| `chore` | Build process, dependencies |
-
-### Examples
-
-```
-feat(canvas): add + operator for Chain concatenation
-
-fix(cron): handle DST gaps in GetNextOccurrence
-
-docs(readme): update installation instructions
-
-test(chain): add tests for params Span constructor
-```
+- No conventional-commit prefix or scope (`feat:`, `fix(cron):`), ticket tag, or emoji.
+- No body and no trailers (`Co-Authored-By:`, `Signed-off-by:`, or generator footers).
+- Keep each commit focused; separate refactoring from behavior changes.
 
 ## Questions?
 
