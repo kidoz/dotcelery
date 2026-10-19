@@ -156,9 +156,20 @@ public sealed class DotCeleryBuilder
     /// </summary>
     /// <typeparam name="TTask">The task type.</typeparam>
     /// <returns>The builder.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the task type's static <see cref="ITask.TaskName"/> is null or empty.
+    /// </exception>
     public DotCeleryBuilder AddTask<TTask>()
         where TTask : class, ITask
     {
+        if (string.IsNullOrEmpty(TTask.TaskName))
+        {
+            throw new InvalidOperationException(
+                $"Task type '{typeof(TTask).FullName}' cannot be registered: its static "
+                    + $"{nameof(ITask)}.{nameof(ITask.TaskName)} property must return a non-empty name."
+            );
+        }
+
         Services.AddTransient<TTask>();
         _taskTypes.Add(typeof(TTask));
         return this;
@@ -169,6 +180,10 @@ public sealed class DotCeleryBuilder
     /// </summary>
     /// <param name="assembly">The assembly to scan.</param>
     /// <returns>The builder.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when a discovered task type's static <see cref="ITask.TaskName"/> is missing,
+    /// null, or empty.
+    /// </exception>
     public DotCeleryBuilder AddTasksFromAssembly(System.Reflection.Assembly assembly)
     {
         ArgumentNullException.ThrowIfNull(assembly);
@@ -192,6 +207,25 @@ public sealed class DotCeleryBuilder
 
         foreach (var taskType in taskTypes)
         {
+            var taskName =
+                taskType
+                    .GetProperty(
+                        nameof(ITask.TaskName),
+                        System.Reflection.BindingFlags.Public
+                            | System.Reflection.BindingFlags.Static
+                            | System.Reflection.BindingFlags.FlattenHierarchy
+                    )
+                    ?.GetValue(null) as string;
+
+            if (string.IsNullOrEmpty(taskName))
+            {
+                throw new InvalidOperationException(
+                    $"Task type '{taskType.FullName}' in assembly '{assembly.GetName().Name}' "
+                        + $"cannot be registered: its static {nameof(ITask)}.{nameof(ITask.TaskName)} "
+                        + "property must return a non-empty name."
+                );
+            }
+
             Services.AddTransient(taskType);
             _taskTypes.Add(taskType);
         }
