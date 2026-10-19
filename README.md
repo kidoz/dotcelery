@@ -14,7 +14,7 @@ A distributed task queue for .NET 10, inspired by Python's [Celery](https://docs
 - **Result Backends** - Redis, PostgreSQL, SQL Server, MongoDB, In-Memory
 - **Canvas Workflows** - Chain, Group, and Chord primitives, dispatched by workers
 - **Beat Scheduler** - Periodic task scheduling with cron and interval support
-- **OpenTelemetry** - Built-in distributed tracing (metric instruments are defined but not yet recorded)
+- **OpenTelemetry** - Built-in distributed tracing and metrics for sends, completions, retries, queue time, and in-progress tasks
 
 ### Enterprise Features
 - **ETA/Countdown** - Schedule tasks for future execution with delayed message store
@@ -22,7 +22,7 @@ A distributed task queue for .NET 10, inspired by Python's [Celery](https://docs
 - **Dashboard UI** - Web-based monitoring UI and SignalR hub, with built-in data providers and live updates
 - **Rate Limiting** - Sliding window algorithm for task throttling
 - **Batches** - Grouped task submission with completion tracking and completion callbacks
-- **Saga State Machine** - Long-running business process coordination (incomplete)
+- **Saga State Machine** - Long-running business process coordination
 - **Compensating Actions** - Automatic rollback when saga steps fail
 - **Progress Reporting** - Real-time task progress updates during execution
 - **Circuit Breaker** - Fault tolerance with automatic recovery, gating each queue's consumption
