@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
@@ -19,6 +21,19 @@ public sealed class JsonMessageSerializerOptions
     /// AOT-friendly options with reflection fallback.
     /// </summary>
     public JsonSerializerOptions? SerializerOptions { get; set; }
+
+    /// <summary>
+    /// Gets or sets the source-generated context that serializes the task inputs and results.
+    /// </summary>
+    /// <remarks>
+    /// When set, every application payload type must be registered in the context, and the
+    /// serializer never falls back to reflection for those payloads, so it works under Native
+    /// AOT. DotCelery's own model types keep coming from <see cref="DotCeleryJsonContext"/>, so
+    /// the context only registers the application's task inputs and results. Without a context,
+    /// a type that no context knows is serialized through reflection, which a Native AOT
+    /// application cannot do.
+    /// </remarks>
+    public JsonSerializerContext? Context { get; set; }
 
     /// <summary>
     /// Gets or sets whether deserialization is restricted to <see cref="AllowedDeserializationTypes"/>
@@ -46,7 +61,8 @@ public sealed class JsonMessageSerializer : IMessageSerializer
 {
     private static readonly JsonSerializerOptions FallbackOptions = CreateDefaultOptions();
     private readonly JsonMessageSerializerOptions _serializerOptions;
-    private readonly JsonSerializerOptions _options;
+    private readonly JsonSerializerContext? _context;
+    private readonly JsonSerializerOptions _reflectionOptions;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="JsonMessageSerializer"/> class
@@ -65,7 +81,7 @@ public sealed class JsonMessageSerializer : IMessageSerializer
     /// <summary>
     /// Initializes a new instance of the <see cref="JsonMessageSerializer"/> class.
     /// </summary>
-    /// <param name="jsonOptions">Optional JSON serializer options. If null, uses combined AOT + reflection options.</param>
+    /// <param name="jsonOptions">Optional JSON serializer options, used by the reflection fallback.</param>
     /// <param name="serializerOptions">DotCelery JSON serializer options.</param>
     public JsonMessageSerializer(
         JsonSerializerOptions? jsonOptions,
@@ -73,72 +89,179 @@ public sealed class JsonMessageSerializer : IMessageSerializer
     )
     {
         _serializerOptions = serializerOptions ?? new JsonMessageSerializerOptions();
-        _options = jsonOptions ?? _serializerOptions.SerializerOptions ?? CreateCombinedOptions();
+        _context = _serializerOptions.Context;
+        _reflectionOptions = jsonOptions ?? _serializerOptions.SerializerOptions ?? FallbackOptions;
     }
 
     /// <inheritdoc />
     public string ContentType => "application/json";
 
     /// <inheritdoc />
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2026",
+        Justification = "The reflection fallback is refused when the application targets Native AOT or trimming without a source-generated context; a Native AOT application configures JsonMessageSerializerOptions.Context."
+    )]
+    [UnconditionalSuppressMessage(
+        "AOT",
+        "IL3050",
+        Justification = "The reflection fallback is refused when the application targets Native AOT without a source-generated context; a Native AOT application configures JsonMessageSerializerOptions.Context."
+    )]
     public byte[] Serialize<T>(T value)
     {
-        // For polymorphic serialization (runtime type != declared type), use fallback
-        // This handles cases like Serialize<object>(someSpecificType)
-        if (value is not null && typeof(T) != value.GetType())
+        // The runtime type is the one that must be serializable, so a typed value sent through
+        // an object-typed parameter uses its own metadata
+        var type = value?.GetType() ?? typeof(T);
+
+        if (TryGetPayloadTypeInfo(type) is { } typeInfo)
         {
-            return JsonSerializer.SerializeToUtf8Bytes(value, FallbackOptions);
+            return JsonSerializer.SerializeToUtf8Bytes(value, typeInfo);
         }
 
-        // Try to use AOT-generated type info if available
-        var typeInfo = TryGetTypeInfo<T>();
-        return typeInfo is not null
-            ? JsonSerializer.SerializeToUtf8Bytes(value, typeInfo)
-            : JsonSerializer.SerializeToUtf8Bytes(value, FallbackOptions);
+        EnsureReflectionFallbackAllowed(type);
+        return SerializeWithReflection(value, type);
     }
 
     /// <inheritdoc />
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2026",
+        Justification = "The reflection fallback is refused when the application targets Native AOT or trimming without a source-generated context; a Native AOT application configures JsonMessageSerializerOptions.Context."
+    )]
+    [UnconditionalSuppressMessage(
+        "AOT",
+        "IL3050",
+        Justification = "The reflection fallback is refused when the application targets Native AOT without a source-generated context; a Native AOT application configures JsonMessageSerializerOptions.Context."
+    )]
     public T Deserialize<T>(ReadOnlySpan<byte> data)
     {
         EnsureDeserializationAllowed(typeof(T));
 
-        // Try to use AOT-generated type info if available
-        var typeInfo = TryGetTypeInfo<T>();
-        var result = typeInfo is not null
-            ? JsonSerializer.Deserialize(data, typeInfo)
-            : JsonSerializer.Deserialize<T>(data, FallbackOptions);
+        if (TryGetPayloadTypeInfo(typeof(T)) is JsonTypeInfo<T> typeInfo)
+        {
+            return JsonSerializer.Deserialize(data, typeInfo)
+                ?? throw new InvalidOperationException(
+                    $"Failed to deserialize to {typeof(T).Name}"
+                );
+        }
 
-        return result
-            ?? throw new InvalidOperationException($"Failed to deserialize to {typeof(T).Name}");
+        EnsureReflectionFallbackAllowed(typeof(T));
+        return DeserializeWithReflection<T>(data);
     }
 
     /// <inheritdoc />
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2026",
+        Justification = "The reflection fallback is refused when the application targets Native AOT or trimming without a source-generated context; a Native AOT application configures JsonMessageSerializerOptions.Context."
+    )]
+    [UnconditionalSuppressMessage(
+        "AOT",
+        "IL3050",
+        Justification = "The reflection fallback is refused when the application targets Native AOT without a source-generated context; a Native AOT application configures JsonMessageSerializerOptions.Context."
+    )]
     public object Deserialize(ReadOnlySpan<byte> data, Type type)
     {
         ArgumentNullException.ThrowIfNull(type);
         EnsureDeserializationAllowed(type);
 
-        // Try to use AOT-generated type info if available
-        var typeInfo = DotCeleryJsonContext.Default.GetTypeInfo(type);
-        var result = typeInfo is not null
-            ? JsonSerializer.Deserialize(data, typeInfo)
-            : JsonSerializer.Deserialize(data, type, FallbackOptions);
+        if (TryGetPayloadTypeInfo(type) is { } typeInfo)
+        {
+            return JsonSerializer.Deserialize(data, typeInfo)
+                ?? throw new InvalidOperationException($"Failed to deserialize to {type.Name}");
+        }
 
-        return result
-            ?? throw new InvalidOperationException($"Failed to deserialize to {type.Name}");
+        EnsureReflectionFallbackAllowed(type);
+        return DeserializeWithReflection(data, type);
     }
 
-    private static JsonTypeInfo<T>? TryGetTypeInfo<T>()
+    private JsonTypeInfo? TryGetPayloadTypeInfo(Type type)
     {
+        // The configured context serializes the application's payload types; DotCelery's own
+        // model types keep coming from its context, so an application registers only its own
+        // inputs and results
+        if (_context is not null)
+        {
+            JsonTypeInfo? typeInfo = null;
+            try
+            {
+                typeInfo = _context.GetTypeInfo(type);
+            }
+            catch (NotSupportedException)
+            {
+                // Not registered in the application context; DotCelery's context may know it
+            }
+
+            if (typeInfo is not null)
+            {
+                return typeInfo;
+            }
+        }
+
         try
         {
-            return (JsonTypeInfo<T>?)DotCeleryJsonContext.Default.GetTypeInfo(typeof(T));
+            return DotCeleryJsonContext.Default.GetTypeInfo(type);
         }
         catch
         {
-            // Type not registered in context, fall back to reflection-based serialization
+            // Type not registered in either context, fall back to reflection-based serialization
             return null;
         }
     }
+
+    // A configured context is the whole contract for application payloads: a type that no
+    // context knows is an error, not a reflection fallback. Without one, reflection is used,
+    // which Native AOT cannot do.
+    private void EnsureReflectionFallbackAllowed(Type type)
+    {
+        if (_context is not null)
+        {
+            throw new InvalidOperationException(
+                $"Type '{type.FullName}' is not registered in DotCeleryJsonContext or in the "
+                    + "JsonSerializerContext configured with JsonMessageSerializerOptions.Context. "
+                    + "Add it to your context with [JsonSerializable(typeof(...))]."
+            );
+        }
+
+        if (!RuntimeFeature.IsDynamicCodeSupported)
+        {
+            throw new InvalidOperationException(
+                $"Type '{type.FullName}' is not registered in DotCeleryJsonContext and the application "
+                    + "targets Native AOT, where reflection-based serialization is unavailable. Configure "
+                    + "JsonMessageSerializerOptions.Context with a source-generated context that registers "
+                    + "the type."
+            );
+        }
+    }
+
+    [RequiresUnreferencedCode(
+        "Serializing a type that no source-generated JSON context registers needs reflection."
+    )]
+    [RequiresDynamicCode(
+        "Serializing a type that no source-generated JSON context registers may need runtime code generation."
+    )]
+    private byte[] SerializeWithReflection(object? value, Type type) =>
+        JsonSerializer.SerializeToUtf8Bytes(value, type, _reflectionOptions);
+
+    [RequiresUnreferencedCode(
+        "Deserializing a type that no source-generated JSON context registers needs reflection."
+    )]
+    [RequiresDynamicCode(
+        "Deserializing a type that no source-generated JSON context registers may need runtime code generation."
+    )]
+    private T DeserializeWithReflection<T>(ReadOnlySpan<byte> data) =>
+        JsonSerializer.Deserialize<T>(data, _reflectionOptions)
+        ?? throw new InvalidOperationException($"Failed to deserialize to {typeof(T).Name}");
+
+    [RequiresUnreferencedCode(
+        "Deserializing a type that no source-generated JSON context registers needs reflection."
+    )]
+    [RequiresDynamicCode(
+        "Deserializing a type that no source-generated JSON context registers may need runtime code generation."
+    )]
+    private object DeserializeWithReflection(ReadOnlySpan<byte> data, Type type) =>
+        JsonSerializer.Deserialize(data, type, _reflectionOptions)
+        ?? throw new InvalidOperationException($"Failed to deserialize to {type.Name}");
 
     private void EnsureDeserializationAllowed(Type type)
     {
@@ -152,7 +275,7 @@ public sealed class JsonMessageSerializer : IMessageSerializer
             return;
         }
 
-        if (_serializerOptions.AllowDotCeleryTypes && TryGetTypeInfo(type) is not null)
+        if (_serializerOptions.AllowDotCeleryTypes && IsDotCeleryType(type))
         {
             return;
         }
@@ -164,22 +287,33 @@ public sealed class JsonMessageSerializer : IMessageSerializer
         );
     }
 
-    private static JsonTypeInfo? TryGetTypeInfo(Type type)
+    // The allowlist names the types DotCelery itself defines, whatever context serializes payloads
+    private static bool IsDotCeleryType(Type type)
     {
         try
         {
-            return DotCeleryJsonContext.Default.GetTypeInfo(type);
+            return DotCeleryJsonContext.Default.GetTypeInfo(type) is not null;
         }
         catch
         {
-            return null;
+            return false;
         }
     }
 
     /// <summary>
-    /// Creates the default JSON serializer options (non-AOT compatible, for backwards compatibility).
+    /// Creates the default JSON serializer options (reflection based, for backwards compatibility).
     /// </summary>
     /// <returns>The default JSON serializer options.</returns>
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2026",
+        Justification = "These options are the reflection fallback, which Native AOT applications do not use."
+    )]
+    [UnconditionalSuppressMessage(
+        "AOT",
+        "IL3050",
+        Justification = "These options are the reflection fallback, which Native AOT applications do not use."
+    )]
     public static JsonSerializerOptions CreateDefaultOptions()
     {
         return new JsonSerializerOptions
@@ -192,9 +326,19 @@ public sealed class JsonMessageSerializer : IMessageSerializer
     }
 
     /// <summary>
-    /// Creates combined options that first try AOT context, then fall back to reflection.
+    /// Creates combined options that first try the AOT context, then fall back to reflection.
     /// </summary>
     /// <returns>Combined JSON serializer options.</returns>
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2026",
+        Justification = "These options fall back to reflection for types the context does not register, which Native AOT applications avoid by configuring a context."
+    )]
+    [UnconditionalSuppressMessage(
+        "AOT",
+        "IL3050",
+        Justification = "These options fall back to reflection for types the context does not register, which Native AOT applications avoid by configuring a context."
+    )]
     public static JsonSerializerOptions CreateCombinedOptions()
     {
         return new JsonSerializerOptions
