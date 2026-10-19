@@ -1,1 +1,53 @@
 #nullable enable
+const DotCelery.Backend.Redis.Storage.RedisStorageOptions.DevelopmentDefaultConnectionString = "localhost:6379" -> string!
+DotCelery.Backend.Redis.Extensions.DotCeleryBuilderExtensions
+DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions
+DotCelery.Backend.Redis.Storage.IRedisConnectionProvider
+DotCelery.Backend.Redis.Storage.IRedisConnectionProvider.GetConnectionAsync(DotCelery.Backend.Redis.Storage.RedisStorageOptions! options) -> System.Threading.Tasks.Task<StackExchange.Redis.IConnectionMultiplexer!>!
+DotCelery.Backend.Redis.Storage.RedisConnectionProvider
+DotCelery.Backend.Redis.Storage.RedisConnectionProvider.DisposeAsync() -> System.Threading.Tasks.ValueTask
+DotCelery.Backend.Redis.Storage.RedisConnectionProvider.GetConnectionAsync(DotCelery.Backend.Redis.Storage.RedisStorageOptions! options) -> System.Threading.Tasks.Task<StackExchange.Redis.IConnectionMultiplexer!>!
+DotCelery.Backend.Redis.Storage.RedisConnectionProvider.RedisConnectionProvider() -> void
+DotCelery.Backend.Redis.Storage.RedisStorageOptions
+DotCelery.Backend.Redis.Storage.RedisStorageOptions.ConnectionString.get -> string!
+DotCelery.Backend.Redis.Storage.RedisStorageOptions.ConnectionString.set -> void
+DotCelery.Backend.Redis.Storage.RedisStorageOptions.ConnectTimeout.get -> System.TimeSpan
+DotCelery.Backend.Redis.Storage.RedisStorageOptions.ConnectTimeout.set -> void
+DotCelery.Backend.Redis.Storage.RedisStorageOptions.Database.get -> int
+DotCelery.Backend.Redis.Storage.RedisStorageOptions.Database.set -> void
+DotCelery.Backend.Redis.Storage.RedisStorageOptions.KeyPrefix.get -> string!
+DotCelery.Backend.Redis.Storage.RedisStorageOptions.KeyPrefix.set -> void
+DotCelery.Backend.Redis.Storage.RedisStorageOptions.RedisStorageOptions() -> void
+DotCelery.Backend.Redis.Storage.RedisStorageOptions.SyncTimeout.get -> System.TimeSpan
+DotCelery.Backend.Redis.Storage.RedisStorageOptions.SyncTimeout.set -> void
+DotCelery.Backend.Redis.Storage.RedisStorageProvider
+DotCelery.Backend.Redis.Storage.RedisStorageProvider.Counters.get -> DotCelery.Core.Storage.ICounterStore!
+DotCelery.Backend.Redis.Storage.RedisStorageProvider.Documents.get -> DotCelery.Core.Storage.IDocumentStore!
+DotCelery.Backend.Redis.Storage.RedisStorageProvider.IsHealthyAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<bool>
+DotCelery.Backend.Redis.Storage.RedisStorageProvider.Leases.get -> DotCelery.Core.Storage.ILeaseStore!
+DotCelery.Backend.Redis.Storage.RedisStorageProvider.Name.get -> string!
+DotCelery.Backend.Redis.Storage.RedisStorageProvider.Notifications.get -> DotCelery.Core.Storage.INotificationChannel?
+DotCelery.Backend.Redis.Storage.RedisStorageProvider.PurgeExpiredAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<long>
+DotCelery.Backend.Redis.Storage.RedisStorageProvider.Queues.get -> DotCelery.Core.Storage.IQueueStore!
+DotCelery.Backend.Redis.Storage.RedisStorageProvider.RedisStorageProvider(DotCelery.Backend.Redis.Storage.IRedisConnectionProvider! connections, DotCelery.Backend.Redis.Storage.RedisStorageOptions! options, System.TimeProvider? timeProvider = null) -> void
+static DotCelery.Backend.Redis.Extensions.DotCeleryBuilderExtensions.UseRedis(this DotCelery.Core.Extensions.DotCeleryBuilder! builder, string! connectionString) -> DotCelery.Core.Extensions.DotCeleryBuilder!
+static DotCelery.Backend.Redis.Extensions.DotCeleryBuilderExtensions.UseRedis(this DotCelery.Core.Extensions.DotCeleryBuilder! builder, System.Action<DotCelery.Backend.Redis.Storage.RedisStorageOptions!>? configure = null) -> DotCelery.Core.Extensions.DotCeleryBuilder!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisBackend(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! connectionString) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisBackend(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Redis.Storage.RedisStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisBatchStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Redis.Storage.RedisStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisConnectionProvider(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisDeadLetterStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Redis.Storage.RedisStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisDelayedMessageStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Redis.Storage.RedisStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisHighPriorityFeatures(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Redis.Storage.RedisStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisHistoricalDataStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Redis.Storage.RedisStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisInboxStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Redis.Storage.RedisStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisOutboxStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Redis.Storage.RedisStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisPartitionLockStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Redis.Storage.RedisStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisQueueMetrics(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Redis.Storage.RedisStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisRateLimiter(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Redis.Storage.RedisStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisRevocationStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Redis.Storage.RedisStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisSagaStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Redis.Storage.RedisStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisSignalStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Redis.Storage.RedisStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisStorage(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Redis.Storage.RedisStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisTaskExecutionTracker(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Redis.Storage.RedisStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Redis.Extensions.ServiceCollectionExtensions.AddRedisWorkerRegistry(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Redis.Storage.RedisStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!

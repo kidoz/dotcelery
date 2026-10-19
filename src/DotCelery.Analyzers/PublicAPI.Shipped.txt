@@ -1,1 +1,35 @@
 #nullable enable
+const DotCelery.Analyzers.TaskRegistrationGenerator.GeneratedClassName = "DotCeleryTasks" -> string!
+const DotCelery.Analyzers.TaskRegistrationGenerator.GeneratedNamespace = "DotCelery.Generated" -> string!
+const DotCelery.Analyzers.TaskRegistrationGenerator.RegisterMethodName = "RegisterTasks" -> string!
+DotCelery.Analyzers.AttributeValidationAnalyzer
+DotCelery.Analyzers.AttributeValidationAnalyzer.AttributeValidationAnalyzer() -> void
+DotCelery.Analyzers.BlockingCallAnalyzer
+DotCelery.Analyzers.BlockingCallAnalyzer.BlockingCallAnalyzer() -> void
+DotCelery.Analyzers.DiagnosticDescriptors
+DotCelery.Analyzers.SerializationAnalyzer
+DotCelery.Analyzers.SerializationAnalyzer.SerializationAnalyzer() -> void
+DotCelery.Analyzers.TaskNameAnalyzer
+DotCelery.Analyzers.TaskNameAnalyzer.TaskNameAnalyzer() -> void
+DotCelery.Analyzers.TaskRegistrationGenerator
+DotCelery.Analyzers.TaskRegistrationGenerator.Initialize(Microsoft.CodeAnalysis.IncrementalGeneratorInitializationContext context) -> void
+DotCelery.Analyzers.TaskRegistrationGenerator.TaskRegistrationGenerator() -> void
+override DotCelery.Analyzers.AttributeValidationAnalyzer.Initialize(Microsoft.CodeAnalysis.Diagnostics.AnalysisContext! context) -> void
+override DotCelery.Analyzers.AttributeValidationAnalyzer.SupportedDiagnostics.get -> System.Collections.Immutable.ImmutableArray<Microsoft.CodeAnalysis.DiagnosticDescriptor!>
+override DotCelery.Analyzers.BlockingCallAnalyzer.Initialize(Microsoft.CodeAnalysis.Diagnostics.AnalysisContext! context) -> void
+override DotCelery.Analyzers.BlockingCallAnalyzer.SupportedDiagnostics.get -> System.Collections.Immutable.ImmutableArray<Microsoft.CodeAnalysis.DiagnosticDescriptor!>
+override DotCelery.Analyzers.SerializationAnalyzer.Initialize(Microsoft.CodeAnalysis.Diagnostics.AnalysisContext! context) -> void
+override DotCelery.Analyzers.SerializationAnalyzer.SupportedDiagnostics.get -> System.Collections.Immutable.ImmutableArray<Microsoft.CodeAnalysis.DiagnosticDescriptor!>
+override DotCelery.Analyzers.TaskNameAnalyzer.Initialize(Microsoft.CodeAnalysis.Diagnostics.AnalysisContext! context) -> void
+override DotCelery.Analyzers.TaskNameAnalyzer.SupportedDiagnostics.get -> System.Collections.Immutable.ImmutableArray<Microsoft.CodeAnalysis.DiagnosticDescriptor!>
+static readonly DotCelery.Analyzers.DiagnosticDescriptors.AvoidBlockingCallsInTasks -> Microsoft.CodeAnalysis.DiagnosticDescriptor!
+static readonly DotCelery.Analyzers.DiagnosticDescriptors.AvoidMutableCollections -> Microsoft.CodeAnalysis.DiagnosticDescriptor!
+static readonly DotCelery.Analyzers.DiagnosticDescriptors.DuplicateTaskName -> Microsoft.CodeAnalysis.DiagnosticDescriptor!
+static readonly DotCelery.Analyzers.DiagnosticDescriptors.InvalidPreventOverlappingConfiguration -> Microsoft.CodeAnalysis.DiagnosticDescriptor!
+static readonly DotCelery.Analyzers.DiagnosticDescriptors.InvalidRouteAttribute -> Microsoft.CodeAnalysis.DiagnosticDescriptor!
+static readonly DotCelery.Analyzers.DiagnosticDescriptors.InvalidTimeLimitConfiguration -> Microsoft.CodeAnalysis.DiagnosticDescriptor!
+static readonly DotCelery.Analyzers.DiagnosticDescriptors.MissingTaskRegistration -> Microsoft.CodeAnalysis.DiagnosticDescriptor!
+static readonly DotCelery.Analyzers.DiagnosticDescriptors.SendAsyncTypeMismatch -> Microsoft.CodeAnalysis.DiagnosticDescriptor!
+static readonly DotCelery.Analyzers.DiagnosticDescriptors.TaskMustBeSealed -> Microsoft.CodeAnalysis.DiagnosticDescriptor!
+static readonly DotCelery.Analyzers.DiagnosticDescriptors.TaskNameCannotBeEmpty -> Microsoft.CodeAnalysis.DiagnosticDescriptor!
+static readonly DotCelery.Analyzers.DiagnosticDescriptors.TypeMustBeSerializable -> Microsoft.CodeAnalysis.DiagnosticDescriptor!

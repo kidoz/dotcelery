@@ -1,1 +1,104 @@
 #nullable enable
+DotCelery.Client.AsyncResult
+DotCelery.Client.AsyncResult.AsyncResult(string! taskId, DotCelery.Client.ICeleryClient! client) -> void
+DotCelery.Client.AsyncResult.GetStateAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Models.TaskState?>
+DotCelery.Client.AsyncResult.IsCompleteAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<bool>
+DotCelery.Client.AsyncResult.TaskId.get -> string!
+DotCelery.Client.AsyncResult.WaitAsync(System.TimeSpan? timeout = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<DotCelery.Core.Models.TaskResult!>!
+DotCelery.Client.AsyncResult<TOutput>
+DotCelery.Client.AsyncResult<TOutput>.AsyncResult(string! taskId, DotCelery.Client.ICeleryClient! client, DotCelery.Core.Abstractions.IMessageSerializer! serializer) -> void
+DotCelery.Client.AsyncResult<TOutput>.GetAsync(System.TimeSpan? timeout = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TOutput!>!
+DotCelery.Client.Batches.BatchBuilder
+DotCelery.Client.Batches.BatchBuilder.BatchBuilder() -> void
+DotCelery.Client.Batches.BatchBuilder.Enqueue<TTask, TInput, TOutput>(TInput! input, DotCelery.Client.SendOptions? options = null) -> DotCelery.Client.Batches.BatchBuilder!
+DotCelery.Client.Batches.BatchBuilder.Enqueue<TTask, TInput>(TInput! input, DotCelery.Client.SendOptions? options = null) -> DotCelery.Client.Batches.BatchBuilder!
+DotCelery.Client.Batches.BatchBuilder.OnComplete<TTask, TInput>(TInput! input) -> DotCelery.Client.Batches.BatchBuilder!
+DotCelery.Client.Batches.BatchBuilder.WithName(string! name) -> DotCelery.Client.Batches.BatchBuilder!
+DotCelery.Client.Batches.BatchClient
+DotCelery.Client.Batches.BatchClient.BatchClient(DotCelery.Core.Abstractions.IMessageBroker! broker, DotCelery.Core.Abstractions.IMessageSerializer! serializer, DotCelery.Client.ICeleryClient! celeryClient, Microsoft.Extensions.Options.IOptions<DotCelery.Client.CeleryClientOptions!>! options, Microsoft.Extensions.Logging.ILogger<DotCelery.Client.Batches.BatchClient!>! logger, DotCelery.Core.Batches.IBatchStore? batchStore = null) -> void
+DotCelery.Client.Batches.BatchClient.CancelBatchAsync(string! batchId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+DotCelery.Client.Batches.BatchClient.CreateBatchAsync(System.Action<DotCelery.Client.Batches.BatchBuilder!>! configure, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<string!>
+DotCelery.Client.Batches.BatchClient.GetBatchAsync(string! batchId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Batches.Batch?>
+DotCelery.Client.Batches.BatchClient.WaitForBatchAsync(string! batchId, System.TimeSpan? timeout = null, System.TimeSpan? pollInterval = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<DotCelery.Core.Batches.Batch!>!
+DotCelery.Client.Batches.IBatchClient
+DotCelery.Client.Batches.IBatchClient.CancelBatchAsync(string! batchId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+DotCelery.Client.Batches.IBatchClient.CreateBatchAsync(System.Action<DotCelery.Client.Batches.BatchBuilder!>! configure, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<string!>
+DotCelery.Client.Batches.IBatchClient.GetBatchAsync(string! batchId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Batches.Batch?>
+DotCelery.Client.Batches.IBatchClient.WaitForBatchAsync(string! batchId, System.TimeSpan? timeout = null, System.TimeSpan? pollInterval = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<DotCelery.Core.Batches.Batch!>!
+DotCelery.Client.Canvas.CanvasClient
+DotCelery.Client.Canvas.CanvasClient.CanvasClient(DotCelery.Core.Abstractions.IMessageBroker! broker, DotCelery.Core.Abstractions.IMessageSerializer! serializer, Microsoft.Extensions.Options.IOptions<DotCelery.Client.CeleryClientOptions!>! options, Microsoft.Extensions.Logging.ILogger<DotCelery.Client.Canvas.CanvasClient!>! logger, DotCelery.Core.Batches.IBatchStore? batchStore = null) -> void
+DotCelery.Client.Canvas.CanvasClient.SendChainAsync(DotCelery.Core.Canvas.Chain! chain, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Canvas.ChainResult!>
+DotCelery.Client.Canvas.CanvasClient.SendChordAsync(DotCelery.Core.Canvas.Chord! chord, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Canvas.ChordResult!>
+DotCelery.Client.Canvas.CanvasClient.SendGroupAsync(DotCelery.Core.Canvas.Group! group, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Canvas.GroupResult!>
+DotCelery.Client.Canvas.ICanvasClient
+DotCelery.Client.Canvas.ICanvasClient.SendChainAsync(DotCelery.Core.Canvas.Chain! chain, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Canvas.ChainResult!>
+DotCelery.Client.Canvas.ICanvasClient.SendChordAsync(DotCelery.Core.Canvas.Chord! chord, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Canvas.ChordResult!>
+DotCelery.Client.Canvas.ICanvasClient.SendGroupAsync(DotCelery.Core.Canvas.Group! group, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Canvas.GroupResult!>
+DotCelery.Client.CeleryClient
+DotCelery.Client.CeleryClient.CancelScheduledAsync(string! taskId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<bool>
+DotCelery.Client.CeleryClient.CeleryClient(DotCelery.Core.Abstractions.IMessageBroker! broker, DotCelery.Core.Abstractions.IResultBackend! backend, DotCelery.Core.Abstractions.IMessageSerializer! serializer, Microsoft.Extensions.Options.IOptions<DotCelery.Client.CeleryClientOptions!>! options, Microsoft.Extensions.Logging.ILogger<DotCelery.Client.CeleryClient!>! logger, DotCelery.Core.Abstractions.IRevocationStore? revocationStore = null, DotCelery.Core.Signals.ITaskSignalDispatcher? signalDispatcher = null, DotCelery.Core.Routing.ITaskRouter? taskRouter = null, DotCelery.Core.Abstractions.IDelayedMessageStore? delayedMessageStore = null, DotCelery.Core.MultiTenancy.ITenantRouter? tenantRouter = null) -> void
+DotCelery.Client.CeleryClient.GetResultAsync(string! taskId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Models.TaskResult?>
+DotCelery.Client.CeleryClient.IsRevokedAsync(string! taskId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<bool>
+DotCelery.Client.CeleryClient.RevokeAsync(string! taskId, DotCelery.Core.Models.RevokeOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+DotCelery.Client.CeleryClient.RevokeAsync(System.Collections.Generic.IEnumerable<string!>! taskIds, DotCelery.Core.Models.RevokeOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+DotCelery.Client.CeleryClient.SendAsync<TTask, TInput, TOutput>(TInput! input, DotCelery.Client.SendOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Client.AsyncResult<TOutput!>!>
+DotCelery.Client.CeleryClient.SendAsync<TTask, TInput>(TInput! input, DotCelery.Client.SendOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Client.AsyncResult!>
+DotCelery.Client.CeleryClient.WaitForResultAsync(string! taskId, System.TimeSpan? timeout = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<DotCelery.Core.Models.TaskResult!>!
+DotCelery.Client.CeleryClientOptions
+DotCelery.Client.CeleryClientOptions.CeleryClientOptions() -> void
+DotCelery.Client.CeleryClientOptions.DefaultMaxRetries.get -> int
+DotCelery.Client.CeleryClientOptions.DefaultMaxRetries.set -> void
+DotCelery.Client.CeleryClientOptions.DefaultQueue.get -> string!
+DotCelery.Client.CeleryClientOptions.DefaultQueue.set -> void
+DotCelery.Client.CeleryClientOptions.DefaultTimeout.get -> System.TimeSpan
+DotCelery.Client.CeleryClientOptions.DefaultTimeout.set -> void
+DotCelery.Client.Extensions.ClientServiceCollectionExtensions
+DotCelery.Client.ICeleryClient
+DotCelery.Client.ICeleryClient.CancelScheduledAsync(string! taskId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<bool>
+DotCelery.Client.ICeleryClient.GetResultAsync(string! taskId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Models.TaskResult?>
+DotCelery.Client.ICeleryClient.IsRevokedAsync(string! taskId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<bool>
+DotCelery.Client.ICeleryClient.RevokeAsync(string! taskId, DotCelery.Core.Models.RevokeOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+DotCelery.Client.ICeleryClient.RevokeAsync(System.Collections.Generic.IEnumerable<string!>! taskIds, DotCelery.Core.Models.RevokeOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+DotCelery.Client.ICeleryClient.SendAsync<TTask, TInput, TOutput>(TInput! input, DotCelery.Client.SendOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Client.AsyncResult<TOutput!>!>
+DotCelery.Client.ICeleryClient.SendAsync<TTask, TInput>(TInput! input, DotCelery.Client.SendOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Client.AsyncResult!>
+DotCelery.Client.ICeleryClient.WaitForResultAsync(string! taskId, System.TimeSpan? timeout = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<DotCelery.Core.Models.TaskResult!>!
+DotCelery.Client.SendOptions
+DotCelery.Client.SendOptions.<Clone>$() -> DotCelery.Client.SendOptions!
+DotCelery.Client.SendOptions.CorrelationId.get -> string?
+DotCelery.Client.SendOptions.CorrelationId.init -> void
+DotCelery.Client.SendOptions.Countdown.get -> System.TimeSpan?
+DotCelery.Client.SendOptions.Countdown.init -> void
+DotCelery.Client.SendOptions.Equals(DotCelery.Client.SendOptions? other) -> bool
+DotCelery.Client.SendOptions.Eta.get -> System.DateTimeOffset?
+DotCelery.Client.SendOptions.Eta.init -> void
+DotCelery.Client.SendOptions.Expires.get -> System.DateTimeOffset?
+DotCelery.Client.SendOptions.Expires.init -> void
+DotCelery.Client.SendOptions.Headers.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>?
+DotCelery.Client.SendOptions.Headers.init -> void
+DotCelery.Client.SendOptions.MaxRetries.get -> int?
+DotCelery.Client.SendOptions.MaxRetries.init -> void
+DotCelery.Client.SendOptions.PartitionKey.get -> string?
+DotCelery.Client.SendOptions.PartitionKey.init -> void
+DotCelery.Client.SendOptions.Priority.get -> int?
+DotCelery.Client.SendOptions.Priority.init -> void
+DotCelery.Client.SendOptions.Queue.get -> string?
+DotCelery.Client.SendOptions.Queue.init -> void
+DotCelery.Client.SendOptions.SendOptions() -> void
+DotCelery.Client.SendOptions.TaskId.get -> string?
+DotCelery.Client.SendOptions.TaskId.init -> void
+DotCelery.Client.SendOptions.TenantId.get -> string?
+DotCelery.Client.SendOptions.TenantId.init -> void
+DotCelery.Client.SendOptions.Validate() -> void
+override DotCelery.Client.SendOptions.Equals(object? obj) -> bool
+override DotCelery.Client.SendOptions.GetHashCode() -> int
+override DotCelery.Client.SendOptions.ToString() -> string!
+static DotCelery.Client.Extensions.ClientServiceCollectionExtensions.AddBatchClient(this DotCelery.Core.Extensions.DotCeleryBuilder! builder) -> DotCelery.Core.Extensions.DotCeleryBuilder!
+static DotCelery.Client.Extensions.ClientServiceCollectionExtensions.AddCanvasClient(this DotCelery.Core.Extensions.DotCeleryBuilder! builder) -> DotCelery.Core.Extensions.DotCeleryBuilder!
+static DotCelery.Client.Extensions.ClientServiceCollectionExtensions.AddClient(this DotCelery.Core.Extensions.DotCeleryBuilder! builder, System.Action<DotCelery.Client.CeleryClientOptions!>? configure = null) -> DotCelery.Core.Extensions.DotCeleryBuilder!
+static DotCelery.Client.Extensions.ClientServiceCollectionExtensions.AddRoute(this DotCelery.Core.Extensions.DotCeleryBuilder! builder, string! pattern, string! queue) -> DotCelery.Core.Extensions.DotCeleryBuilder!
+static DotCelery.Client.Extensions.ClientServiceCollectionExtensions.AddRoute<TTask>(this DotCelery.Core.Extensions.DotCeleryBuilder! builder, string! queue) -> DotCelery.Core.Extensions.DotCeleryBuilder!
+static DotCelery.Client.Extensions.ClientServiceCollectionExtensions.AddSignalHandler<TSignal, THandler>(this DotCelery.Core.Extensions.DotCeleryBuilder! builder) -> DotCelery.Core.Extensions.DotCeleryBuilder!
+static DotCelery.Client.Extensions.ClientServiceCollectionExtensions.AddSignalHandler<TSignal>(this DotCelery.Core.Extensions.DotCeleryBuilder! builder, System.Func<System.IServiceProvider!, DotCelery.Core.Signals.ITaskSignalHandler<TSignal>!>! handlerFactory) -> DotCelery.Core.Extensions.DotCeleryBuilder!
+static DotCelery.Client.Extensions.ClientServiceCollectionExtensions.ConfigureRouting(this DotCelery.Core.Extensions.DotCeleryBuilder! builder, System.Action<DotCelery.Core.Routing.ITaskRouter!>! configure) -> DotCelery.Core.Extensions.DotCeleryBuilder!
+static DotCelery.Client.SendOptions.operator !=(DotCelery.Client.SendOptions? left, DotCelery.Client.SendOptions? right) -> bool
+static DotCelery.Client.SendOptions.operator ==(DotCelery.Client.SendOptions? left, DotCelery.Client.SendOptions? right) -> bool
