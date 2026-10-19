@@ -987,10 +987,8 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
                 .ConnectAsync(configOptions)
                 .ConfigureAwait(false);
 
-            _logger.LogInformation(
-                "Connected to Redis at {ConnectionString}",
-                _options.ConnectionString
-            );
+            // The connection string is not logged: it commonly embeds credentials
+            _logger.LogInformation("Connected to Redis");
 
             return _connection;
         }
