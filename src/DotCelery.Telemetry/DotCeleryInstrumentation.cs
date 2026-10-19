@@ -98,7 +98,7 @@ public static class DotCeleryInstrumentation
 
         if (activity is not null)
         {
-            activity.SetTag("messaging.system", "celery");
+            activity.SetTag("messaging.system", "dotcelery");
             activity.SetTag("messaging.operation", "send");
             activity.SetTag("messaging.destination.name", taskName);
             activity.SetTag("celery.task.name", taskName);
@@ -131,7 +131,7 @@ public static class DotCeleryInstrumentation
 
         if (activity is not null)
         {
-            activity.SetTag("messaging.system", "celery");
+            activity.SetTag("messaging.system", "dotcelery");
             activity.SetTag("messaging.operation", "process");
             activity.SetTag("celery.task.name", taskName);
             activity.SetTag("celery.task.id", taskId);

@@ -150,7 +150,7 @@ public class DotCeleryInstrumentationTests
         Assert.NotNull(activity);
         Assert.Equal("send test.task", activity.DisplayName);
         Assert.Equal(ActivityKind.Producer, activity.Kind);
-        Assert.Equal("celery", activity.GetTagItem("messaging.system"));
+        Assert.Equal("dotcelery", activity.GetTagItem("messaging.system"));
         Assert.Equal("send", activity.GetTagItem("messaging.operation"));
         Assert.Equal("test.task", activity.GetTagItem("celery.task.name"));
         Assert.Equal("task-123", activity.GetTagItem("celery.task.id"));
