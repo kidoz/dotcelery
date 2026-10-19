@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text.Json;
 using DotCelery.Core.Attributes;
@@ -174,6 +175,11 @@ public sealed class PreventOverlappingFilter : ITaskFilterWithExceptionHandling
         return ComputeInputHash(context.Input);
     }
 
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2075",
+        Justification = "Keying by an input property reflects over the task input; UsePreventOverlapping is annotated as requiring unreferenced code, so a trimmed application that relies on this property preserves it."
+    )]
     private static string? GetPropertyValue(object input, string propertyName)
     {
         try
@@ -193,6 +199,16 @@ public sealed class PreventOverlappingFilter : ITaskFilterWithExceptionHandling
         return null;
     }
 
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2026",
+        Justification = "Hashing the whole input serializes it with reflection; UsePreventOverlapping is annotated as requiring unreferenced code, so a Native AOT application does not use this mode."
+    )]
+    [UnconditionalSuppressMessage(
+        "AOT",
+        "IL3050",
+        Justification = "Hashing the whole input serializes it with reflection; UsePreventOverlapping is annotated as requiring dynamic code, so a Native AOT application does not use this mode."
+    )]
     private static string ComputeInputHash(object input)
     {
         var json = JsonSerializer.SerializeToUtf8Bytes(input);

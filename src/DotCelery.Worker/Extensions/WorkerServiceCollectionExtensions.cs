@@ -402,6 +402,12 @@ public static class WorkerServiceCollectionExtensions
     /// <remarks>
     /// Requires an ITaskExecutionTracker implementation to be registered.
     /// </remarks>
+    [RequiresUnreferencedCode(
+        "Keying by input reflects over the task input type; an application that trims must preserve the properties it keys on."
+    )]
+    [RequiresDynamicCode(
+        "Keying by input hashes the input through reflection-based serialization, which Native AOT does not provide."
+    )]
     public static DotCeleryBuilder UsePreventOverlapping(this DotCeleryBuilder builder)
     {
         builder.AddTaskFilter<PreventOverlappingFilter>();
@@ -454,6 +460,12 @@ public static class WorkerServiceCollectionExtensions
     /// Requires the corresponding store implementations to be registered.
     /// Call AddInMemoryAdvancedPatterns() on the backend builder to register in-memory stores.
     /// </remarks>
+    [RequiresUnreferencedCode(
+        "The set includes prevent-overlapping execution, which keys by input through reflection."
+    )]
+    [RequiresDynamicCode(
+        "The set includes prevent-overlapping execution, which hashes input through reflection-based serialization."
+    )]
     public static DotCeleryBuilder UseAdvancedPatternFilters(this DotCeleryBuilder builder)
     {
         return builder

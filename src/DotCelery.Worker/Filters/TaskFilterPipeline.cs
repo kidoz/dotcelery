@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using DotCelery.Core.Filters;
 using DotCelery.Worker.Registry;
 using Microsoft.Extensions.DependencyInjection;
@@ -99,6 +100,11 @@ public sealed class TaskFilterPipeline
         return filters.OrderBy(f => f.Order).ToList();
     }
 
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2067",
+        Justification = "Filter types registered through AddTaskFilter<TFilter>() preserve their constructors; a filter named only by a [TaskFilter] attribute relies on the application preserving it when it trims."
+    )]
     private ResolvedFilter? ResolveFilter(Type filterType, IServiceScope scope)
     {
         try
