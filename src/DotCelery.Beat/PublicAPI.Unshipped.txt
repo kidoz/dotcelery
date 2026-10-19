@@ -1,0 +1,60 @@
+#nullable enable
+DotCelery.Beat.BeatOptions
+DotCelery.Beat.BeatOptions.BeatOptions() -> void
+DotCelery.Beat.BeatOptions.CheckInterval.get -> System.TimeSpan
+DotCelery.Beat.BeatOptions.CheckInterval.set -> void
+DotCelery.Beat.BeatOptions.MaxJitter.get -> System.TimeSpan
+DotCelery.Beat.BeatOptions.MaxJitter.set -> void
+DotCelery.Beat.BeatOptions.PersistState.get -> bool
+DotCelery.Beat.BeatOptions.PersistState.set -> void
+DotCelery.Beat.BeatOptions.RunMissedOnStartup.get -> bool
+DotCelery.Beat.BeatOptions.RunMissedOnStartup.set -> void
+DotCelery.Beat.BeatOptions.SchedulerName.get -> string!
+DotCelery.Beat.BeatOptions.SchedulerName.set -> void
+DotCelery.Beat.BeatOptions.StatePath.get -> string?
+DotCelery.Beat.BeatOptions.StatePath.set -> void
+DotCelery.Beat.BeatSchedulerService
+DotCelery.Beat.BeatSchedulerService.BeatSchedulerService(DotCelery.Beat.Schedule! schedule, DotCelery.Core.Abstractions.IMessageBroker! broker, DotCelery.Core.Abstractions.IMessageSerializer! serializer, Microsoft.Extensions.Options.IOptions<DotCelery.Beat.BeatOptions!>! options, Microsoft.Extensions.Logging.ILogger<DotCelery.Beat.BeatSchedulerService!>! logger, System.TimeProvider? timeProvider = null, DotCelery.Core.Storage.IStorageProvider? storage = null, Microsoft.Extensions.Options.IOptions<DotCelery.Core.Storage.Stores.StorageStoreOptions!>? storeOptions = null) -> void
+DotCelery.Beat.Extensions.ServiceCollectionExtensions
+DotCelery.Beat.Schedule
+DotCelery.Beat.Schedule.Add(DotCelery.Beat.ScheduleEntry! entry) -> void
+DotCelery.Beat.Schedule.Contains(string! name) -> bool
+DotCelery.Beat.Schedule.Count.get -> int
+DotCelery.Beat.Schedule.Get(string! name) -> DotCelery.Beat.ScheduleEntry?
+DotCelery.Beat.Schedule.GetDueEntries(System.DateTimeOffset now) -> System.Collections.Generic.IEnumerable<DotCelery.Beat.ScheduleEntry!>!
+DotCelery.Beat.Schedule.GetEnumerator() -> System.Collections.Generic.IEnumerator<DotCelery.Beat.ScheduleEntry!>!
+DotCelery.Beat.Schedule.Remove(string! name) -> bool
+DotCelery.Beat.Schedule.Schedule() -> void
+DotCelery.Beat.ScheduleEntry
+DotCelery.Beat.ScheduleEntry.Cron.get -> string?
+DotCelery.Beat.ScheduleEntry.Cron.init -> void
+DotCelery.Beat.ScheduleEntry.Enabled.get -> bool
+DotCelery.Beat.ScheduleEntry.Enabled.set -> void
+DotCelery.Beat.ScheduleEntry.GetNextRunTime(System.DateTimeOffset from) -> System.DateTimeOffset?
+DotCelery.Beat.ScheduleEntry.Interval.get -> System.TimeSpan?
+DotCelery.Beat.ScheduleEntry.Interval.init -> void
+DotCelery.Beat.ScheduleEntry.LastRunTime.get -> System.DateTimeOffset?
+DotCelery.Beat.ScheduleEntry.LastRunTime.set -> void
+DotCelery.Beat.ScheduleEntry.Name.get -> string!
+DotCelery.Beat.ScheduleEntry.Name.init -> void
+DotCelery.Beat.ScheduleEntry.Options.get -> DotCelery.Beat.ScheduleOptions?
+DotCelery.Beat.ScheduleEntry.Options.init -> void
+DotCelery.Beat.ScheduleEntry.ScheduleEntry() -> void
+DotCelery.Beat.ScheduleEntry.ShouldRun(System.DateTimeOffset now) -> bool
+DotCelery.Beat.ScheduleEntry.Task.get -> DotCelery.Core.Canvas.Signature!
+DotCelery.Beat.ScheduleEntry.Task.init -> void
+DotCelery.Beat.ScheduleOptions
+DotCelery.Beat.ScheduleOptions.ExpiresIn.get -> System.TimeSpan?
+DotCelery.Beat.ScheduleOptions.ExpiresIn.init -> void
+DotCelery.Beat.ScheduleOptions.Priority.get -> int?
+DotCelery.Beat.ScheduleOptions.Priority.init -> void
+DotCelery.Beat.ScheduleOptions.Queue.get -> string?
+DotCelery.Beat.ScheduleOptions.Queue.init -> void
+DotCelery.Beat.ScheduleOptions.RelativeEta.get -> bool
+DotCelery.Beat.ScheduleOptions.RelativeEta.init -> void
+DotCelery.Beat.ScheduleOptions.ScheduleOptions() -> void
+static DotCelery.Beat.Extensions.ServiceCollectionExtensions.AddBeatScheduler(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Beat.Schedule!>! configureSchedule, System.Action<DotCelery.Beat.BeatOptions!>? configureOptions = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Beat.Extensions.ServiceCollectionExtensions.AddCron(this DotCelery.Beat.Schedule! schedule, string! name, string! cron, string! taskName, byte[]? args = null, DotCelery.Beat.ScheduleOptions? options = null) -> DotCelery.Beat.Schedule!
+static DotCelery.Beat.Extensions.ServiceCollectionExtensions.AddCron<TTask, TInput>(this DotCelery.Beat.Schedule! schedule, string! name, string! cron, TInput! input, DotCelery.Core.Abstractions.IMessageSerializer! serializer, DotCelery.Beat.ScheduleOptions? options = null) -> DotCelery.Beat.Schedule!
+static DotCelery.Beat.Extensions.ServiceCollectionExtensions.AddInterval(this DotCelery.Beat.Schedule! schedule, string! name, System.TimeSpan interval, string! taskName, byte[]? args = null, DotCelery.Beat.ScheduleOptions? options = null) -> DotCelery.Beat.Schedule!
+static DotCelery.Beat.Extensions.ServiceCollectionExtensions.AddInterval<TTask, TInput>(this DotCelery.Beat.Schedule! schedule, string! name, System.TimeSpan interval, TInput! input, DotCelery.Core.Abstractions.IMessageSerializer! serializer, DotCelery.Beat.ScheduleOptions? options = null) -> DotCelery.Beat.Schedule!

@@ -127,8 +127,25 @@ The build also enforces code quality:
 
 - `TreatWarningsAsErrors` is enabled, so a warning fails the build.
 - `AnalysisMode` is `Recommended` and `EnforceCodeStyleInBuild` is enabled.
-- Suppressions belong in `Directory.Build.props` only when they apply project-wide and have a
-  stated reason; do not suppress a diagnostic just to make a build pass.
+- Suppressions belong in `Directory.Build.props` or `src/Directory.Build.targets` only when they
+  apply project-wide and have a stated reason; do not suppress a diagnostic just to make a build
+  pass.
+
+### Public API
+
+Every shipped library tracks its public surface in `PublicAPI.Shipped.txt` and
+`PublicAPI.Unshipped.txt` (`Microsoft.CodeAnalysis.PublicApiAnalyzers`, enabled for everything
+under `src/`). Adding, removing, or changing a public member fails the build with `RS0016`,
+`RS0017`, or `RS0018` until the change is declared, so an accidental API change cannot ship.
+
+After an intentional API change, declare it with:
+
+```bash
+just api-format
+```
+
+This adds new members to `PublicAPI.Unshipped.txt`. Move entries from `Unshipped` to `Shipped`
+only when the change is part of a release; both files are enforced.
 
 ### Naming Conventions
 

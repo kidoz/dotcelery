@@ -1,0 +1,36 @@
+#nullable enable
+DotCelery.Broker.Sqs.Extensions.DotCeleryBuilderExtensions
+DotCelery.Broker.Sqs.SqsBroker
+DotCelery.Broker.Sqs.SqsBroker.AckAsync(DotCelery.Core.Abstractions.BrokerMessage! message, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+DotCelery.Broker.Sqs.SqsBroker.Capabilities.get -> DotCelery.Core.Abstractions.MessageBrokerCapabilities!
+DotCelery.Broker.Sqs.SqsBroker.ConsumeAsync(System.Collections.Generic.IReadOnlyList<string!>! queues, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<DotCelery.Core.Abstractions.BrokerMessage!>!
+DotCelery.Broker.Sqs.SqsBroker.DisposeAsync() -> System.Threading.Tasks.ValueTask
+DotCelery.Broker.Sqs.SqsBroker.IsHealthyAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<bool>
+DotCelery.Broker.Sqs.SqsBroker.PublishAsync(DotCelery.Core.Models.TaskMessage! message, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+DotCelery.Broker.Sqs.SqsBroker.RejectAsync(DotCelery.Core.Abstractions.BrokerMessage! message, bool requeue = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+DotCelery.Broker.Sqs.SqsBroker.SqsBroker(Microsoft.Extensions.Options.IOptions<DotCelery.Broker.Sqs.SqsBrokerOptions!>! options, Microsoft.Extensions.Logging.ILogger<DotCelery.Broker.Sqs.SqsBroker!>! logger, DotCelery.Core.Abstractions.IDeadLetterStore? deadLetterStore = null, DotCelery.Core.Security.IMessageSecurityValidator? messageSecurityValidator = null, DotCelery.Core.Abstractions.IQueueMetrics? queueMetrics = null) -> void
+DotCelery.Broker.Sqs.SqsBrokerOptions
+DotCelery.Broker.Sqs.SqsBrokerOptions.AccessKey.get -> string?
+DotCelery.Broker.Sqs.SqsBrokerOptions.AccessKey.set -> void
+DotCelery.Broker.Sqs.SqsBrokerOptions.AutoCreateQueues.get -> bool
+DotCelery.Broker.Sqs.SqsBrokerOptions.AutoCreateQueues.set -> void
+DotCelery.Broker.Sqs.SqsBrokerOptions.BatchSize.get -> int
+DotCelery.Broker.Sqs.SqsBrokerOptions.BatchSize.set -> void
+DotCelery.Broker.Sqs.SqsBrokerOptions.MaxMessageSizeBytes.get -> int
+DotCelery.Broker.Sqs.SqsBrokerOptions.MaxMessageSizeBytes.set -> void
+DotCelery.Broker.Sqs.SqsBrokerOptions.MessageRetention.get -> System.TimeSpan
+DotCelery.Broker.Sqs.SqsBrokerOptions.MessageRetention.set -> void
+DotCelery.Broker.Sqs.SqsBrokerOptions.Region.get -> string!
+DotCelery.Broker.Sqs.SqsBrokerOptions.Region.set -> void
+DotCelery.Broker.Sqs.SqsBrokerOptions.RenewVisibilityWhileProcessing.get -> bool
+DotCelery.Broker.Sqs.SqsBrokerOptions.RenewVisibilityWhileProcessing.set -> void
+DotCelery.Broker.Sqs.SqsBrokerOptions.SecretKey.get -> string?
+DotCelery.Broker.Sqs.SqsBrokerOptions.SecretKey.set -> void
+DotCelery.Broker.Sqs.SqsBrokerOptions.ServiceUrl.get -> string?
+DotCelery.Broker.Sqs.SqsBrokerOptions.ServiceUrl.set -> void
+DotCelery.Broker.Sqs.SqsBrokerOptions.SqsBrokerOptions() -> void
+DotCelery.Broker.Sqs.SqsBrokerOptions.VisibilityTimeout.get -> System.TimeSpan
+DotCelery.Broker.Sqs.SqsBrokerOptions.VisibilityTimeout.set -> void
+DotCelery.Broker.Sqs.SqsBrokerOptions.WaitTime.get -> System.TimeSpan
+DotCelery.Broker.Sqs.SqsBrokerOptions.WaitTime.set -> void
+static DotCelery.Broker.Sqs.Extensions.DotCeleryBuilderExtensions.UseSqs(this DotCelery.Core.Extensions.DotCeleryBuilder! builder, System.Action<DotCelery.Broker.Sqs.SqsBrokerOptions!>? configure = null) -> DotCelery.Core.Extensions.DotCeleryBuilder!

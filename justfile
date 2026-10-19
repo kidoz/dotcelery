@@ -13,6 +13,14 @@ format:
 format-check:
     dotnet tool run csharpier check .
 
+# Declare the current public API of every shipped library in PublicAPI.Unshipped.txt
+api-format:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for project in src/*/*.csproj; do
+        dotnet format analyzers "$project" --diagnostics RS0016
+    done
+
 # Build the solution
 build:
     dotnet build

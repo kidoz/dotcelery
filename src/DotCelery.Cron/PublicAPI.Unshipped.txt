@@ -1,0 +1,26 @@
+#nullable enable
+DotCelery.Cron.CronExpression
+DotCelery.Cron.CronExpression.GetNextOccurrence(System.DateTimeOffset from) -> System.DateTimeOffset?
+DotCelery.Cron.CronExpression.GetNextOccurrence(System.DateTimeOffset from, System.TimeZoneInfo! zone) -> System.DateTimeOffset?
+DotCelery.Cron.CronExpression.GetOccurrences(System.DateTimeOffset from, System.DateTimeOffset to) -> System.Collections.Generic.IEnumerable<System.DateTimeOffset>!
+DotCelery.Cron.CronExpression.GetOccurrences(System.DateTimeOffset from, System.DateTimeOffset to, System.TimeZoneInfo! zone) -> System.Collections.Generic.IEnumerable<System.DateTimeOffset>!
+DotCelery.Cron.CronExpression.ToDescription() -> string!
+DotCelery.Cron.CronFormat
+DotCelery.Cron.CronFormat.IncludeSeconds = 1 -> DotCelery.Cron.CronFormat
+DotCelery.Cron.CronFormat.IncludeSecondsAndYear = 3 -> DotCelery.Cron.CronFormat
+DotCelery.Cron.CronFormat.IncludeYear = 2 -> DotCelery.Cron.CronFormat
+DotCelery.Cron.CronFormat.Standard = 0 -> DotCelery.Cron.CronFormat
+DotCelery.Cron.CronFormatException
+DotCelery.Cron.CronFormatException.CronFormatException() -> void
+DotCelery.Cron.CronFormatException.CronFormatException(string! message) -> void
+DotCelery.Cron.CronFormatException.CronFormatException(string! message, System.Exception! innerException) -> void
+override DotCelery.Cron.CronExpression.ToString() -> string!
+static DotCelery.Cron.CronExpression.Daily.get -> DotCelery.Cron.CronExpression!
+static DotCelery.Cron.CronExpression.EveryMinute.get -> DotCelery.Cron.CronExpression!
+static DotCelery.Cron.CronExpression.Hourly.get -> DotCelery.Cron.CronExpression!
+static DotCelery.Cron.CronExpression.Monthly.get -> DotCelery.Cron.CronExpression!
+static DotCelery.Cron.CronExpression.Parse(string! expression, DotCelery.Cron.CronFormat format = DotCelery.Cron.CronFormat.Standard) -> DotCelery.Cron.CronExpression!
+static DotCelery.Cron.CronExpression.TryParse(string! expression, DotCelery.Cron.CronFormat format, out DotCelery.Cron.CronExpression? result) -> bool
+static DotCelery.Cron.CronExpression.TryParse(string! expression, out DotCelery.Cron.CronExpression? result) -> bool
+static DotCelery.Cron.CronExpression.Weekly.get -> DotCelery.Cron.CronExpression!
+static DotCelery.Cron.CronExpression.Yearly.get -> DotCelery.Cron.CronExpression!

@@ -1,0 +1,90 @@
+#nullable enable
+const DotCelery.Backend.Postgres.Validation.PostgresIdentifierValidator.MaxIdentifierLength = 63 -> int
+DotCelery.Backend.Postgres.Extensions.DotCeleryBuilderExtensions
+DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions
+DotCelery.Backend.Postgres.IPostgresDataSourceProvider
+DotCelery.Backend.Postgres.IPostgresDataSourceProvider.GetDataSource(string! connectionString) -> Npgsql.NpgsqlDataSource!
+DotCelery.Backend.Postgres.PostgresDataSourceProvider
+DotCelery.Backend.Postgres.PostgresDataSourceProvider.DisposeAsync() -> System.Threading.Tasks.ValueTask
+DotCelery.Backend.Postgres.PostgresDataSourceProvider.GetDataSource(string! connectionString) -> Npgsql.NpgsqlDataSource!
+DotCelery.Backend.Postgres.PostgresDataSourceProvider.PostgresDataSourceProvider() -> void
+DotCelery.Backend.Postgres.Storage.PostgresDialect
+DotCelery.Backend.Postgres.Storage.PostgresStorage
+DotCelery.Backend.Postgres.Storage.PostgresStorageOptions
+DotCelery.Backend.Postgres.Storage.PostgresStorageOptions.CommandTimeout.get -> System.TimeSpan
+DotCelery.Backend.Postgres.Storage.PostgresStorageOptions.CommandTimeout.set -> void
+DotCelery.Backend.Postgres.Storage.PostgresStorageOptions.ConnectionString.get -> string!
+DotCelery.Backend.Postgres.Storage.PostgresStorageOptions.ConnectionString.set -> void
+DotCelery.Backend.Postgres.Storage.PostgresStorageOptions.PostgresStorageOptions() -> void
+DotCelery.Backend.Postgres.Storage.PostgresStorageOptions.Schema.get -> string!
+DotCelery.Backend.Postgres.Storage.PostgresStorageOptions.Schema.set -> void
+DotCelery.Backend.Postgres.Storage.PostgresStorageStatements
+DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.PostgresStorageStatements(string! schema) -> void
+DotCelery.Backend.Postgres.Validation.PostgresIdentifierValidator
+override DotCelery.Backend.Postgres.Storage.PostgresDialect.Name.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresDialect.Quote(string! identifier) -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresDialect.ReleaseMigrationLockStatement.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresDialect.RenderGuardedMigration(string! schema, string! historyTable, string! moduleName, DotCelery.Storage.Sql.Migrations.SqlMigration! migration) -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresDialect.SchemaExistsQuery.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresDialect.TableExistsQuery.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresDialect.TryAcquireMigrationLockQuery.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.CounterDelete.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.CounterGet.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.CounterIncrement.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.DocumentCount(DotCelery.Storage.Sql.Storage.DocumentFilterShape shape) -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.DocumentDelete.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.DocumentDeleteMany(DotCelery.Storage.Sql.Storage.DocumentFilterShape shape) -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.DocumentDeleteVersion.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.DocumentGet.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.DocumentInsert.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.DocumentQuery(DotCelery.Storage.Sql.Storage.DocumentQueryShape shape) -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.DocumentReplace.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.DocumentUpsert.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.HealthCheck.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.LeaseAcquire.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.LeaseGet.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.LeaseList.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.LeaseRelease.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.LeaseRenew.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.Purge.get -> System.Collections.Generic.IReadOnlyList<string!>!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.QueueAbandon.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.QueueClaim.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.QueueComplete.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.QueueCount.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.QueueEnqueue.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.QueueNextDue.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.QueueRemove.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.WindowAdd.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.WindowLock.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.WindowPrune.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.WindowSnapshot.get -> string!
+override DotCelery.Backend.Postgres.Storage.PostgresStorageStatements.WindowState.get -> string!
+static DotCelery.Backend.Postgres.Extensions.DotCeleryBuilderExtensions.UsePostgres(this DotCelery.Core.Extensions.DotCeleryBuilder! builder, string! connectionString) -> DotCelery.Core.Extensions.DotCeleryBuilder!
+static DotCelery.Backend.Postgres.Extensions.DotCeleryBuilderExtensions.UsePostgres(this DotCelery.Core.Extensions.DotCeleryBuilder! builder, System.Action<DotCelery.Backend.Postgres.Storage.PostgresStorageOptions!>? configure = null) -> DotCelery.Core.Extensions.DotCeleryBuilder!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresBackend(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! connectionString) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresBackend(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Postgres.Storage.PostgresStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresBatchStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Postgres.Storage.PostgresStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresDataSourceProvider(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresDeadLetterStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Postgres.Storage.PostgresStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresDelayedMessageStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Postgres.Storage.PostgresStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresHistoricalDataStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Postgres.Storage.PostgresStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresInboxStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Postgres.Storage.PostgresStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresMigrations(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Storage.Sql.Migrations.SqlMigrationOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresOutboxStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Postgres.Storage.PostgresStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresPartitionLockStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Postgres.Storage.PostgresStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresQueueMetrics(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Postgres.Storage.PostgresStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresRateLimiter(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Postgres.Storage.PostgresStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresRevocationStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Postgres.Storage.PostgresStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresSagaStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Postgres.Storage.PostgresStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresSignalStore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Postgres.Storage.PostgresStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresStorage(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Postgres.Storage.PostgresStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresTaskExecutionTracker(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Postgres.Storage.PostgresStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Extensions.ServiceCollectionExtensions.AddPostgresWorkerRegistry(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Backend.Postgres.Storage.PostgresStorageOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Backend.Postgres.Storage.PostgresDialect.Instance.get -> DotCelery.Backend.Postgres.Storage.PostgresDialect!
+static DotCelery.Backend.Postgres.Storage.PostgresStorage.CreateModule(DotCelery.Backend.Postgres.Storage.PostgresStorageOptions! options) -> DotCelery.Storage.Sql.Migrations.SqlMigrationModule!
+static DotCelery.Backend.Postgres.Storage.PostgresStorage.CreateProvider(Npgsql.NpgsqlDataSource! dataSource, DotCelery.Backend.Postgres.Storage.PostgresStorageOptions! options, System.TimeProvider? timeProvider = null) -> DotCelery.Core.Storage.IStorageProvider!
+static DotCelery.Backend.Postgres.Validation.PostgresIdentifierValidator.IsValidIdentifier(string? identifier) -> bool
+static DotCelery.Backend.Postgres.Validation.PostgresIdentifierValidator.ValidateBatchSize(int batchSize, string! parameterName, int minSize = 1, int maxSize = 100000) -> void
+static DotCelery.Backend.Postgres.Validation.PostgresIdentifierValidator.ValidateConnectionString(string? connectionString, string! parameterName) -> void
+static DotCelery.Backend.Postgres.Validation.PostgresIdentifierValidator.ValidateIdentifier(string? identifier, string! parameterName) -> void
+static DotCelery.Backend.Postgres.Validation.PostgresIdentifierValidator.ValidateTimeout(System.TimeSpan timeout, string! parameterName, System.TimeSpan? minTimeout = null, System.TimeSpan? maxTimeout = null) -> void

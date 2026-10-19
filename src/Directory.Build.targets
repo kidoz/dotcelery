@@ -1,0 +1,26 @@
+<Project>
+  <!--
+    Tracks the public surface of every shipped library against PublicAPI.Shipped.txt and
+    PublicAPI.Unshipped.txt, so an accidental API change fails the build before 1.0 fixes it.
+    Tests, samples, benchmarks, and eng/ are outside src/ and are not tracked.
+  -->
+  <PropertyGroup>
+    <!--
+      RS0041: the System.Text.Json source generator emits the public context properties without
+      nullable annotations, so the analyzer sees them as oblivious.
+
+      RS0026, RS0027: the async and provider-registration APIs keep optional parameters on
+      overloads by design. The PublicAPI files still put every new overload through an API
+      review.
+    -->
+    <NoWarn>$(NoWarn);RS0041;RS0026;RS0027</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference
+      Include="Microsoft.CodeAnalysis.PublicApiAnalyzers"
+      Version="5.6.0"
+      PrivateAssets="all"
+    />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,302 @@
+#nullable enable
+abstract DotCelery.Storage.Sql.Migrations.SchemaOperation.<Clone>$() -> DotCelery.Storage.Sql.Migrations.SchemaOperation!
+abstract DotCelery.Storage.Sql.SqlDialect.ColumnType(DotCelery.Storage.Sql.Schema.SqlColumn! column) -> string!
+abstract DotCelery.Storage.Sql.SqlDialect.Name.get -> string!
+abstract DotCelery.Storage.Sql.SqlDialect.Quote(string! identifier) -> string!
+abstract DotCelery.Storage.Sql.SqlDialect.ReleaseMigrationLockStatement.get -> string!
+abstract DotCelery.Storage.Sql.SqlDialect.RenderGuardedMigration(string! schema, string! historyTable, string! moduleName, DotCelery.Storage.Sql.Migrations.SqlMigration! migration) -> string!
+abstract DotCelery.Storage.Sql.SqlDialect.SchemaExistsQuery.get -> string!
+abstract DotCelery.Storage.Sql.SqlDialect.TableExistsQuery.get -> string!
+abstract DotCelery.Storage.Sql.SqlDialect.TryAcquireMigrationLockQuery.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.CounterDelete.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.CounterGet.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.CounterIncrement.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.DocumentCount(DotCelery.Storage.Sql.Storage.DocumentFilterShape shape) -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.DocumentDelete.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.DocumentDeleteMany(DotCelery.Storage.Sql.Storage.DocumentFilterShape shape) -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.DocumentDeleteVersion.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.DocumentGet.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.DocumentInsert.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.DocumentQuery(DotCelery.Storage.Sql.Storage.DocumentQueryShape shape) -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.DocumentReplace.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.DocumentUpsert.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.HealthCheck.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.LeaseAcquire.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.LeaseGet.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.LeaseList.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.LeaseRelease.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.LeaseRenew.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.Purge.get -> System.Collections.Generic.IReadOnlyList<string!>!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.QueueAbandon.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.QueueClaim.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.QueueComplete.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.QueueCount.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.QueueEnqueue.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.QueueNextDue.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.QueueRemove.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.WindowAdd.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.WindowLock.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.WindowPrune.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.WindowSnapshot.get -> string!
+abstract DotCelery.Storage.Sql.Storage.SqlStorageStatements.WindowState.get -> string!
+const DotCelery.Storage.Sql.Schema.SqlIdentifier.MaxLength = 63 -> int
+const DotCelery.Storage.Sql.Storage.SqlStorageSchema.CountersTable = "dotcelery_counters" -> string!
+const DotCelery.Storage.Sql.Storage.SqlStorageSchema.DocumentsTable = "dotcelery_documents" -> string!
+const DotCelery.Storage.Sql.Storage.SqlStorageSchema.DocumentVersionSequence = "dotcelery_document_versions" -> string!
+const DotCelery.Storage.Sql.Storage.SqlStorageSchema.LeasesTable = "dotcelery_leases" -> string!
+const DotCelery.Storage.Sql.Storage.SqlStorageSchema.LeaseTokenSequence = "dotcelery_lease_tokens" -> string!
+const DotCelery.Storage.Sql.Storage.SqlStorageSchema.ModuleName = "storage" -> string!
+const DotCelery.Storage.Sql.Storage.SqlStorageSchema.QueueItemsTable = "dotcelery_queue_items" -> string!
+const DotCelery.Storage.Sql.Storage.SqlStorageSchema.WindowEventsTable = "dotcelery_window_events" -> string!
+const DotCelery.Storage.Sql.Storage.SqlStorageSchema.WindowKeysTable = "dotcelery_window_keys" -> string!
+DotCelery.Storage.Sql.Execution.ISqlDataSourceProvider
+DotCelery.Storage.Sql.Execution.ISqlDataSourceProvider.GetDataSource(string! connectionString) -> System.Data.Common.DbDataSource!
+DotCelery.Storage.Sql.Execution.SqlExecutor
+DotCelery.Storage.Sql.Execution.SqlExecutor.ExecuteAsync(string! sql, System.Action<DotCelery.Storage.Sql.Execution.SqlParameters!>? bind, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<int>!
+DotCelery.Storage.Sql.Execution.SqlExecutor.InCallerTransactionAsync(System.Data.Common.DbTransaction! transaction, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>! work, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask
+DotCelery.Storage.Sql.Execution.SqlExecutor.InTransactionAsync<T>(System.Func<DotCelery.Storage.Sql.Execution.SqlSession!, System.Threading.Tasks.Task<T>!>! work, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<T>!
+DotCelery.Storage.Sql.Execution.SqlExecutor.OpenSessionAsync(System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<DotCelery.Storage.Sql.Execution.SqlSession!>!
+DotCelery.Storage.Sql.Execution.SqlExecutor.QueryAsync<T>(string! sql, System.Action<DotCelery.Storage.Sql.Execution.SqlParameters!>? bind, System.Func<System.Data.Common.DbDataReader!, T>! map, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<System.Collections.Generic.List<T>!>!
+DotCelery.Storage.Sql.Execution.SqlExecutor.QuerySingleAsync<T>(string! sql, System.Action<DotCelery.Storage.Sql.Execution.SqlParameters!>? bind, System.Func<System.Data.Common.DbDataReader!, T>! map, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<T?>!
+DotCelery.Storage.Sql.Execution.SqlExecutor.RunInTransactionAsync(System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>! work, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask
+DotCelery.Storage.Sql.Execution.SqlExecutor.SqlExecutor(System.Data.Common.DbDataSource! dataSource, System.TimeSpan commandTimeout, System.Func<System.Data.Common.DbException!, bool>? isTransient = null) -> void
+DotCelery.Storage.Sql.Execution.SqlParameters
+DotCelery.Storage.Sql.Execution.SqlParameters.Binary(string! name, System.ReadOnlyMemory<byte> value) -> DotCelery.Storage.Sql.Execution.SqlParameters!
+DotCelery.Storage.Sql.Execution.SqlParameters.Integer32(string! name, int? value) -> DotCelery.Storage.Sql.Execution.SqlParameters!
+DotCelery.Storage.Sql.Execution.SqlParameters.Integer64(string! name, long? value) -> DotCelery.Storage.Sql.Execution.SqlParameters!
+DotCelery.Storage.Sql.Execution.SqlParameters.Text(string! name, string? value) -> DotCelery.Storage.Sql.Execution.SqlParameters!
+DotCelery.Storage.Sql.Execution.SqlParameters.Timestamp(string! name, System.DateTimeOffset? value) -> DotCelery.Storage.Sql.Execution.SqlParameters!
+DotCelery.Storage.Sql.Execution.SqlParameters.Uuid(string! name, System.Guid? value) -> DotCelery.Storage.Sql.Execution.SqlParameters!
+DotCelery.Storage.Sql.Execution.SqlSession
+DotCelery.Storage.Sql.Execution.SqlSession.DisposeAsync() -> System.Threading.Tasks.ValueTask
+DotCelery.Storage.Sql.Execution.SqlSession.ExecuteAsync(string! sql, System.Action<DotCelery.Storage.Sql.Execution.SqlParameters!>? bind, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<int>!
+DotCelery.Storage.Sql.Execution.SqlSession.InTransactionAsync<T>(System.Func<System.Threading.Tasks.Task<T>!>! work, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<T>!
+DotCelery.Storage.Sql.Execution.SqlSession.QueryAsync<T>(string! sql, System.Action<DotCelery.Storage.Sql.Execution.SqlParameters!>? bind, System.Func<System.Data.Common.DbDataReader!, T>! map, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<System.Collections.Generic.List<T>!>!
+DotCelery.Storage.Sql.Execution.SqlSession.QuerySingleAsync<T>(string! sql, System.Action<DotCelery.Storage.Sql.Execution.SqlParameters!>? bind, System.Func<System.Data.Common.DbDataReader!, T>! map, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<T?>!
+DotCelery.Storage.Sql.Extensions.SqlStorageServiceCollectionExtensions
+DotCelery.Storage.Sql.Migrations.SchemaOperation
+DotCelery.Storage.Sql.Migrations.SchemaOperation.AddColumn
+DotCelery.Storage.Sql.Migrations.SchemaOperation.AddColumn.AddColumn(string! table, DotCelery.Storage.Sql.Schema.SqlColumn! column) -> void
+DotCelery.Storage.Sql.Migrations.SchemaOperation.AddColumn.Column.get -> DotCelery.Storage.Sql.Schema.SqlColumn!
+DotCelery.Storage.Sql.Migrations.SchemaOperation.AddColumn.Equals(DotCelery.Storage.Sql.Migrations.SchemaOperation.AddColumn? other) -> bool
+DotCelery.Storage.Sql.Migrations.SchemaOperation.AddColumn.Table.get -> string!
+DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateIndex
+DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateIndex.CreateIndex(string! table, DotCelery.Storage.Sql.Schema.SqlIndex! index) -> void
+DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateIndex.Equals(DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateIndex? other) -> bool
+DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateIndex.Index.get -> DotCelery.Storage.Sql.Schema.SqlIndex!
+DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateIndex.Table.get -> string!
+DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateSequence
+DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateSequence.CreateSequence(string! name) -> void
+DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateSequence.Equals(DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateSequence? other) -> bool
+DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateSequence.Name.get -> string!
+DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateTable
+DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateTable.CreateTable(DotCelery.Storage.Sql.Schema.SqlTable! table) -> void
+DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateTable.Equals(DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateTable? other) -> bool
+DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateTable.Table.get -> DotCelery.Storage.Sql.Schema.SqlTable!
+DotCelery.Storage.Sql.Migrations.SchemaOperation.ExecuteSql
+DotCelery.Storage.Sql.Migrations.SchemaOperation.ExecuteSql.Equals(DotCelery.Storage.Sql.Migrations.SchemaOperation.ExecuteSql? other) -> bool
+DotCelery.Storage.Sql.Migrations.SchemaOperation.ExecuteSql.ExecuteSql(string! statement) -> void
+DotCelery.Storage.Sql.Migrations.SchemaOperation.ExecuteSql.Statement.get -> string!
+DotCelery.Storage.Sql.Migrations.SchemaOperation.SchemaOperation(DotCelery.Storage.Sql.Migrations.SchemaOperation! original) -> void
+DotCelery.Storage.Sql.Migrations.SqlMigration
+DotCelery.Storage.Sql.Migrations.SqlMigration.<Clone>$() -> DotCelery.Storage.Sql.Migrations.SqlMigration!
+DotCelery.Storage.Sql.Migrations.SqlMigration.Checksum.get -> string!
+DotCelery.Storage.Sql.Migrations.SqlMigration.Description.get -> string!
+DotCelery.Storage.Sql.Migrations.SqlMigration.Equals(DotCelery.Storage.Sql.Migrations.SqlMigration? other) -> bool
+DotCelery.Storage.Sql.Migrations.SqlMigration.Operations.get -> System.Collections.Generic.IReadOnlyList<DotCelery.Storage.Sql.Migrations.SchemaOperation!>!
+DotCelery.Storage.Sql.Migrations.SqlMigration.SqlMigration(long version, string! description, System.Collections.Generic.IReadOnlyList<DotCelery.Storage.Sql.Migrations.SchemaOperation!>! operations) -> void
+DotCelery.Storage.Sql.Migrations.SqlMigration.Version.get -> long
+DotCelery.Storage.Sql.Migrations.SqlMigrationModule
+DotCelery.Storage.Sql.Migrations.SqlMigrationModule.ConnectionString.get -> string!
+DotCelery.Storage.Sql.Migrations.SqlMigrationModule.Migrations.get -> System.Collections.Generic.IReadOnlyList<DotCelery.Storage.Sql.Migrations.SqlMigration!>!
+DotCelery.Storage.Sql.Migrations.SqlMigrationModule.Name.get -> string!
+DotCelery.Storage.Sql.Migrations.SqlMigrationModule.Schema.get -> string!
+DotCelery.Storage.Sql.Migrations.SqlMigrationModule.SqlMigrationModule(string! name, string! connectionString, string! schema, System.Collections.Generic.IReadOnlyList<DotCelery.Storage.Sql.Migrations.SqlMigration!>! migrations) -> void
+DotCelery.Storage.Sql.Migrations.SqlMigrationOptions
+DotCelery.Storage.Sql.Migrations.SqlMigrationOptions.CommandTimeout.get -> System.TimeSpan
+DotCelery.Storage.Sql.Migrations.SqlMigrationOptions.CommandTimeout.set -> void
+DotCelery.Storage.Sql.Migrations.SqlMigrationOptions.HistoryTableName.get -> string!
+DotCelery.Storage.Sql.Migrations.SqlMigrationOptions.HistoryTableName.set -> void
+DotCelery.Storage.Sql.Migrations.SqlMigrationOptions.LockTimeout.get -> System.TimeSpan
+DotCelery.Storage.Sql.Migrations.SqlMigrationOptions.LockTimeout.set -> void
+DotCelery.Storage.Sql.Migrations.SqlMigrationOptions.RunAtStartup.get -> bool
+DotCelery.Storage.Sql.Migrations.SqlMigrationOptions.RunAtStartup.set -> void
+DotCelery.Storage.Sql.Migrations.SqlMigrationOptions.SqlMigrationOptions() -> void
+DotCelery.Storage.Sql.Migrations.SqlMigrator
+DotCelery.Storage.Sql.Migrations.SqlMigrator.GenerateScript() -> string!
+DotCelery.Storage.Sql.Migrations.SqlMigrator.MigrateAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+DotCelery.Storage.Sql.Migrations.SqlMigrator.Modules.get -> System.Collections.Generic.IReadOnlyList<DotCelery.Storage.Sql.Migrations.SqlMigrationModule!>!
+DotCelery.Storage.Sql.Migrations.SqlMigrator.SqlMigrator(DotCelery.Storage.Sql.SqlDialect! dialect, DotCelery.Storage.Sql.Execution.ISqlDataSourceProvider! dataSources, System.Collections.Generic.IEnumerable<DotCelery.Storage.Sql.Migrations.SqlMigrationModule!>! modules, Microsoft.Extensions.Options.IOptions<DotCelery.Storage.Sql.Migrations.SqlMigrationOptions!>! options, Microsoft.Extensions.Logging.ILogger<DotCelery.Storage.Sql.Migrations.SqlMigrator!>! logger, System.TimeProvider? timeProvider = null) -> void
+DotCelery.Storage.Sql.Schema.SqlColumn
+DotCelery.Storage.Sql.Schema.SqlColumn.<Clone>$() -> DotCelery.Storage.Sql.Schema.SqlColumn!
+DotCelery.Storage.Sql.Schema.SqlColumn.Equals(DotCelery.Storage.Sql.Schema.SqlColumn? other) -> bool
+DotCelery.Storage.Sql.Schema.SqlColumn.MaxLength.get -> int?
+DotCelery.Storage.Sql.Schema.SqlColumn.Name.get -> string!
+DotCelery.Storage.Sql.Schema.SqlColumn.Nullable.get -> bool
+DotCelery.Storage.Sql.Schema.SqlColumn.SqlColumn(string! name, DotCelery.Storage.Sql.Schema.SqlType type, bool nullable = false, int? maxLength = null) -> void
+DotCelery.Storage.Sql.Schema.SqlColumn.Type.get -> DotCelery.Storage.Sql.Schema.SqlType
+DotCelery.Storage.Sql.Schema.SqlIdentifier
+DotCelery.Storage.Sql.Schema.SqlIndex
+DotCelery.Storage.Sql.Schema.SqlIndex.<Clone>$() -> DotCelery.Storage.Sql.Schema.SqlIndex!
+DotCelery.Storage.Sql.Schema.SqlIndex.Columns.get -> System.Collections.Generic.IReadOnlyList<string!>!
+DotCelery.Storage.Sql.Schema.SqlIndex.Equals(DotCelery.Storage.Sql.Schema.SqlIndex? other) -> bool
+DotCelery.Storage.Sql.Schema.SqlIndex.Name.get -> string!
+DotCelery.Storage.Sql.Schema.SqlIndex.SqlIndex(string! name, System.Collections.Generic.IReadOnlyList<string!>! columns, bool unique = false) -> void
+DotCelery.Storage.Sql.Schema.SqlIndex.Unique.get -> bool
+DotCelery.Storage.Sql.Schema.SqlTable
+DotCelery.Storage.Sql.Schema.SqlTable.<Clone>$() -> DotCelery.Storage.Sql.Schema.SqlTable!
+DotCelery.Storage.Sql.Schema.SqlTable.Columns.get -> System.Collections.Generic.IReadOnlyList<DotCelery.Storage.Sql.Schema.SqlColumn!>!
+DotCelery.Storage.Sql.Schema.SqlTable.Equals(DotCelery.Storage.Sql.Schema.SqlTable? other) -> bool
+DotCelery.Storage.Sql.Schema.SqlTable.Name.get -> string!
+DotCelery.Storage.Sql.Schema.SqlTable.PrimaryKey.get -> System.Collections.Generic.IReadOnlyList<string!>!
+DotCelery.Storage.Sql.Schema.SqlTable.SqlTable(string! name, System.Collections.Generic.IReadOnlyList<DotCelery.Storage.Sql.Schema.SqlColumn!>! columns, System.Collections.Generic.IReadOnlyList<string!>? primaryKey = null) -> void
+DotCelery.Storage.Sql.Schema.SqlType
+DotCelery.Storage.Sql.Schema.SqlType.Binary = 1 -> DotCelery.Storage.Sql.Schema.SqlType
+DotCelery.Storage.Sql.Schema.SqlType.Boolean = 4 -> DotCelery.Storage.Sql.Schema.SqlType
+DotCelery.Storage.Sql.Schema.SqlType.Integer32 = 2 -> DotCelery.Storage.Sql.Schema.SqlType
+DotCelery.Storage.Sql.Schema.SqlType.Integer64 = 3 -> DotCelery.Storage.Sql.Schema.SqlType
+DotCelery.Storage.Sql.Schema.SqlType.Text = 0 -> DotCelery.Storage.Sql.Schema.SqlType
+DotCelery.Storage.Sql.Schema.SqlType.Timestamp = 5 -> DotCelery.Storage.Sql.Schema.SqlType
+DotCelery.Storage.Sql.Schema.SqlType.Uuid = 6 -> DotCelery.Storage.Sql.Schema.SqlType
+DotCelery.Storage.Sql.SqlDialect
+DotCelery.Storage.Sql.SqlDialect.Qualify(string! schema, string! name) -> string!
+DotCelery.Storage.Sql.SqlDialect.Render(string! schema, DotCelery.Storage.Sql.Migrations.SchemaOperation! operation) -> System.Collections.Generic.IReadOnlyList<string!>!
+DotCelery.Storage.Sql.SqlDialect.SqlDialect() -> void
+DotCelery.Storage.Sql.Storage.DocumentFilterShape
+DotCelery.Storage.Sql.Storage.DocumentFilterShape.Deconstruct(out bool IndexKey, out bool SortKeyFrom, out bool SortKeyBefore) -> void
+DotCelery.Storage.Sql.Storage.DocumentFilterShape.DocumentFilterShape() -> void
+DotCelery.Storage.Sql.Storage.DocumentFilterShape.DocumentFilterShape(bool IndexKey, bool SortKeyFrom, bool SortKeyBefore) -> void
+DotCelery.Storage.Sql.Storage.DocumentFilterShape.Equals(DotCelery.Storage.Sql.Storage.DocumentFilterShape other) -> bool
+DotCelery.Storage.Sql.Storage.DocumentFilterShape.IndexKey.get -> bool
+DotCelery.Storage.Sql.Storage.DocumentFilterShape.IndexKey.init -> void
+DotCelery.Storage.Sql.Storage.DocumentFilterShape.SortKeyBefore.get -> bool
+DotCelery.Storage.Sql.Storage.DocumentFilterShape.SortKeyBefore.init -> void
+DotCelery.Storage.Sql.Storage.DocumentFilterShape.SortKeyFrom.get -> bool
+DotCelery.Storage.Sql.Storage.DocumentFilterShape.SortKeyFrom.init -> void
+DotCelery.Storage.Sql.Storage.DocumentQueryShape
+DotCelery.Storage.Sql.Storage.DocumentQueryShape.Deconstruct(out DotCelery.Storage.Sql.Storage.DocumentFilterShape Filter, out bool Descending, out bool Limit, out bool Offset) -> void
+DotCelery.Storage.Sql.Storage.DocumentQueryShape.Descending.get -> bool
+DotCelery.Storage.Sql.Storage.DocumentQueryShape.Descending.init -> void
+DotCelery.Storage.Sql.Storage.DocumentQueryShape.DocumentQueryShape() -> void
+DotCelery.Storage.Sql.Storage.DocumentQueryShape.DocumentQueryShape(DotCelery.Storage.Sql.Storage.DocumentFilterShape Filter, bool Descending, bool Limit, bool Offset) -> void
+DotCelery.Storage.Sql.Storage.DocumentQueryShape.Equals(DotCelery.Storage.Sql.Storage.DocumentQueryShape other) -> bool
+DotCelery.Storage.Sql.Storage.DocumentQueryShape.Filter.get -> DotCelery.Storage.Sql.Storage.DocumentFilterShape
+DotCelery.Storage.Sql.Storage.DocumentQueryShape.Filter.init -> void
+DotCelery.Storage.Sql.Storage.DocumentQueryShape.Limit.get -> bool
+DotCelery.Storage.Sql.Storage.DocumentQueryShape.Limit.init -> void
+DotCelery.Storage.Sql.Storage.DocumentQueryShape.Offset.get -> bool
+DotCelery.Storage.Sql.Storage.DocumentQueryShape.Offset.init -> void
+DotCelery.Storage.Sql.Storage.SqlStorageProvider
+DotCelery.Storage.Sql.Storage.SqlStorageProvider.CanWriteIn(object! transaction) -> bool
+DotCelery.Storage.Sql.Storage.SqlStorageProvider.Counters.get -> DotCelery.Core.Storage.ICounterStore!
+DotCelery.Storage.Sql.Storage.SqlStorageProvider.Documents.get -> DotCelery.Core.Storage.IDocumentStore!
+DotCelery.Storage.Sql.Storage.SqlStorageProvider.IsHealthyAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<bool>
+DotCelery.Storage.Sql.Storage.SqlStorageProvider.Leases.get -> DotCelery.Core.Storage.ILeaseStore!
+DotCelery.Storage.Sql.Storage.SqlStorageProvider.Name.get -> string!
+DotCelery.Storage.Sql.Storage.SqlStorageProvider.Notifications.get -> DotCelery.Core.Storage.INotificationChannel?
+DotCelery.Storage.Sql.Storage.SqlStorageProvider.PurgeExpiredAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<long>
+DotCelery.Storage.Sql.Storage.SqlStorageProvider.Queues.get -> DotCelery.Core.Storage.IQueueStore!
+DotCelery.Storage.Sql.Storage.SqlStorageProvider.RunInTransactionAsync(System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>! work, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+DotCelery.Storage.Sql.Storage.SqlStorageProvider.SqlStorageProvider(string! name, DotCelery.Storage.Sql.Storage.SqlStorageStatements! statements, DotCelery.Storage.Sql.Execution.SqlExecutor! executor, System.TimeProvider? timeProvider = null, DotCelery.Core.Storage.INotificationChannel? notifications = null) -> void
+DotCelery.Storage.Sql.Storage.SqlStorageProvider.WriteInAsync(object! transaction, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>! work, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+DotCelery.Storage.Sql.Storage.SqlStorageSchema
+DotCelery.Storage.Sql.Storage.SqlStorageStatements
+DotCelery.Storage.Sql.Storage.SqlStorageStatements.All() -> System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<string!, string!>>!
+DotCelery.Storage.Sql.Storage.SqlStorageStatements.SqlStorageStatements() -> void
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.AddColumn.<Clone>$() -> DotCelery.Storage.Sql.Migrations.SchemaOperation.AddColumn!
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.AddColumn.Equals(object? obj) -> bool
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.AddColumn.GetHashCode() -> int
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.AddColumn.ToString() -> string!
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateIndex.<Clone>$() -> DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateIndex!
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateIndex.Equals(object? obj) -> bool
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateIndex.GetHashCode() -> int
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateIndex.ToString() -> string!
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateSequence.<Clone>$() -> DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateSequence!
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateSequence.Equals(object? obj) -> bool
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateSequence.GetHashCode() -> int
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateSequence.ToString() -> string!
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateTable.<Clone>$() -> DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateTable!
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateTable.Equals(object? obj) -> bool
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateTable.GetHashCode() -> int
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateTable.ToString() -> string!
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.Equals(object? obj) -> bool
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.ExecuteSql.<Clone>$() -> DotCelery.Storage.Sql.Migrations.SchemaOperation.ExecuteSql!
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.ExecuteSql.Equals(object? obj) -> bool
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.ExecuteSql.GetHashCode() -> int
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.ExecuteSql.ToString() -> string!
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.GetHashCode() -> int
+override DotCelery.Storage.Sql.Migrations.SchemaOperation.ToString() -> string!
+override DotCelery.Storage.Sql.Migrations.SqlMigration.Equals(object? obj) -> bool
+override DotCelery.Storage.Sql.Migrations.SqlMigration.GetHashCode() -> int
+override DotCelery.Storage.Sql.Migrations.SqlMigration.ToString() -> string!
+override DotCelery.Storage.Sql.Schema.SqlColumn.Equals(object? obj) -> bool
+override DotCelery.Storage.Sql.Schema.SqlColumn.GetHashCode() -> int
+override DotCelery.Storage.Sql.Schema.SqlColumn.ToString() -> string!
+override DotCelery.Storage.Sql.Schema.SqlIndex.Equals(object? obj) -> bool
+override DotCelery.Storage.Sql.Schema.SqlIndex.GetHashCode() -> int
+override DotCelery.Storage.Sql.Schema.SqlIndex.ToString() -> string!
+override DotCelery.Storage.Sql.Schema.SqlTable.Equals(object? obj) -> bool
+override DotCelery.Storage.Sql.Schema.SqlTable.GetHashCode() -> int
+override DotCelery.Storage.Sql.Schema.SqlTable.ToString() -> string!
+override DotCelery.Storage.Sql.Storage.DocumentFilterShape.GetHashCode() -> int
+override DotCelery.Storage.Sql.Storage.DocumentQueryShape.GetHashCode() -> int
+override sealed DotCelery.Storage.Sql.Migrations.SchemaOperation.AddColumn.Equals(DotCelery.Storage.Sql.Migrations.SchemaOperation? other) -> bool
+override sealed DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateIndex.Equals(DotCelery.Storage.Sql.Migrations.SchemaOperation? other) -> bool
+override sealed DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateSequence.Equals(DotCelery.Storage.Sql.Migrations.SchemaOperation? other) -> bool
+override sealed DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateTable.Equals(DotCelery.Storage.Sql.Migrations.SchemaOperation? other) -> bool
+override sealed DotCelery.Storage.Sql.Migrations.SchemaOperation.ExecuteSql.Equals(DotCelery.Storage.Sql.Migrations.SchemaOperation? other) -> bool
+static DotCelery.Storage.Sql.Extensions.SqlStorageServiceCollectionExtensions.AddSqlMigrations(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DotCelery.Storage.Sql.Migrations.SqlMigrationOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DotCelery.Storage.Sql.Migrations.SchemaOperation.AddColumn.operator !=(DotCelery.Storage.Sql.Migrations.SchemaOperation.AddColumn? left, DotCelery.Storage.Sql.Migrations.SchemaOperation.AddColumn? right) -> bool
+static DotCelery.Storage.Sql.Migrations.SchemaOperation.AddColumn.operator ==(DotCelery.Storage.Sql.Migrations.SchemaOperation.AddColumn? left, DotCelery.Storage.Sql.Migrations.SchemaOperation.AddColumn? right) -> bool
+static DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateIndex.operator !=(DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateIndex? left, DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateIndex? right) -> bool
+static DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateIndex.operator ==(DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateIndex? left, DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateIndex? right) -> bool
+static DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateSequence.operator !=(DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateSequence? left, DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateSequence? right) -> bool
+static DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateSequence.operator ==(DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateSequence? left, DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateSequence? right) -> bool
+static DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateTable.operator !=(DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateTable? left, DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateTable? right) -> bool
+static DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateTable.operator ==(DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateTable? left, DotCelery.Storage.Sql.Migrations.SchemaOperation.CreateTable? right) -> bool
+static DotCelery.Storage.Sql.Migrations.SchemaOperation.ExecuteSql.operator !=(DotCelery.Storage.Sql.Migrations.SchemaOperation.ExecuteSql? left, DotCelery.Storage.Sql.Migrations.SchemaOperation.ExecuteSql? right) -> bool
+static DotCelery.Storage.Sql.Migrations.SchemaOperation.ExecuteSql.operator ==(DotCelery.Storage.Sql.Migrations.SchemaOperation.ExecuteSql? left, DotCelery.Storage.Sql.Migrations.SchemaOperation.ExecuteSql? right) -> bool
+static DotCelery.Storage.Sql.Migrations.SchemaOperation.operator !=(DotCelery.Storage.Sql.Migrations.SchemaOperation? left, DotCelery.Storage.Sql.Migrations.SchemaOperation? right) -> bool
+static DotCelery.Storage.Sql.Migrations.SchemaOperation.operator ==(DotCelery.Storage.Sql.Migrations.SchemaOperation? left, DotCelery.Storage.Sql.Migrations.SchemaOperation? right) -> bool
+static DotCelery.Storage.Sql.Migrations.SqlMigration.operator !=(DotCelery.Storage.Sql.Migrations.SqlMigration? left, DotCelery.Storage.Sql.Migrations.SqlMigration? right) -> bool
+static DotCelery.Storage.Sql.Migrations.SqlMigration.operator ==(DotCelery.Storage.Sql.Migrations.SqlMigration? left, DotCelery.Storage.Sql.Migrations.SqlMigration? right) -> bool
+static DotCelery.Storage.Sql.Schema.SqlColumn.Binary(string! name, bool nullable = false) -> DotCelery.Storage.Sql.Schema.SqlColumn!
+static DotCelery.Storage.Sql.Schema.SqlColumn.Boolean(string! name, bool nullable = false) -> DotCelery.Storage.Sql.Schema.SqlColumn!
+static DotCelery.Storage.Sql.Schema.SqlColumn.Integer32(string! name, bool nullable = false) -> DotCelery.Storage.Sql.Schema.SqlColumn!
+static DotCelery.Storage.Sql.Schema.SqlColumn.Integer64(string! name, bool nullable = false) -> DotCelery.Storage.Sql.Schema.SqlColumn!
+static DotCelery.Storage.Sql.Schema.SqlColumn.operator !=(DotCelery.Storage.Sql.Schema.SqlColumn? left, DotCelery.Storage.Sql.Schema.SqlColumn? right) -> bool
+static DotCelery.Storage.Sql.Schema.SqlColumn.operator ==(DotCelery.Storage.Sql.Schema.SqlColumn? left, DotCelery.Storage.Sql.Schema.SqlColumn? right) -> bool
+static DotCelery.Storage.Sql.Schema.SqlColumn.Text(string! name, int? maxLength = null, bool nullable = false) -> DotCelery.Storage.Sql.Schema.SqlColumn!
+static DotCelery.Storage.Sql.Schema.SqlColumn.Timestamp(string! name, bool nullable = false) -> DotCelery.Storage.Sql.Schema.SqlColumn!
+static DotCelery.Storage.Sql.Schema.SqlColumn.Uuid(string! name, bool nullable = false) -> DotCelery.Storage.Sql.Schema.SqlColumn!
+static DotCelery.Storage.Sql.Schema.SqlIdentifier.IsValid(string? name) -> bool
+static DotCelery.Storage.Sql.Schema.SqlIdentifier.ThrowIfInvalid(string? name, string? paramName = null) -> void
+static DotCelery.Storage.Sql.Schema.SqlIndex.operator !=(DotCelery.Storage.Sql.Schema.SqlIndex? left, DotCelery.Storage.Sql.Schema.SqlIndex? right) -> bool
+static DotCelery.Storage.Sql.Schema.SqlIndex.operator ==(DotCelery.Storage.Sql.Schema.SqlIndex? left, DotCelery.Storage.Sql.Schema.SqlIndex? right) -> bool
+static DotCelery.Storage.Sql.Schema.SqlTable.operator !=(DotCelery.Storage.Sql.Schema.SqlTable? left, DotCelery.Storage.Sql.Schema.SqlTable? right) -> bool
+static DotCelery.Storage.Sql.Schema.SqlTable.operator ==(DotCelery.Storage.Sql.Schema.SqlTable? left, DotCelery.Storage.Sql.Schema.SqlTable? right) -> bool
+static DotCelery.Storage.Sql.Storage.DocumentFilterShape.All.get -> System.Collections.Generic.IEnumerable<DotCelery.Storage.Sql.Storage.DocumentFilterShape>!
+static DotCelery.Storage.Sql.Storage.DocumentFilterShape.Of(DotCelery.Core.Storage.DocumentFilter! filter) -> DotCelery.Storage.Sql.Storage.DocumentFilterShape
+static DotCelery.Storage.Sql.Storage.DocumentFilterShape.operator !=(DotCelery.Storage.Sql.Storage.DocumentFilterShape left, DotCelery.Storage.Sql.Storage.DocumentFilterShape right) -> bool
+static DotCelery.Storage.Sql.Storage.DocumentFilterShape.operator ==(DotCelery.Storage.Sql.Storage.DocumentFilterShape left, DotCelery.Storage.Sql.Storage.DocumentFilterShape right) -> bool
+static DotCelery.Storage.Sql.Storage.DocumentQueryShape.All.get -> System.Collections.Generic.IEnumerable<DotCelery.Storage.Sql.Storage.DocumentQueryShape>!
+static DotCelery.Storage.Sql.Storage.DocumentQueryShape.Of(DotCelery.Core.Storage.DocumentFilter! filter, DotCelery.Core.Storage.DocumentPage? page) -> DotCelery.Storage.Sql.Storage.DocumentQueryShape
+static DotCelery.Storage.Sql.Storage.DocumentQueryShape.operator !=(DotCelery.Storage.Sql.Storage.DocumentQueryShape left, DotCelery.Storage.Sql.Storage.DocumentQueryShape right) -> bool
+static DotCelery.Storage.Sql.Storage.DocumentQueryShape.operator ==(DotCelery.Storage.Sql.Storage.DocumentQueryShape left, DotCelery.Storage.Sql.Storage.DocumentQueryShape right) -> bool
+static DotCelery.Storage.Sql.Storage.SqlStorageSchema.CreateModule(string! connectionString, string! schema) -> DotCelery.Storage.Sql.Migrations.SqlMigrationModule!
+static DotCelery.Storage.Sql.Storage.SqlStorageSchema.Migrations.get -> System.Collections.Generic.IReadOnlyList<DotCelery.Storage.Sql.Migrations.SqlMigration!>!
+virtual DotCelery.Storage.Sql.Migrations.SchemaOperation.EqualityContract.get -> System.Type!
+virtual DotCelery.Storage.Sql.Migrations.SchemaOperation.Equals(DotCelery.Storage.Sql.Migrations.SchemaOperation? other) -> bool
+virtual DotCelery.Storage.Sql.Migrations.SchemaOperation.PrintMembers(System.Text.StringBuilder! builder) -> bool
+virtual DotCelery.Storage.Sql.SqlDialect.RenderAddColumn(string! schema, string! table, DotCelery.Storage.Sql.Schema.SqlColumn! column) -> string!
+virtual DotCelery.Storage.Sql.SqlDialect.RenderColumn(DotCelery.Storage.Sql.Schema.SqlColumn! column) -> string!
+virtual DotCelery.Storage.Sql.SqlDialect.RenderCreateIndex(string! schema, string! table, DotCelery.Storage.Sql.Schema.SqlIndex! index) -> string!
+virtual DotCelery.Storage.Sql.SqlDialect.RenderCreateSchema(string! schema, bool ifNotExists) -> string!
+virtual DotCelery.Storage.Sql.SqlDialect.RenderCreateSequence(string! schema, string! name) -> string!
+virtual DotCelery.Storage.Sql.SqlDialect.RenderCreateTable(string! schema, DotCelery.Storage.Sql.Schema.SqlTable! table, bool ifNotExists) -> string!
+virtual DotCelery.Storage.Sql.SqlDialect.RenderInsertMigration(string! schema, string! historyTable) -> string!
+virtual DotCelery.Storage.Sql.SqlDialect.RenderSelectMigrations(string! schema, string! historyTable) -> string!
+~override DotCelery.Storage.Sql.Storage.DocumentFilterShape.Equals(object obj) -> bool
+~override DotCelery.Storage.Sql.Storage.DocumentFilterShape.ToString() -> string
+~override DotCelery.Storage.Sql.Storage.DocumentQueryShape.Equals(object obj) -> bool
+~override DotCelery.Storage.Sql.Storage.DocumentQueryShape.ToString() -> string
