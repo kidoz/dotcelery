@@ -36,6 +36,7 @@ public sealed class TaskExecutor
     private readonly MultiTenancyOptions? _multiTenancyOptions;
     private readonly WorkerOptions _options;
     private readonly ILogger<TaskExecutor> _logger;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TaskExecutor"/> class.
@@ -53,7 +54,8 @@ public sealed class TaskExecutor
         IRateLimiter? rateLimiter = null,
         TimeLimitEnforcer? timeLimitEnforcer = null,
         IInboxStore? inboxStore = null,
-        IOptions<MultiTenancyOptions>? multiTenancyOptions = null
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
+        TimeProvider? timeProvider = null
     )
     {
         _registry = registry;
@@ -69,6 +71,7 @@ public sealed class TaskExecutor
         _outcomes = OutcomeRecorder.Create(resultBackend, inboxStore);
         _options = options.Value;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
 
         var tenantOptions = multiTenancyOptions?.Value;
         _multiTenancyOptions = tenantOptions is { Enabled: true } ? tenantOptions : null;
@@ -96,7 +99,7 @@ public sealed class TaskExecutor
     )
     {
         var message = brokerMessage.Message;
-        var startTime = DateTimeOffset.UtcNow;
+        var startTime = _timeProvider.GetUtcNow();
 
         using var processActivity = StartProcessActivity(message);
 
@@ -184,7 +187,8 @@ public sealed class TaskExecutor
                 serviceProvider: scope.ServiceProvider,
                 resultBackend: _resultBackend,
                 signalDispatcher: _signalDispatcher,
-                workerName: workerName
+                workerName: workerName,
+                timeProvider: _timeProvider
             );
 
             // Get filters for this task
@@ -197,7 +201,7 @@ public sealed class TaskExecutor
                     {
                         TaskId = message.Id,
                         TaskName = message.Task,
-                        Timestamp = DateTimeOffset.UtcNow,
+                        Timestamp = _timeProvider.GetUtcNow(),
                         Input = input,
                         RetryCount = message.Retries,
                         Worker = workerName,
@@ -229,7 +233,7 @@ public sealed class TaskExecutor
                 {
                     TaskId = message.Id,
                     State = TaskState.Requeued,
-                    CompletedAt = DateTimeOffset.UtcNow,
+                    CompletedAt = _timeProvider.GetUtcNow(),
                     Duration = duration,
                     Retries = message.Retries,
                     Worker = workerName,
@@ -252,7 +256,7 @@ public sealed class TaskExecutor
                         {
                             TaskId = message.Id,
                             TaskName = message.Task,
-                            Timestamp = DateTimeOffset.UtcNow,
+                            Timestamp = _timeProvider.GetUtcNow(),
                             Reason = "Filter requested requeue",
                             Worker = workerName,
                         },
@@ -293,7 +297,7 @@ public sealed class TaskExecutor
                 State = TaskState.Success,
                 Result = result is not null ? _serializer.Serialize(result) : null,
                 ContentType = _serializer.ContentType,
-                CompletedAt = DateTimeOffset.UtcNow,
+                CompletedAt = _timeProvider.GetUtcNow(),
                 Duration = duration,
                 Retries = message.Retries,
                 Worker = workerName,
@@ -314,7 +318,7 @@ public sealed class TaskExecutor
                     {
                         TaskId = message.Id,
                         TaskName = message.Task,
-                        Timestamp = DateTimeOffset.UtcNow,
+                        Timestamp = _timeProvider.GetUtcNow(),
                         Result = result,
                         Duration = duration,
                         Worker = workerName,
@@ -329,7 +333,7 @@ public sealed class TaskExecutor
                     {
                         TaskId = message.Id,
                         TaskName = message.Task,
-                        Timestamp = DateTimeOffset.UtcNow,
+                        Timestamp = _timeProvider.GetUtcNow(),
                         State = TaskState.Success,
                         Duration = duration,
                         Result = result,
@@ -381,8 +385,8 @@ public sealed class TaskExecutor
                 TaskId = message.Id,
                 State = TaskState.Retry,
                 Exception = TaskExceptionInfo.FromException(ex.InnerException ?? ex),
-                CompletedAt = DateTimeOffset.UtcNow,
-                Duration = DateTimeOffset.UtcNow - startTime,
+                CompletedAt = _timeProvider.GetUtcNow(),
+                Duration = _timeProvider.GetUtcNow() - startTime,
                 Retries = message.Retries,
                 Worker = workerName,
                 RetryAfter = ex.Countdown,
@@ -397,7 +401,7 @@ public sealed class TaskExecutor
                     {
                         TaskId = message.Id,
                         TaskName = message.Task,
-                        Timestamp = DateTimeOffset.UtcNow,
+                        Timestamp = _timeProvider.GetUtcNow(),
                         Exception = ex.InnerException ?? ex,
                         RetryCount = message.Retries,
                         Countdown = ex.Countdown,
@@ -413,7 +417,7 @@ public sealed class TaskExecutor
                     {
                         TaskId = message.Id,
                         TaskName = message.Task,
-                        Timestamp = DateTimeOffset.UtcNow,
+                        Timestamp = _timeProvider.GetUtcNow(),
                         State = TaskState.Retry,
                         Duration = taskResult.Duration,
                         Worker = workerName,
@@ -433,8 +437,8 @@ public sealed class TaskExecutor
                 TaskId = message.Id,
                 State = TaskState.Rejected,
                 Exception = TaskExceptionInfo.FromException(ex),
-                CompletedAt = DateTimeOffset.UtcNow,
-                Duration = DateTimeOffset.UtcNow - startTime,
+                CompletedAt = _timeProvider.GetUtcNow(),
+                Duration = _timeProvider.GetUtcNow() - startTime,
                 Retries = message.Retries,
                 Worker = workerName,
             };
@@ -448,7 +452,7 @@ public sealed class TaskExecutor
                     {
                         TaskId = message.Id,
                         TaskName = message.Task,
-                        Timestamp = DateTimeOffset.UtcNow,
+                        Timestamp = _timeProvider.GetUtcNow(),
                         Reason = ex.Message,
                         Worker = workerName,
                     },
@@ -462,7 +466,7 @@ public sealed class TaskExecutor
                     {
                         TaskId = message.Id,
                         TaskName = message.Task,
-                        Timestamp = DateTimeOffset.UtcNow,
+                        Timestamp = _timeProvider.GetUtcNow(),
                         State = TaskState.Rejected,
                         Duration = taskResult.Duration,
                         Worker = workerName,
@@ -482,8 +486,8 @@ public sealed class TaskExecutor
                 TaskId = message.Id,
                 State = TaskState.Failure,
                 Exception = TaskExceptionInfo.FromException(ex),
-                CompletedAt = DateTimeOffset.UtcNow,
-                Duration = DateTimeOffset.UtcNow - startTime,
+                CompletedAt = _timeProvider.GetUtcNow(),
+                Duration = _timeProvider.GetUtcNow() - startTime,
                 Retries = message.Retries,
                 Worker = workerName,
             };
@@ -497,7 +501,7 @@ public sealed class TaskExecutor
                     {
                         TaskId = message.Id,
                         TaskName = message.Task,
-                        Timestamp = DateTimeOffset.UtcNow,
+                        Timestamp = _timeProvider.GetUtcNow(),
                         Exception = ex,
                         RetryCount = message.Retries,
                         Duration = taskResult.Duration,
@@ -513,7 +517,7 @@ public sealed class TaskExecutor
                     {
                         TaskId = message.Id,
                         TaskName = message.Task,
-                        Timestamp = DateTimeOffset.UtcNow,
+                        Timestamp = _timeProvider.GetUtcNow(),
                         State = TaskState.Failure,
                         Duration = taskResult.Duration,
                         Worker = workerName,
@@ -574,7 +578,7 @@ public sealed class TaskExecutor
             TaskId = message.Id,
             State = TaskState.Retry,
             RetryAfter = _options.RateLimitRequeueDelay ?? lease.RetryAfter,
-            CompletedAt = DateTimeOffset.UtcNow,
+            CompletedAt = _timeProvider.GetUtcNow(),
             Duration = TimeSpan.Zero,
             Retries = message.Retries,
             Worker = null,
@@ -594,8 +598,8 @@ public sealed class TaskExecutor
         {
             TaskId = message.Id,
             State = TaskState.Revoked,
-            CompletedAt = DateTimeOffset.UtcNow,
-            Duration = DateTimeOffset.UtcNow - startTime,
+            CompletedAt = _timeProvider.GetUtcNow(),
+            Duration = _timeProvider.GetUtcNow() - startTime,
             Retries = message.Retries,
             Worker = workerName,
         };
@@ -609,7 +613,7 @@ public sealed class TaskExecutor
                 {
                     TaskId = message.Id,
                     TaskName = message.Task,
-                    Timestamp = DateTimeOffset.UtcNow,
+                    Timestamp = _timeProvider.GetUtcNow(),
                     Terminated = terminated,
                     Worker = workerName,
                 },
@@ -623,7 +627,7 @@ public sealed class TaskExecutor
                 {
                     TaskId = message.Id,
                     TaskName = message.Task,
-                    Timestamp = DateTimeOffset.UtcNow,
+                    Timestamp = _timeProvider.GetUtcNow(),
                     State = TaskState.Revoked,
                     Duration = taskResult.Duration,
                     Worker = workerName,

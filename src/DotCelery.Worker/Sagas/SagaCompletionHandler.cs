@@ -20,6 +20,7 @@ public sealed class SagaCompletionHandler
     private readonly ITaskSignalDispatcher _signalDispatcher;
     private readonly SagaOptions _options;
     private readonly ILogger<SagaCompletionHandler> _logger;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SagaCompletionHandler"/> class.
@@ -29,7 +30,8 @@ public sealed class SagaCompletionHandler
         ISagaOrchestrator orchestrator,
         IOptions<SagaOptions> options,
         ILogger<SagaCompletionHandler> logger,
-        ITaskSignalDispatcher? signalDispatcher = null
+        ITaskSignalDispatcher? signalDispatcher = null,
+        TimeProvider? timeProvider = null
     )
     {
         _sagaStore = sagaStore;
@@ -37,6 +39,7 @@ public sealed class SagaCompletionHandler
         _options = options.Value;
         _logger = logger;
         _signalDispatcher = signalDispatcher ?? NullTaskSignalDispatcher.Instance;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -162,7 +165,7 @@ public sealed class SagaCompletionHandler
                     {
                         TaskId = signal.TaskId,
                         TaskName = step.Name,
-                        Timestamp = DateTimeOffset.UtcNow,
+                        Timestamp = _timeProvider.GetUtcNow(),
                         SagaId = saga.Id,
                         StepId = step.Id,
                         StepOrder = step.Order,
@@ -214,7 +217,7 @@ public sealed class SagaCompletionHandler
                     {
                         TaskId = signal.TaskId,
                         TaskName = step.Name,
-                        Timestamp = DateTimeOffset.UtcNow,
+                        Timestamp = _timeProvider.GetUtcNow(),
                         SagaId = saga.Id,
                         StepId = step.Id,
                         StepOrder = step.Order,
@@ -339,7 +342,7 @@ public sealed class SagaCompletionHandler
                     {
                         TaskId = taskId,
                         TaskName = step.Name,
-                        Timestamp = DateTimeOffset.UtcNow,
+                        Timestamp = _timeProvider.GetUtcNow(),
                         SagaId = saga.Id,
                         StepId = step.Id,
                         StepOrder = step.Order,
@@ -396,7 +399,7 @@ public sealed class SagaCompletionHandler
                     {
                         TaskId = taskId,
                         TaskName = step.Name,
-                        Timestamp = DateTimeOffset.UtcNow,
+                        Timestamp = _timeProvider.GetUtcNow(),
                         SagaId = saga.Id,
                         StepId = step.Id,
                         StepOrder = step.Order,

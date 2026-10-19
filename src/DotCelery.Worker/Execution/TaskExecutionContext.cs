@@ -27,7 +27,8 @@ public sealed class TaskExecutionContext : ITaskContext
         IResultBackend resultBackend,
         ITaskSignalDispatcher? signalDispatcher = null,
         string? workerName = null,
-        IEnumerable<Type>? blockedServiceTypes = null
+        IEnumerable<Type>? blockedServiceTypes = null,
+        TimeProvider? timeProvider = null
     )
     {
         Message = message;
@@ -64,7 +65,8 @@ public sealed class TaskExecutionContext : ITaskContext
             TaskName,
             resultBackend,
             signalDispatcher,
-            workerName
+            workerName,
+            timeProvider
         );
     }
 

@@ -21,6 +21,7 @@ public sealed class SagaOrchestrator : ISagaOrchestrator
     private readonly ITaskSignalDispatcher _signalDispatcher;
     private readonly SagaOptions _options;
     private readonly ILogger<SagaOrchestrator> _logger;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SagaOrchestrator"/> class.
@@ -32,7 +33,8 @@ public sealed class SagaOrchestrator : ISagaOrchestrator
         IResultBackend backend,
         IOptions<SagaOptions> options,
         ILogger<SagaOrchestrator> logger,
-        ITaskSignalDispatcher? signalDispatcher = null
+        ITaskSignalDispatcher? signalDispatcher = null,
+        TimeProvider? timeProvider = null
     )
     {
         _sagaStore = sagaStore;
@@ -42,6 +44,7 @@ public sealed class SagaOrchestrator : ISagaOrchestrator
         _options = options.Value;
         _logger = logger;
         _signalDispatcher = signalDispatcher ?? NullTaskSignalDispatcher.Instance;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -55,7 +58,7 @@ public sealed class SagaOrchestrator : ISagaOrchestrator
         {
             Id = string.IsNullOrEmpty(saga.Id) ? Guid.NewGuid().ToString() : saga.Id,
             State = SagaState.Executing,
-            StartedAt = DateTimeOffset.UtcNow,
+            StartedAt = _timeProvider.GetUtcNow(),
             CurrentStepIndex = 0,
         };
 
@@ -77,7 +80,7 @@ public sealed class SagaOrchestrator : ISagaOrchestrator
                     {
                         TaskId = newSaga.Id,
                         TaskName = newSaga.Name,
-                        Timestamp = DateTimeOffset.UtcNow,
+                        Timestamp = _timeProvider.GetUtcNow(),
                         OldState = SagaState.Created,
                         NewState = SagaState.Executing,
                         CurrentStepIndex = 0,
@@ -131,7 +134,7 @@ public sealed class SagaOrchestrator : ISagaOrchestrator
                         {
                             TaskId = sagaId,
                             TaskName = updatedSaga.Name,
-                            Timestamp = DateTimeOffset.UtcNow,
+                            Timestamp = _timeProvider.GetUtcNow(),
                             OldState = SagaState.Executing,
                             NewState = updatedSaga.State,
                             CurrentStepIndex = updatedSaga.CurrentStepIndex,
@@ -204,7 +207,7 @@ public sealed class SagaOrchestrator : ISagaOrchestrator
                     {
                         TaskId = sagaId,
                         TaskName = saga.Name,
-                        Timestamp = DateTimeOffset.UtcNow,
+                        Timestamp = _timeProvider.GetUtcNow(),
                         Reason = reason,
                         StepsToCompensate = saga.StepsToCompensate.Count,
                     },
@@ -218,7 +221,7 @@ public sealed class SagaOrchestrator : ISagaOrchestrator
                     {
                         TaskId = sagaId,
                         TaskName = saga.Name,
-                        Timestamp = DateTimeOffset.UtcNow,
+                        Timestamp = _timeProvider.GetUtcNow(),
                         OldState = oldState,
                         NewState = SagaState.Compensating,
                         Reason = reason,
@@ -332,7 +335,7 @@ public sealed class SagaOrchestrator : ISagaOrchestrator
                     {
                         TaskId = sagaId,
                         TaskName = saga.Name,
-                        Timestamp = DateTimeOffset.UtcNow,
+                        Timestamp = _timeProvider.GetUtcNow(),
                         OldState = oldState,
                         NewState = SagaState.Cancelled,
                         Reason = reason,
@@ -429,7 +432,7 @@ public sealed class SagaOrchestrator : ISagaOrchestrator
                         {
                             TaskId = saga.Id,
                             TaskName = saga.Name,
-                            Timestamp = DateTimeOffset.UtcNow,
+                            Timestamp = _timeProvider.GetUtcNow(),
                             OldState = SagaState.Compensating,
                             NewState = newState,
                             CurrentStepIndex = saga.CurrentStepIndex,
@@ -495,7 +498,7 @@ public sealed class SagaOrchestrator : ISagaOrchestrator
         var eta = signature.Eta;
         if (signature.Countdown.HasValue)
         {
-            eta = DateTimeOffset.UtcNow.Add(signature.Countdown.Value);
+            eta = _timeProvider.GetUtcNow().Add(signature.Countdown.Value);
         }
 
         var message = new TaskMessage
@@ -504,7 +507,7 @@ public sealed class SagaOrchestrator : ISagaOrchestrator
             Task = signature.TaskName,
             Args = signature.Args ?? [],
             ContentType = _serializer.ContentType,
-            Timestamp = DateTimeOffset.UtcNow,
+            Timestamp = _timeProvider.GetUtcNow(),
             Eta = eta,
             Expires = signature.Expires,
             MaxRetries = signature.MaxRetries,

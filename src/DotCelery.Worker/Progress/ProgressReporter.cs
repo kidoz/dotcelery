@@ -16,6 +16,7 @@ public sealed class ProgressReporter : IProgressReporter
     private readonly IResultBackend _resultBackend;
     private readonly ITaskSignalDispatcher? _signalDispatcher;
     private readonly string? _workerName;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ProgressReporter"/> class.
@@ -25,7 +26,8 @@ public sealed class ProgressReporter : IProgressReporter
         string taskName,
         IResultBackend resultBackend,
         ITaskSignalDispatcher? signalDispatcher = null,
-        string? workerName = null
+        string? workerName = null,
+        TimeProvider? timeProvider = null
     )
     {
         _taskId = taskId;
@@ -33,6 +35,7 @@ public sealed class ProgressReporter : IProgressReporter
         _resultBackend = resultBackend;
         _signalDispatcher = signalDispatcher;
         _workerName = workerName;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -48,7 +51,7 @@ public sealed class ProgressReporter : IProgressReporter
             Percentage = Math.Clamp(percentage, 0, 100),
             Message = message,
             Data = data,
-            Timestamp = DateTimeOffset.UtcNow,
+            Timestamp = _timeProvider.GetUtcNow(),
         };
 
         await ReportAsync(progress, cancellationToken).ConfigureAwait(false);
@@ -106,7 +109,7 @@ public sealed class ProgressReporter : IProgressReporter
             Message = message,
             ItemsProcessed = itemsProcessed,
             TotalItems = totalItems,
-            Timestamp = DateTimeOffset.UtcNow,
+            Timestamp = _timeProvider.GetUtcNow(),
         };
 
         return ReportAsync(progress, cancellationToken);
@@ -127,7 +130,7 @@ public sealed class ProgressReporter : IProgressReporter
             Percentage = Math.Clamp(percentage, 0, 100),
             Message = stepName,
             CurrentStep = $"{currentStep} of {totalSteps}",
-            Timestamp = DateTimeOffset.UtcNow,
+            Timestamp = _timeProvider.GetUtcNow(),
         };
 
         return ReportAsync(progress, cancellationToken);
