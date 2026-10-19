@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.DeadLetter;
 using DotCelery.Core.Extensions;
@@ -126,7 +127,9 @@ public static class WorkerServiceCollectionExtensions
     /// <typeparam name="TFilter">The filter type.</typeparam>
     /// <param name="builder">The DotCelery builder.</param>
     /// <returns>The builder.</returns>
-    public static DotCeleryBuilder AddTaskFilter<TFilter>(this DotCeleryBuilder builder)
+    public static DotCeleryBuilder AddTaskFilter<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TFilter
+    >(this DotCeleryBuilder builder)
         where TFilter : class
     {
         // Register filter type for DI
@@ -147,7 +150,11 @@ public static class WorkerServiceCollectionExtensions
     /// <param name="builder">The DotCelery builder.</param>
     /// <param name="filterType">The filter type.</param>
     /// <returns>The builder.</returns>
-    public static DotCeleryBuilder AddTaskFilter(this DotCeleryBuilder builder, Type filterType)
+    public static DotCeleryBuilder AddTaskFilter(
+        this DotCeleryBuilder builder,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
+            Type filterType
+    )
     {
         // Register filter type for DI
         builder.Services.AddScoped(filterType);
@@ -184,9 +191,10 @@ public static class WorkerServiceCollectionExtensions
     /// <typeparam name="THandler">The handler implementation type.</typeparam>
     /// <param name="builder">The DotCelery builder.</param>
     /// <returns>The builder.</returns>
-    public static DotCeleryBuilder AddSignalHandler<TSignal, THandler>(
-        this DotCeleryBuilder builder
-    )
+    public static DotCeleryBuilder AddSignalHandler<
+        TSignal,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] THandler
+    >(this DotCeleryBuilder builder)
         where TSignal : ITaskSignal
         where THandler : class, ITaskSignalHandler<TSignal>
     {
@@ -335,10 +343,9 @@ public static class WorkerServiceCollectionExtensions
     /// <param name="builder">The DotCelery builder.</param>
     /// <param name="configure">Optional configuration action.</param>
     /// <returns>The builder.</returns>
-    public static DotCeleryBuilder UseOutbox<TOutboxStore>(
-        this DotCeleryBuilder builder,
-        Action<OutboxOptions>? configure = null
-    )
+    public static DotCeleryBuilder UseOutbox<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TOutboxStore
+    >(this DotCeleryBuilder builder, Action<OutboxOptions>? configure = null)
         where TOutboxStore : class, IOutboxStore
     {
         builder.Services.Configure<OutboxOptions>(configure ?? (_ => { }));
@@ -355,10 +362,9 @@ public static class WorkerServiceCollectionExtensions
     /// <param name="builder">The DotCelery builder.</param>
     /// <param name="configure">Optional configuration action.</param>
     /// <returns>The builder.</returns>
-    public static DotCeleryBuilder UseInbox<TInboxStore>(
-        this DotCeleryBuilder builder,
-        Action<InboxOptions>? configure = null
-    )
+    public static DotCeleryBuilder UseInbox<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TInboxStore
+    >(this DotCeleryBuilder builder, Action<InboxOptions>? configure = null)
         where TInboxStore : class, IInboxStore
     {
         builder.Services.Configure<InboxOptions>(configure ?? (_ => { }));
