@@ -6,7 +6,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DotCelery.Core\DotCelery.Core.csproj" />
-    <ProjectReference Include="..\DotCelery.Client\DotCelery.Client.csproj" />
     <ProjectReference Include="..\DotCelery.Cron\DotCelery.Cron.csproj" />
   </ItemGroup>
 
