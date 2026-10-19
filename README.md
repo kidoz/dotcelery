@@ -44,10 +44,28 @@ See [ROADMAP.md](ROADMAP.md) for known gaps in the features above and for planne
 dotnet add package DotCelery.Core
 dotnet add package DotCelery.Client
 dotnet add package DotCelery.Worker
+dotnet add package DotCelery.Analyzers
 dotnet add package DotCelery.Broker.RabbitMQ
-dotnet add package DotCelery.Broker.Sqs
 dotnet add package DotCelery.Backend.Redis
 ```
+
+`DotCelery.Analyzers` supplies the source generator: it registers the tasks an assembly defines
+(`RegisterTasks()`) and attaches the typed invokers, so no task is invoked through expression
+compilation. It is optional — without it, register tasks by hand with `AddTask<TTask>()` or scan
+with `AddTasksFromAssembly`, and the worker falls back to the compiled invoker.
+
+| Package | Purpose |
+|---------|---------|
+| `DotCelery.Core` | Abstractions, models, canvas, storage stores, JSON serialization |
+| `DotCelery.Client` | Sending tasks and canvas workflows |
+| `DotCelery.Worker` | Worker, execution, filters, sagas, batches, outbox/inbox |
+| `DotCelery.Analyzers` | Duplicate-name analysis and the source-generated registration and invokers |
+| `DotCelery.Broker.InMemory`, `.RabbitMQ`, `.Redis`, `.Sqs` | Message brokers |
+| `DotCelery.Backend.InMemory`, `.Redis`, `.Postgres`, `.SqlServer`, `.Mongo` | Result backends and their storage stores |
+| `DotCelery.Storage.Sql` | SQL schema, migrations, and the SQL storage dialect shared by the SQL providers |
+| `DotCelery.Beat`, `DotCelery.Cron` | Periodic scheduling and cron expressions |
+| `DotCelery.Dashboard` | Monitoring API, SignalR hub, and UI |
+| `DotCelery.Telemetry` | OpenTelemetry metrics and tracing |
 
 ### Local Redis/Postgres Example
 
