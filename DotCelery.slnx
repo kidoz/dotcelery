@@ -28,6 +28,7 @@
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/DotCelery.AotSmoke/DotCelery.AotSmoke.csproj" />
+    <Project Path="samples/DotCelery.CanvasExample/DotCelery.CanvasExample.csproj" />
     <Project Path="samples/DotCelery.Demo/DotCelery.Demo.csproj" />
     <Project Path="samples/DotCelery.Dashboard.Demo/DotCelery.Dashboard.Demo.csproj" />
     <Project Path="samples/DotCelery.RedisPostgresExample/DotCelery.RedisPostgresExample.csproj" />

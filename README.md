@@ -67,6 +67,15 @@ with `AddTasksFromAssembly`, and the worker falls back to the compiled invoker.
 | `DotCelery.Dashboard` | Monitoring API, SignalR hub, and UI |
 | `DotCelery.Telemetry` | OpenTelemetry metrics and tracing |
 
+### Canvas Workflow Example
+
+The repository includes a runnable sample that sends a chain, a group, a chord with a callback, and
+a nested canvas over the in-memory transport, checking every result:
+
+```bash
+dotnet run --project samples/DotCelery.CanvasExample
+```
+
 ### Local Redis/Postgres Example
 
 The repository includes a runnable sample that uses Redis Streams as the broker and PostgreSQL as the default result backend:
@@ -788,7 +797,7 @@ dotcelery/
 │   ├── DotCelery.Tests.Integration/ # Integration tests (Testcontainers)
 │   ├── DotCelery.Tests.Conformance/ # Tests that every storage provider runs
 │   └── DotCelery.Analyzers.Tests/   # Analyzer tests
-├── samples/                         # Demo, dashboard demo, Redis/PostgreSQL example
+├── samples/                         # Demo, dashboard demo, canvas example, Redis/PostgreSQL example
 └── benchmarks/                      # BenchmarkDotNet benchmarks
 ```
 

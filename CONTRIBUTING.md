@@ -96,6 +96,7 @@ dotcelery/
 │   └── DotCelery.Tests.Conformance/ # Shared conformance suites, referenced by the test projects
 ├── samples/
 │   ├── DotCelery.Demo/              # Minimal worker and client example
+│   ├── DotCelery.CanvasExample/     # Chain, group, and chord workflows
 │   ├── DotCelery.Dashboard.Demo/    # Dashboard example
 │   ├── DotCelery.RedisPostgresExample/ # Redis broker with a PostgreSQL backend
 │   └── DotCelery.AotSmoke/          # Native AOT smoke test

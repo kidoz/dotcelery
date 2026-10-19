@@ -57,6 +57,10 @@ install-tools:
 run-demo:
     dotnet run --project samples/DotCelery.Demo
 
+# Run the canvas workflow example
+run-canvas-example:
+    dotnet run --project samples/DotCelery.CanvasExample
+
 # Publish the Native AOT smoke test for the host platform and run it
 aot-smoke:
     #!/usr/bin/env bash
