@@ -178,16 +178,15 @@ public sealed class CanvasClientTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task SendGroupAsync_WithAChordMember_IsRefused()
+    public void Group_WithAChordMember_IsRefusedAtConstruction()
     {
-        var client = CreateClient();
         var nestedChord = new Group(new Signature { TaskName = "inner.task" }).WithCallback(
             new Signature { TaskName = "inner.callback" }
         );
 
-        await Assert.ThrowsAsync<NotSupportedException>(async () =>
-            await client.SendGroupAsync(new Group(nestedChord))
-        );
+        // The client's defensive rejection never runs for a group built through the public API:
+        // the group itself cannot be constructed with a chord member
+        Assert.Throws<ArgumentException>(() => new Group(nestedChord));
     }
 
     [Fact]

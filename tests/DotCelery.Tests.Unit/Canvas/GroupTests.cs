@@ -53,6 +53,48 @@ public class GroupTests
     }
 
     [Fact]
+    public void Group_WithChordMember_ThrowsArgumentException()
+    {
+        var chord = new Group([new Signature { TaskName = "task1" }]).WithCallback(
+            new Signature { TaskName = "callback" }
+        );
+
+        Assert.Throws<ArgumentException>(() => new Group(chord));
+    }
+
+    [Fact]
+    public void Group_FromPrimitives_WithChordMember_ThrowsArgumentException()
+    {
+        var chord = new Group([new Signature { TaskName = "task1" }]).WithCallback(
+            new Signature { TaskName = "callback" }
+        );
+        CanvasPrimitive[] members = [new Signature { TaskName = "task2" }, chord];
+
+        Assert.Throws<ArgumentException>(() => new Group((IEnumerable<CanvasPrimitive>)members));
+    }
+
+    [Fact]
+    public void Group_And_WithChordMember_ThrowsArgumentException()
+    {
+        var group = new Group([new Signature { TaskName = "task1" }]);
+        var chord = new Group([new Signature { TaskName = "task2" }]).WithCallback(
+            new Signature { TaskName = "callback" }
+        );
+
+        Assert.Throws<ArgumentException>(() => group.And(chord));
+    }
+
+    [Fact]
+    public void Group_WithNestedGroup_StillConstructs()
+    {
+        var nested = new Group([new Signature { TaskName = "nested" }]);
+
+        var group = new Group([new Signature { TaskName = "task1" }, nested]);
+
+        Assert.Equal(2, group.Count);
+    }
+
+    [Fact]
     public void Group_And_Signature_AddsToGroup()
     {
         var sig1 = new Signature { TaskName = "task1" };

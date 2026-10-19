@@ -6,7 +6,9 @@ namespace DotCelery.Core.Canvas;
 /// </summary>
 /// <remarks>
 /// A member is any canvas primitive: a signature, a chain, or another group. A nested group
-/// is flattened into its members by the client that sends the canvas.
+/// is flattened into its members by the client that sends the canvas. A chord is rejected,
+/// because it carries its own completion callback; send it separately, or make this group the
+/// chord's header.
 /// </remarks>
 public sealed class Group : CanvasPrimitive
 {
@@ -28,6 +30,11 @@ public sealed class Group : CanvasPrimitive
                 nameof(primitives)
             );
         }
+
+        foreach (var member in _members)
+        {
+            ThrowIfChord(member, nameof(primitives));
+        }
     }
 
     /// <summary>
@@ -45,6 +52,11 @@ public sealed class Group : CanvasPrimitive
         }
 
         _members = [.. primitives];
+
+        foreach (var member in _members)
+        {
+            ThrowIfChord(member, nameof(primitives));
+        }
     }
 
     /// <summary>
@@ -80,8 +92,21 @@ public sealed class Group : CanvasPrimitive
     public Group And(CanvasPrimitive primitive)
     {
         ArgumentNullException.ThrowIfNull(primitive);
+        ThrowIfChord(primitive, nameof(primitive));
         _members.Add(primitive);
         return this;
+    }
+
+    private static void ThrowIfChord(CanvasPrimitive primitive, string paramName)
+    {
+        if (primitive.Type == CanvasType.Chord)
+        {
+            throw new ArgumentException(
+                "A chord cannot be a member of a group, because it carries its own completion "
+                    + "callback. Send the chord separately, or make this group the chord's header.",
+                paramName
+            );
+        }
     }
 
     /// <summary>
