@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Serialization;
 using DotCelery.Core.Storage;
@@ -93,7 +94,9 @@ public sealed class DotCeleryBuilder
     /// </summary>
     /// <typeparam name="TBroker">The broker type.</typeparam>
     /// <returns>The builder.</returns>
-    public DotCeleryBuilder UseBroker<TBroker>()
+    public DotCeleryBuilder UseBroker<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TBroker
+    >()
         where TBroker : class, IMessageBroker
     {
         Services.AddSingleton<IMessageBroker, TBroker>();
@@ -118,7 +121,9 @@ public sealed class DotCeleryBuilder
     /// </summary>
     /// <typeparam name="TBackend">The backend type.</typeparam>
     /// <returns>The builder.</returns>
-    public DotCeleryBuilder UseBackend<TBackend>()
+    public DotCeleryBuilder UseBackend<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TBackend
+    >()
         where TBackend : class, IResultBackend
     {
         Services.AddSingleton<IResultBackend, TBackend>();
@@ -143,7 +148,9 @@ public sealed class DotCeleryBuilder
     /// </summary>
     /// <typeparam name="TSerializer">The serializer type.</typeparam>
     /// <returns>The builder.</returns>
-    public DotCeleryBuilder UseSerializer<TSerializer>()
+    public DotCeleryBuilder UseSerializer<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TSerializer
+    >()
         where TSerializer : class, IMessageSerializer
     {
         // Remove default serializer and add custom one
@@ -165,7 +172,13 @@ public sealed class DotCeleryBuilder
     /// <exception cref="InvalidOperationException">
     /// Thrown when the task type's static <see cref="ITask.TaskName"/> is null or empty.
     /// </exception>
-    public DotCeleryBuilder AddTask<TTask>()
+    public DotCeleryBuilder AddTask<
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes.PublicConstructors
+                | DynamicallyAccessedMemberTypes.Interfaces
+        )]
+            TTask
+    >()
         where TTask : class, ITask
     {
         if (string.IsNullOrEmpty(TTask.TaskName))
@@ -191,7 +204,13 @@ public sealed class DotCeleryBuilder
     /// <param name="taskName">The name the task routes by.</param>
     /// <param name="invoker">The typed adapter that invokes the task, when one was generated.</param>
     /// <returns>The builder.</returns>
-    public DotCeleryBuilder AddTask<TTask>(string taskName, ITaskInvoker? invoker = null)
+    public DotCeleryBuilder AddTask<
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes.PublicConstructors
+                | DynamicallyAccessedMemberTypes.Interfaces
+        )]
+            TTask
+    >(string taskName, ITaskInvoker? invoker = null)
         where TTask : class, ITask
     {
         ArgumentException.ThrowIfNullOrEmpty(taskName);
