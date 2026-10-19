@@ -351,8 +351,10 @@ public static class WorkerServiceCollectionExtensions
 
     /// <summary>
     /// Adds transactional outbox functionality to the worker.
-    /// The outbox pattern ensures exactly-once message delivery by storing messages
-    /// in the same transaction as the business operation.
+    /// Messages are stored in the same transaction as the business operation, so the write
+    /// is atomic with it; the outbox dispatcher then publishes stored messages
+    /// asynchronously. Dispatch is at-least-once: a message can be delivered again if the
+    /// dispatcher stops before marking it published, so consumers must tolerate duplicates.
     /// </summary>
     /// <typeparam name="TOutboxStore">The outbox store implementation type.</typeparam>
     /// <param name="builder">The DotCelery builder.</param>
