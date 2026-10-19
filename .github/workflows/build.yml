@@ -54,4 +54,5 @@ jobs:
       - name: Test
         run: |
           dotnet test tests/DotCelery.Tests.Unit --configuration Release --no-build
+          dotnet test tests/DotCelery.Tests.Generated --configuration Release --no-build
           dotnet test tests/DotCelery.Analyzers.Tests --configuration Release --no-build
