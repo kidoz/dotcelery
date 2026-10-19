@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-19
+
 ### Added
 - `WorkerOptions.InfrastructureFailureRequeueDelay` sets how long the worker waits before returning a message to the broker after an infrastructure failure
 - `DotCelery.Storage.Sql`: tables, columns, indexes, and sequences defined in code; migrations as schema operations; and `SqlMigrator`, which applies versioned migrations when the host starts, under a database lock, and records them with checksums of their operations in a `dotcelery_migrations` table. SQL text lives only in each database's dialect
@@ -215,5 +217,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Requires .NET 10.0 and C# 14
 - First public release
 
-[Unreleased]: https://github.com/kidoz/dotcelery/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/kidoz/dotcelery/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/kidoz/dotcelery/releases/tag/v1.0.0
 [0.1.0]: https://github.com/kidoz/dotcelery/releases/tag/v0.1.0
