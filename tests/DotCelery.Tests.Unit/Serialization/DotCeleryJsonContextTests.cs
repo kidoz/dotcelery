@@ -96,8 +96,6 @@ public class DotCeleryJsonContextTests
     [InlineData(typeof(TaskPreRunSignal))]
     [InlineData(typeof(TaskPostRunSignal))]
     [InlineData(typeof(TaskSuccessSignal))]
-    [InlineData(typeof(TaskFailureSignal))]
-    [InlineData(typeof(TaskRetrySignal))]
     [InlineData(typeof(TaskRevokedSignal))]
     [InlineData(typeof(TaskRejectedSignal))]
     public void GetTypeInfo_SignalTypes_ReturnsTypeInfo(Type type)
@@ -106,6 +104,17 @@ public class DotCeleryJsonContextTests
 
         Assert.NotNull(typeInfo);
         Assert.Equal(type, typeInfo.Type);
+    }
+
+    [Theory]
+    [InlineData(typeof(TaskFailureSignal))]
+    [InlineData(typeof(TaskRetrySignal))]
+    public void GetTypeInfo_SignalsCarryingAnException_AreNotInTheContext(Type type)
+    {
+        // The generator cannot produce metadata for Exception without reflecting over the
+        // exception's runtime members, which a Native AOT application cannot do; a queued signal
+        // payload is serialized polymorphically by SignalMessage instead
+        Assert.Null(DotCeleryJsonContext.Default.GetTypeInfo(type));
     }
 
     [Theory]

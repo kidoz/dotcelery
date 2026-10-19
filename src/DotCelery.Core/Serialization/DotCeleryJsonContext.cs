@@ -48,8 +48,6 @@ namespace DotCelery.Core.Serialization;
 [JsonSerializable(typeof(TaskPreRunSignal))]
 [JsonSerializable(typeof(TaskPostRunSignal))]
 [JsonSerializable(typeof(TaskSuccessSignal))]
-[JsonSerializable(typeof(TaskFailureSignal))]
-[JsonSerializable(typeof(TaskRetrySignal))]
 [JsonSerializable(typeof(TaskRevokedSignal))]
 [JsonSerializable(typeof(TaskRejectedSignal))]
 // Saga Types
