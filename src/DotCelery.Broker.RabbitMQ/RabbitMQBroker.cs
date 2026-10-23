@@ -30,8 +30,10 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly SemaphoreSlim _publishChannelLock = new(1, 1);
 
-    // The channel a message arrived on, so it is settled on that channel and no other
-    private readonly ConcurrentDictionary<BrokerMessage, ConsumerChannel> _deliveries = new();
+    // The channel a message arrived on, so it is settled on that channel and no other. The key
+    // is the delivery's identity, not the instance, because a caller may settle an equivalent
+    // copy, for example one with an ETA attached before a requeue.
+    private readonly ConcurrentDictionary<DeliveryKey, ConsumerChannel> _deliveries = new();
 
     // AOT-friendly type info for TaskMessage serialization
     private static JsonTypeInfo<TaskMessage> TaskMessageTypeInfo =>
@@ -409,7 +411,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
                 };
 
                 consumerChannel.Track(ea.DeliveryTag, brokerMessage);
-                _deliveries[brokerMessage] = consumerChannel;
+                _deliveries[KeyOf(brokerMessage)] = consumerChannel;
 
                 await writer.WriteAsync(brokerMessage, cancellationToken).ConfigureAwait(false);
             }
@@ -428,7 +430,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
                         .RejectReceivedAsync(ea.DeliveryTag, requeue: true, cancellationToken)
                         .ConfigureAwait(false);
                     if (brokerMessage is not null)
-                        _deliveries.TryRemove(brokerMessage, out _);
+                        _deliveries.TryRemove(KeyOf(brokerMessage), out _);
                 }
                 catch (Exception rejectEx)
                 {
@@ -475,7 +477,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
     {
         foreach (var message in consumerChannel.ForgetInFlight())
         {
-            _deliveries.TryRemove(message, out _);
+            _deliveries.TryRemove(KeyOf(message), out _);
         }
     }
 
@@ -495,7 +497,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
 
         var consumerChannel = RequireDeliveringChannel(message, "acknowledged");
         await consumerChannel.AckAsync(deliveryTag, cancellationToken).ConfigureAwait(false);
-        _deliveries.TryRemove(message, out _);
+        _deliveries.TryRemove(KeyOf(message), out _);
 
         _logger.LogDebug("Acknowledged message {MessageId}", message.Message.Id);
     }
@@ -519,7 +521,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
         await consumerChannel
             .RejectAsync(deliveryTag, requeue, cancellationToken)
             .ConfigureAwait(false);
-        _deliveries.TryRemove(message, out _);
+        _deliveries.TryRemove(KeyOf(message), out _);
 
         _logger.LogDebug(
             "Rejected message {MessageId} (requeue: {Requeue})",
@@ -679,7 +681,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
     // channel-local, so another channel's tag of the same value means another message
     private ConsumerChannel RequireDeliveringChannel(BrokerMessage message, string action)
     {
-        if (!_deliveries.TryGetValue(message, out var consumerChannel))
+        if (!_deliveries.TryGetValue(KeyOf(message), out var consumerChannel))
         {
             throw new InvalidOperationException(
                 $"Message {message.Message.Id} cannot be {action}: it was settled already, or its "
@@ -833,6 +835,13 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
             .RejectReceivedAsync(ea.DeliveryTag, requeue: false, cancellationToken)
             .ConfigureAwait(false);
     }
+
+    private static DeliveryKey KeyOf(BrokerMessage message) =>
+        new((ulong)message.DeliveryTag, message.Message.Id, message.Queue);
+
+    // A delivery is identified by its channel-local tag and the message it carries, so an
+    // equivalent copy of the delivered message settles the same delivery
+    private readonly record struct DeliveryKey(ulong DeliveryTag, string MessageId, string Queue);
 
     private static string? GetSignature(IReadOnlyBasicProperties? properties)
     {
