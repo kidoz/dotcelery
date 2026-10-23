@@ -16,3 +16,7 @@ export function stateLabel(state: string): string {
   if (state === "Failure") return "Failed";
   return state;
 }
+
+export function isTerminalTaskState(state: string): boolean {
+  return ["Revoked", "Success", "Failure", "Rejected"].includes(state);
+}

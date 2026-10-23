@@ -7,6 +7,7 @@ import type { RequestKey } from "../data/requestPlan.ts";
 import type { Route } from "../routing.ts";
 import type { Capabilities, Overview } from "../../shared/api/contracts.ts";
 import type { DashboardData } from "../../shared/model/dashboardData.ts";
+import { taskFilterKey } from "../../shared/model/filters.ts";
 
 export function useDashboard(
   api: string,
@@ -86,6 +87,8 @@ export function useDashboard(
             lastRead.current[job.key] = Date.now();
             failures.delete(job.key);
             const patch = { [job.key]: value } as Partial<DashboardData>;
+            if (job.key === "tasks")
+              patch.tasksFilterKey = taskFilterKey(filters);
             // The overview response already includes queue gauges; avoid a duplicate request.
             if (job.key === "overview") {
               patch.queues = (value as Overview).queues;

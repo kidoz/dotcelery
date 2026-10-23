@@ -472,3 +472,202 @@ test("cancellation previews retain cooperative semantics and report acceptance",
       .filter({ hasText: "1 cancellation request accepted." }),
   ).toBeVisible();
 });
+
+for (const openAnotherAction of [false, true]) {
+  test(`late mutation completion preserves ${openAnotherAction ? "a newer action dialog" : "the browser Back destination"}`, async ({
+    page,
+  }) => {
+    await fixture(page);
+    let markSubmitted = () => {};
+    const submitted = new Promise<void>((resolve) => {
+      markSubmitted = resolve;
+    });
+    let releaseMutation = () => {};
+    const mutationGate = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+    await page.route(`**${prefix}/api/v1/tasks/bulk/retry`, async (route) => {
+      markSubmitted();
+      await mutationGate;
+      await route.fulfill({ json: { successCount: 1, failureCount: 0 } });
+    });
+    try {
+      await page.goto(`${prefix}/?view=overview`);
+      await page
+        .getByRole("navigation")
+        .getByRole("link", { name: /^Tasks/ })
+        .click();
+      await page.getByLabel("Select all tasks on this page").check();
+      await page.getByRole("button", { name: "Retry selected" }).click();
+      await page
+        .getByRole("button", { name: "Retry 1 task", exact: true })
+        .click();
+      await submitted;
+      await page.goBack();
+      await expect(
+        page.getByRole("heading", { name: "Execution overview" }),
+      ).toBeVisible();
+      if (openAnotherAction) {
+        await page
+          .getByRole("navigation")
+          .getByRole("link", { name: /^Tasks/ })
+          .click();
+        await page.getByLabel("Select all tasks on this page").check();
+        await page.getByRole("button", { name: "Retry selected" }).click();
+        await expect(
+          page.getByRole("dialog", { name: "Retry tasks" }),
+        ).toContainText("1 of 1");
+      }
+      const destination = page.url();
+      releaseMutation();
+      // The submitted POST still finishes and reports its result after the old dialog unmounts.
+      await expect(
+        page.getByRole("status").filter({ hasText: "1 task requeued." }),
+      ).toBeAttached();
+      await expect(page).toHaveURL(destination);
+      if (openAnotherAction) {
+        await expect(
+          page.getByRole("dialog", { name: "Retry tasks" }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole("button", { name: "Retry 1 task", exact: true }),
+        ).toBeEnabled();
+      } else {
+        await expect(
+          page.getByRole("heading", { name: "Execution overview" }),
+        ).toBeVisible();
+        await expect(page.getByRole("dialog")).toHaveCount(0);
+      }
+    } finally {
+      releaseMutation();
+    }
+  });
+}
+
+test("changed filters hide old actionable rows until their own results arrive", async ({
+  page,
+}) => {
+  await fixture(page);
+  let markRequested = () => {};
+  const requested = new Promise<void>((resolve) => {
+    markRequested = resolve;
+  });
+  let releaseQuery = () => {};
+  const queryGate = new Promise<void>((resolve) => {
+    releaseQuery = resolve;
+  });
+  await page.route(`**${prefix}/api/v1/tasks/search?**`, async (route) => {
+    if (
+      new URL(route.request().url()).searchParams.get("state") !== "Started"
+    ) {
+      await route.fallback();
+      return;
+    }
+    markRequested();
+    await queryGate;
+    await route.fulfill({
+      json: {
+        tasks: [
+          {
+            ...task,
+            taskId: "task-new",
+            taskName: "new-task",
+            state: "Started",
+          },
+        ],
+        page: 1,
+        pageSize: 17,
+        hasMore: false,
+      },
+    });
+  });
+  try {
+    await page.goto(`${prefix}/?view=tasks`);
+    await expect(
+      page.getByLabel(`Select ${task.taskName} ${task.taskId}`, {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await page
+      .getByRole("combobox", { name: "State", exact: true })
+      .selectOption("Started");
+    await requested;
+    await expect(page).toHaveURL(/state=Started/);
+    await expect(
+      page.getByLabel(`Select ${task.taskName} ${task.taskId}`, {
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByLabel("Select all tasks on this page"),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "Retry selected" }),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Loading tasks…" }),
+    ).toBeVisible();
+    releaseQuery();
+    await expect(
+      page.getByRole("link", { name: "new-task", exact: true }),
+    ).toBeVisible();
+    await page.getByLabel("Select new-task task-new", { exact: true }).check();
+    await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
+  } finally {
+    releaseQuery();
+  }
+});
+
+test("cancellation details stop claiming a pending request after a terminal outcome", async ({
+  page,
+}) => {
+  await fixture(page);
+  let outcome = "Started";
+  await page.route(`**${prefix}/api/v1/tasks/${task.taskId}`, (route) =>
+    route.fulfill({ json: { ...task, state: outcome } }),
+  );
+  await page.route(`**${prefix}/api/v1/tasks/actions/preview`, (route) =>
+    route.fulfill({
+      json: {
+        cancelTaskIds: outcome === "Started" ? [task.taskId] : [],
+        retryTaskIds: [],
+      },
+    }),
+  );
+  await page.route(`**${prefix}/api/v1/tasks/bulk/revoke`, (route) =>
+    route.fulfill({ json: { successCount: 1, failureCount: 0 } }),
+  );
+  await page.goto(`${prefix}/?view=tasks`);
+  await page.getByLabel("Select all tasks on this page").check();
+  await page
+    .getByRole("button", { name: "Cancel selected", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Request cancellation (1)", exact: true })
+    .click();
+  await expect(
+    page
+      .getByRole("status")
+      .filter({ hasText: "1 cancellation request accepted." }),
+  ).toBeVisible();
+  for (const state of [
+    "Started",
+    "Success",
+    "Failure",
+    "Revoked",
+    "Rejected",
+  ]) {
+    outcome = state;
+    await page.getByRole("link", { name: "demo.email", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    const label =
+      state === "Started" ? "Running" : state === "Failure" ? "Failed" : state;
+    await expect(
+      dialog.getByText(label, { exact: true }).first(),
+    ).toBeVisible();
+    const pending = dialog.getByText(/The worker outcome will confirm whether/);
+    if (state === "Started") await expect(pending).toBeVisible();
+    else await expect(pending).toHaveCount(0);
+    await page.getByRole("button", { name: "Close task details" }).click();
+  }
+});

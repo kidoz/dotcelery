@@ -16,6 +16,7 @@ export interface DashboardData {
   queues?: QueueStats[];
   recent?: TaskList;
   tasks?: TaskList;
+  tasksFilterKey?: string;
   taskNames?: string[];
   points?: TimePoint[];
   updatedAt?: string;

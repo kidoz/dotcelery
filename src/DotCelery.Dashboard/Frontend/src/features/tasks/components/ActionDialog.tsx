@@ -23,7 +23,14 @@ export function ActionDialog({
   const [error, setError] = useState("");
   const [running, setRunning] = useState(false);
   const inFlight = useRef(false);
+  const mounted = useRef(false);
   const { action, ids } = request;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
     requestJson<ActionPreview>(`${api}/tasks/actions/preview`, {
@@ -48,6 +55,7 @@ export function ActionDialog({
     inFlight.current = true;
     setRunning(true);
     try {
+      // Navigation may unmount the dialog, but must not cancel a submitted mutation.
       const result = await requestJson<BulkResult>(
         `${api}/tasks/bulk/${action === "cancel" ? "revoke" : "retry"}`,
         {
@@ -57,12 +65,13 @@ export function ActionDialog({
       );
       complete({ action, ids: eligible }, result);
     } catch (error) {
-      setError(
-        `${errorMessage(error)} The result may be uncertain; inspect task state before repeating the action.`,
-      );
+      if (mounted.current)
+        setError(
+          `${errorMessage(error)} The result may be uncertain; inspect task state before repeating the action.`,
+        );
     } finally {
       inFlight.current = false;
-      setRunning(false);
+      if (mounted.current) setRunning(false);
     }
   }
   return (

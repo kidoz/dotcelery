@@ -5,8 +5,12 @@ import { EmptyRow, Table } from "../../shared/ui/Table.tsx";
 import { SelectAll } from "./components/SelectAll.tsx";
 import { TaskLink } from "../../shared/ui/TaskLink.tsx";
 import { Time } from "../../shared/ui/Time.tsx";
-import { emptyFilters } from "../../shared/model/filters.ts";
-import { stateLabel, taskStates } from "../../shared/domain/taskState.ts";
+import { emptyFilters, taskFilterKey } from "../../shared/model/filters.ts";
+import {
+  isTerminalTaskState,
+  stateLabel,
+  taskStates,
+} from "../../shared/domain/taskState.ts";
 import { Filter } from "./components/Filter.tsx";
 import type { Filters } from "../../shared/model/filters.ts";
 import type { ActionRequest } from "../../shared/api/contracts.ts";
@@ -35,7 +39,9 @@ export function Tasks({
   const [search, setSearch] = useState(filters.search);
   useEffect(() => setSearch(filters.search), [filters.search]);
   const caps = data.capabilities;
-  const tasks = data.tasks?.tasks ?? [];
+  const taskPage =
+    data.tasksFilterKey === taskFilterKey(filters) ? data.tasks : undefined;
+  const tasks = taskPage?.tasks ?? [];
   const writable =
     !!caps && !caps.readOnly && (caps.canCancel || caps.canRetry);
   const allSelected =
@@ -44,7 +50,7 @@ export function Tasks({
   const sizes = [...new Set([10, 25, 50, effectiveSize, caps?.pageSize ?? 50])]
     .filter((size) => size <= (caps?.pageSize ?? 1000))
     .sort((a, b) => a - b);
-  const start = data.tasks ? (data.tasks.page - 1) * data.tasks.pageSize : 0;
+  const start = taskPage ? (taskPage.page - 1) * taskPage.pageSize : 0;
   const options = (values: string[], current: string) =>
     [...new Set([...values.filter(Boolean), ...(current ? [current] : [])])]
       .sort()
@@ -178,10 +184,10 @@ export function Tasks({
       </div>
       <div className="task-toolbar">
         <span role="status" aria-live="polite">
-          {!data.tasks
+          {!taskPage
             ? "Loading tasks…"
             : tasks.length
-              ? `Showing ${number(start + 1)}–${number(start + tasks.length)} · ${data.tasks.hasMore ? "more available" : "end of results"}`
+              ? `Showing ${number(start + 1)}–${number(start + tasks.length)} · ${taskPage.hasMore ? "more available" : "end of results"}`
               : "No matching tasks"}
         </span>
         {writable && (
@@ -190,7 +196,7 @@ export function Tasks({
             {caps.canRetry && (
               <button
                 className="button secondary"
-                disabled={!selected.size}
+                disabled={!taskPage || !selected.size}
                 onClick={() => plan({ action: "retry", ids: [...selected] })}
               >
                 Retry selected
@@ -199,7 +205,7 @@ export function Tasks({
             {caps.canCancel && (
               <button
                 className="button danger-outline"
-                disabled={!selected.size}
+                disabled={!taskPage || !selected.size}
                 onClick={() => plan({ action: "cancel", ids: [...selected] })}
               >
                 Cancel selected
@@ -268,9 +274,7 @@ export function Tasks({
               <td>
                 <Badge state={task.state} />
                 {cancelled.has(task.taskId) &&
-                  !["Revoked", "Success", "Failure", "Rejected"].includes(
-                    task.state,
-                  ) && (
+                  !isTerminalTaskState(task.state) && (
                     <small className="subtext">Cancellation requested</small>
                   )}
               </td>
@@ -286,7 +290,7 @@ export function Tasks({
           ))
         ) : (
           <EmptyRow columns={7}>
-            {!data.tasks
+            {!taskPage
               ? "Loading tasks…"
               : caps?.hasTaskRecords
                 ? "No tasks match these filters. Clear a filter or choose a wider time range."
@@ -306,17 +310,17 @@ export function Tasks({
             </option>
           ))}
         </Filter>
-        <span>Page {number(data.tasks?.page ?? filters.page)}</span>
+        <span>Page {number(taskPage?.page ?? filters.page)}</span>
         <button
           className="button secondary"
-          disabled={!data.tasks || data.tasks.page <= 1}
+          disabled={!taskPage || taskPage.page <= 1}
           onClick={() => update({ page: Math.max(1, filters.page - 1) })}
         >
           ← Previous
         </button>
         <button
           className="button secondary"
-          disabled={!data.tasks?.hasMore}
+          disabled={!taskPage?.hasMore}
           onClick={() => update({ page: filters.page + 1 })}
         >
           Next →

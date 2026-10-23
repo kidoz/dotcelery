@@ -5,7 +5,10 @@ import { CopyButton } from "../../../shared/ui/CopyButton.tsx";
 import { duration, exactTime, number } from "../../../shared/lib/format.ts";
 import { errorMessage } from "../../../shared/api/errors.ts";
 import { requestJson } from "../../../shared/api/client.ts";
-import { stateLabel } from "../../../shared/domain/taskState.ts";
+import {
+  isTerminalTaskState,
+  stateLabel,
+} from "../../../shared/domain/taskState.ts";
 import type {
   ActionPreview,
   ActionRequest,
@@ -128,7 +131,7 @@ export function TaskDetails({
             </CopyButton>
           </div>
           <Badge state={task.state} />
-          {cancelled && (
+          {cancelled && !isTerminalTaskState(task.state) && (
             <p className="mt-3 text-muted">
               Cancellation requested. The worker outcome will confirm whether
               execution stopped.

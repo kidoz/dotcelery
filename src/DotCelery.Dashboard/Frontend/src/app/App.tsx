@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import logo from "../../../../../assets/dotcelery-logo.png";
 import { Link } from "../shared/ui/Link.tsx";
 import { number } from "../shared/lib/format.ts";
@@ -16,6 +16,11 @@ import type { View } from "../shared/model/navigation.ts";
 import type { ActionRequest, BulkResult } from "../shared/api/contracts.ts";
 import { useDashboard } from "./hooks/useDashboard.ts";
 
+type ActiveAction = ActionRequest & {
+  actionGeneration: number;
+  navigationGeneration: number;
+};
+
 export default function App() {
   const prefix = document.body.dataset.prefix ?? "/celery";
   const title = document.body.dataset.title ?? "DotCelery Dashboard";
@@ -24,23 +29,32 @@ export default function App() {
   const [paused, setPaused] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [cancelled, setCancelled] = useState<Set<string>>(new Set());
-  const [action, setAction] = useState<ActionRequest | null>(null);
+  const [action, setAction] = useState<ActiveAction | null>(null);
+  const generations = useRef({ action: 0, navigation: 0 });
   const [message, setMessage] = useState({ text: "", error: false });
   const blocked = selected.size > 0 || route.taskId !== null || action !== null;
   const { data, busy, refresh } = useDashboard(api, route, paused, blocked);
   const caps = data.capabilities;
 
   useEffect(() => {
+    const currentGenerations = generations.current;
     const onPopState = () => {
+      currentGenerations.navigation++;
+      currentGenerations.action++;
       setSelected(new Set());
       setAction(null);
       setRoute(readRoute(location.search));
     };
     window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      currentGenerations.navigation++;
+      currentGenerations.action++;
+    };
   }, []);
 
   function applyRoute(next: Route, push = false) {
+    generations.current.navigation++;
     history[push ? "pushState" : "replaceState"](
       null,
       "",
@@ -77,7 +91,22 @@ export default function App() {
     applyRoute({ ...route, taskId: id }, true);
   }
   const navigation = { navigate, inspect, taskHref, openTask };
-  function complete(request: ActionRequest, result: BulkResult) {
+  function planAction(request: ActionRequest) {
+    setAction({
+      ...request,
+      actionGeneration: ++generations.current.action,
+      navigationGeneration: generations.current.navigation,
+    });
+  }
+  function dismissAction() {
+    generations.current.action++;
+    setAction(null);
+  }
+  function complete(
+    owner: ActiveAction,
+    request: ActionRequest,
+    result: BulkResult,
+  ) {
     if (request.action === "cancel")
       setCancelled(
         (current) =>
@@ -98,9 +127,16 @@ export default function App() {
       text: `${result.successCount} ${label}.${result.failureCount ? ` ${result.failureCount} failed: ${result.failedTaskIds?.join(", ") ?? "unknown tasks"}.` : ""}`,
       error: result.failureCount > 0,
     });
-    setSelected(new Set());
-    setAction(null);
-    applyRoute({ ...route, taskId: null });
+    // A submitted mutation may finish after Back or a newer action. Report its
+    // result, but only its original, still-current UI context may be cleared.
+    if (
+      owner.actionGeneration === generations.current.action &&
+      owner.navigationGeneration === generations.current.navigation
+    ) {
+      setSelected(new Set());
+      dismissAction();
+      applyRoute({ ...route, taskId: null });
+    }
     refresh();
   }
   const connection = data.error
@@ -271,7 +307,7 @@ export default function App() {
               selected={selected}
               select={setSelected}
               cancelled={cancelled}
-              plan={setAction}
+              plan={planAction}
             />
           )}
           {route.view === "queues" && (
@@ -302,15 +338,16 @@ export default function App() {
           cancelled={cancelled.has(route.taskId)}
           link={taskHref(route.taskId)}
           dismiss={() => applyRoute({ ...route, taskId: null })}
-          plan={setAction}
+          plan={planAction}
         />
       )}
       {action && (
         <ActionDialog
+          key={action.actionGeneration}
           api={api}
           request={action}
-          dismiss={() => setAction(null)}
-          complete={complete}
+          dismiss={dismissAction}
+          complete={(request, result) => complete(action, request, result)}
         />
       )}
     </>
