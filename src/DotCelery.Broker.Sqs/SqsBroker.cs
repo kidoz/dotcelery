@@ -108,6 +108,8 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
             // invisible while it processes it
             NativeDelay = true,
             RedeliveryOnConsumerStop = true,
+            HoldsRequeuedMessagesUntilEta = true,
+            RejectsStaleSettlements = true,
             MaxMessageSizeBytes =
                 _options.MaxMessageSizeBytes > 0 ? _options.MaxMessageSizeBytes : null,
         };
@@ -202,11 +204,10 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
             {
                 if (message.DeliveryTag is string receiptHandle)
                 {
-                    if (_options.RenewVisibilityWhileProcessing)
-                    {
-                        session.Track(message.Queue, receiptHandle);
-                        _deliveries[receiptHandle] = session;
-                    }
+                    // Ownership is tracked for every delivery, not only when visibility is
+                    // renewed, so a settlement after this consumer stops is refused.
+                    session.Track(message.Queue, receiptHandle);
+                    _deliveries[receiptHandle] = session;
                 }
 
                 yield return message;
@@ -242,6 +243,7 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
     )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var (queueUrl, receiptHandle) = await DeliveryAsync(message, cancellationToken)
             .ConfigureAwait(false);
@@ -268,6 +270,7 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
     )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var (queueUrl, receiptHandle) = await DeliveryAsync(message, cancellationToken)
             .ConfigureAwait(false);
@@ -534,7 +537,11 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
         {
             try
             {
-                var (queueUrl, receiptHandle) = await DeliveryAsync(message, CancellationToken.None)
+                var (queueUrl, receiptHandle) = await DeliveryAsync(
+                        message,
+                        CancellationToken.None,
+                        requireOwnership: false
+                    )
                     .ConfigureAwait(false);
 
                 await _client
@@ -683,7 +690,8 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
 
     private async ValueTask<(string QueueUrl, string ReceiptHandle)> DeliveryAsync(
         BrokerMessage message,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        bool requireOwnership = true
     )
     {
         ArgumentNullException.ThrowIfNull(message);
@@ -693,6 +701,13 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
             throw new ArgumentException(
                 "Invalid delivery tag type, expected string",
                 nameof(message)
+            );
+        }
+
+        if (requireOwnership && !_deliveries.ContainsKey(receiptHandle))
+        {
+            throw new InvalidOperationException(
+                $"Message {message.Message.Id} cannot be settled: it was settled already, or its consumer stopped."
             );
         }
 

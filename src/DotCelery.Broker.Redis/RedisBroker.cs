@@ -272,6 +272,7 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(message);
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (message.DeliveryTag is not string deliveryTag)
         {
@@ -280,6 +281,8 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
                 nameof(message)
             );
         }
+
+        RequireOwned(message, deliveryTag);
 
         var (streamKey, messageId) = ParseDeliveryTag(deliveryTag);
 
@@ -304,6 +307,7 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(message);
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (message.DeliveryTag is not string deliveryTag)
         {
@@ -312,6 +316,8 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
                 nameof(message)
             );
         }
+
+        RequireOwned(message, deliveryTag);
 
         var (streamKey, messageId) = ParseDeliveryTag(deliveryTag);
         var db = await GetDatabaseAsync(cancellationToken).ConfigureAwait(false);
@@ -372,7 +378,7 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
     /// expires, so redelivery follows <c>RedisBrokerOptions.ClaimTimeout</c>.
     /// </remarks>
     public MessageBrokerCapabilities Capabilities { get; } =
-        new() { RedeliveryOnConsumerStop = true };
+        new() { RedeliveryOnConsumerStop = true, RejectsStaleSettlements = true };
 
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
@@ -820,6 +826,16 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
         }
 
         return reclaimed;
+    }
+
+    private void RequireOwned(BrokerMessage message, string deliveryTag)
+    {
+        if (!_deliveries.ContainsKey(deliveryTag))
+        {
+            throw new InvalidOperationException(
+                $"Message {message.Message.Id} cannot be settled: it was settled already, or its consumer stopped."
+            );
+        }
     }
 
     private async Task SettleEntryAsync(IDatabase db, string streamKey, RedisValue messageId)

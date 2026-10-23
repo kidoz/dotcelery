@@ -89,13 +89,13 @@ public class InMemoryBrokerTests : IAsyncDisposable
         await foreach (var msg in _broker.ConsumeAsync(["celery"], cts.Token))
         {
             received = msg;
+
+            // The delivery is owned only while the consumer holds it
+            await _broker.AckAsync(msg);
             break;
         }
 
         Assert.NotNull(received);
-
-        // Ack should not throw
-        await _broker.AckAsync(received);
     }
 
     [Fact]

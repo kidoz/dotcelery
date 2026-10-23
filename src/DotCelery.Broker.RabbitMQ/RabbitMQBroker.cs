@@ -553,6 +553,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
         {
             Priority = true,
             RedeliveryOnConsumerStop = true,
+            RejectsStaleSettlements = true,
             MaxMessageSizeBytes =
                 _options.MaxMessageSizeBytes > 0 ? _options.MaxMessageSizeBytes : null,
         };

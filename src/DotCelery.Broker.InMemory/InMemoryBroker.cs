@@ -27,8 +27,9 @@ public sealed class InMemoryBroker : IMessageBroker, IBrokerCapabilities
     private readonly IMessageSecurityValidator? _messageSecurityValidator;
     private readonly IQueueMetrics? _queueMetrics;
 
-    // A delivered message that has not been settled, and the consumer it was delivered to
-    private readonly ConcurrentDictionary<BrokerMessage, ConsumerDeliveries> _deliveries = new();
+    // A delivered message that has not been settled, keyed by its delivery tag, and the
+    // consumer it was delivered to
+    private readonly ConcurrentDictionary<object, ConsumerDeliveries> _deliveries = new();
 
     private bool _disposed;
 
@@ -113,7 +114,7 @@ public sealed class InMemoryBroker : IMessageBroker, IBrokerCapabilities
                     if (channel.Reader.TryRead(out var message))
                     {
                         var delivered = RoundTrip(message);
-                        _deliveries[delivered] = pending;
+                        _deliveries[delivered.DeliveryTag] = pending;
                         pending.Add(delivered);
                         yield return delivered;
                     }
@@ -136,7 +137,7 @@ public sealed class InMemoryBroker : IMessageBroker, IBrokerCapabilities
             // redelivers them
             foreach (var message in pending.Drain())
             {
-                _deliveries.TryRemove(message, out _);
+                _deliveries.TryRemove(message.DeliveryTag, out _);
                 Requeue(message);
             }
         }
@@ -145,25 +146,29 @@ public sealed class InMemoryBroker : IMessageBroker, IBrokerCapabilities
     /// <inheritdoc />
     public ValueTask AckAsync(BrokerMessage message, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         Settle(message);
         return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc />
-    public ValueTask RejectAsync(
+    public async ValueTask RejectAsync(
         BrokerMessage message,
         bool requeue = false,
         CancellationToken cancellationToken = default
     )
     {
-        Settle(message);
+        cancellationToken.ThrowIfCancellationRequested();
+        RequireOwned(message);
 
+        // A requeue writes the returned copy before giving up ownership, so a failed write
+        // leaves the original delivery unsettled and retryable.
         if (requeue)
         {
-            return EnqueueAsync(message.Message, cancellationToken);
+            await EnqueueAsync(message.Message, cancellationToken).ConfigureAwait(false);
         }
 
-        return ValueTask.CompletedTask;
+        Settle(message);
     }
 
     /// <inheritdoc />
@@ -174,7 +179,7 @@ public sealed class InMemoryBroker : IMessageBroker, IBrokerCapabilities
 
     /// <inheritdoc />
     public MessageBrokerCapabilities Capabilities { get; } =
-        new() { RedeliveryOnConsumerStop = true };
+        new() { RedeliveryOnConsumerStop = true, RejectsStaleSettlements = true };
 
     // The delivered message is what its serialized payload says, as with a broker that sends
     // bytes over the wire, so a message that does not survive serialization fails here instead
@@ -200,13 +205,27 @@ public sealed class InMemoryBroker : IMessageBroker, IBrokerCapabilities
     }
 
     // Marks a delivered message settled, so stopping its consumer does not deliver it again.
-    // Settling a message that was not delivered (or was already settled) does nothing.
+    // A delivery that is not tracked was settled already or belongs to a consumer that stopped;
+    // settling it would acknowledge a delivery the caller does not own.
+    private void RequireOwned(BrokerMessage message)
+    {
+        if (!_deliveries.ContainsKey(message.DeliveryTag))
+        {
+            throw new InvalidOperationException(
+                $"Message {message.Message.Id} cannot be settled: it was settled already, or its consumer stopped."
+            );
+        }
+    }
+
     private void Settle(BrokerMessage message)
     {
-        if (_deliveries.TryRemove(message, out var pending))
+        if (!_deliveries.TryRemove(message.DeliveryTag, out var pending))
         {
-            pending.Remove(message);
+            throw new InvalidOperationException(
+                $"Message {message.Message.Id} cannot be settled: it was settled already, or its consumer stopped."
+            );
         }
+        pending.Remove(message.DeliveryTag);
     }
 
     // Puts an unsettled message back on its queue for redelivery
@@ -250,11 +269,11 @@ public sealed class InMemoryBroker : IMessageBroker, IBrokerCapabilities
             }
         }
 
-        public void Remove(BrokerMessage message)
+        public void Remove(object deliveryTag)
         {
             lock (_lock)
             {
-                _messages.Remove(message);
+                _messages.RemoveAll(message => Equals(message.DeliveryTag, deliveryTag));
             }
         }
 

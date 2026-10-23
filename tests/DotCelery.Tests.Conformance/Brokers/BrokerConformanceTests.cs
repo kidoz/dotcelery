@@ -216,6 +216,99 @@ public abstract class BrokerConformanceTests : IAsyncLifetime
         Assert.Equal(count, ids.Count);
     }
 
+    [Fact]
+    public async Task RejectWithRequeue_HonorsTheDeclaredEtaBehavior()
+    {
+        var queue = Unique("requeue-eta");
+        var sent = CreateMessage(queue);
+        await Broker.PublishAsync(sent);
+
+        // The ETA is set on the returned copy so the first delivery is not delayed by a broker
+        // with native delay
+        var eta = DateTimeOffset.UtcNow.AddSeconds(2);
+        using (var timeout = new CancellationTokenSource(Timeout))
+        {
+            await foreach (var message in Broker.ConsumeAsync([queue], timeout.Token))
+            {
+                var returned = new BrokerMessage
+                {
+                    Message = message.Message with { Eta = eta },
+                    DeliveryTag = message.DeliveryTag,
+                    Queue = message.Queue,
+                    ReceivedAt = message.ReceivedAt,
+                    RawBody = message.RawBody,
+                    Signature = message.Signature,
+                };
+                await Broker.RejectAsync(returned, requeue: true);
+                break;
+            }
+        }
+
+        if (Capabilities.HoldsRequeuedMessagesUntilEta)
+        {
+            var early = await TryConsumeOneAsync(queue, TimeSpan.FromSeconds(1));
+            Assert.Null(early);
+        }
+
+        var redelivered = await ConsumeAndAckAsync(queue);
+        Assert.Equal(sent.Id, redelivered.Message.Id);
+
+        if (Capabilities.HoldsRequeuedMessagesUntilEta)
+        {
+            Assert.True(DateTimeOffset.UtcNow >= eta);
+        }
+    }
+
+    [Fact]
+    public async Task CancelledSettlement_DoesNotSettleTheMessage()
+    {
+        var queue = Unique("settle-cancelled");
+        var sent = CreateMessage(queue);
+        await Broker.PublishAsync(sent);
+
+        // Keep the consumer alive so its ownership is not the reason the settlement fails
+        using var timeout = new CancellationTokenSource(Timeout);
+        await using var consumer = Broker
+            .ConsumeAsync([queue], timeout.Token)
+            .GetAsyncEnumerator(CancellationToken.None);
+        Assert.True(await consumer.MoveNextAsync());
+        var received = consumer.Current;
+
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            Broker.AckAsync(received, cancelled.Token).AsTask()
+        );
+
+        // The message was not settled, so stopping the consumer returns it and it is delivered
+        // again, this time settled normally
+        await consumer.DisposeAsync();
+
+        var redelivered = await ConsumeAndAckAsync(queue);
+        Assert.Equal(sent.Id, redelivered.Message.Id);
+    }
+
+    [Fact]
+    public async Task SettlementAfterConsumerStops_IsRefused()
+    {
+        Assert.SkipWhen(
+            !Capabilities.RejectsStaleSettlements,
+            "The broker does not refuse a settlement from a consumer that no longer owns the delivery"
+        );
+
+        var queue = Unique("settle-stale");
+        var sent = CreateMessage(queue);
+        await Broker.PublishAsync(sent);
+
+        var received = await ConsumeWithoutSettlingAsync(queue);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => Broker.AckAsync(received).AsTask());
+
+        var redelivered = await ConsumeAndAckAsync(queue);
+        Assert.Equal(sent.Id, redelivered.Message.Id);
+    }
+
     protected static TaskMessage CreateMessage(string queue) =>
         new()
         {
