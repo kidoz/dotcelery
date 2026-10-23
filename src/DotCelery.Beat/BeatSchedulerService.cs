@@ -345,23 +345,21 @@ public sealed class BeatSchedulerService : BackgroundService
             eta = now.AddMilliseconds(jitterMs);
         }
 
-        var message = new TaskMessage
-        {
-            Id = taskId,
-            Task = signature.TaskName,
-            Args = signature.Args ?? [],
-            ContentType = _serializer.ContentType,
-            Timestamp = now,
-            Eta = eta > now ? eta : null,
-            Expires =
-                entry.Options?.ExpiresIn.HasValue == true
-                    ? now + entry.Options.ExpiresIn.Value
-                    : signature.Expires,
-            MaxRetries = signature.MaxRetries,
-            Priority = entry.Options?.Priority ?? signature.Priority,
-            Queue = entry.Options?.Queue ?? signature.Queue,
-            Headers = signature.Headers,
-        };
+        var message = TaskMessageFactory.ForTask(
+            taskId,
+            signature.TaskName,
+            signature.Args ?? [],
+            _serializer.ContentType,
+            now,
+            entry.Options?.Queue ?? signature.Queue,
+            eta: eta > now ? eta : null,
+            expires: entry.Options?.ExpiresIn.HasValue == true
+                ? now + entry.Options.ExpiresIn.Value
+                : signature.Expires,
+            maxRetries: signature.MaxRetries,
+            priority: entry.Options?.Priority ?? signature.Priority,
+            headers: signature.Headers
+        );
 
         await _broker.PublishAsync(message, cancellationToken).ConfigureAwait(false);
 

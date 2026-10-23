@@ -1,5 +1,6 @@
 # The packages a release publishes, one per line. eng/verify-packages.sh fails when the
 # packed set is missing one of them or contains one that is not listed.
+DotCelery.Abstractions
 DotCelery.Analyzers
 DotCelery.Backend.InMemory
 DotCelery.Backend.Mongo

@@ -82,19 +82,18 @@ public sealed class BatchClient : IBatchClient
             // Serialize the input
             var args = batchTask.Input is not null ? _serializer.Serialize(batchTask.Input) : [];
 
-            var message = new TaskMessage
-            {
-                Id = taskId,
-                Task = batchTask.TaskName,
-                Args = args,
-                ContentType = _serializer.ContentType,
-                Timestamp = DateTimeOffset.UtcNow,
-                Queue = batchTask.Queue ?? _options.DefaultQueue,
-                MaxRetries = batchTask.MaxRetries ?? _options.DefaultMaxRetries,
-                Priority = batchTask.Priority ?? 0,
-                Headers = batchTask.Headers,
-                BatchId = batchId,
-            };
+            var message = TaskMessageFactory.ForTask(
+                taskId,
+                batchTask.TaskName,
+                args,
+                _serializer.ContentType,
+                DateTimeOffset.UtcNow,
+                batchTask.Queue ?? _options.DefaultQueue,
+                maxRetries: batchTask.MaxRetries ?? _options.DefaultMaxRetries,
+                priority: batchTask.Priority ?? 0,
+                headers: batchTask.Headers,
+                batchId: batchId
+            );
 
             try
             {

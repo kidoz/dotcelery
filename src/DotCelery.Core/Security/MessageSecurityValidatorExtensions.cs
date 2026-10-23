@@ -32,17 +32,7 @@ public static class MessageSecurityValidatorExtensions
             return true;
         }
 
-        var validation = validator.Validate(
-            new TaskMessage
-            {
-                Id = "unknown",
-                Task = "unknown",
-                Args = [],
-                ContentType = "application/json",
-                Timestamp = DateTimeOffset.UtcNow,
-            },
-            signature
-        );
+        var validation = validator.Validate(TaskMessageFactory.ForSignatureCheck(), signature);
 
         return validator.IsSignatureValid(validation, payload, signature);
     }

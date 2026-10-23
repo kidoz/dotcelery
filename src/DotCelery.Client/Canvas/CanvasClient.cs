@@ -190,30 +190,32 @@ public sealed class CanvasClient : ICanvasClient
     )
     {
         var eta = signature.EffectiveEta;
+        var queue = string.IsNullOrWhiteSpace(signature.Queue)
+            ? _options.DefaultQueue
+            : signature.Queue;
 
         await _broker
             .PublishAsync(
-                new TaskMessage
+                TaskMessageFactory.ForTask(
+                    taskId,
+                    signature.TaskName,
+                    signature.Args ?? [],
+                    _serializer.ContentType,
+                    DateTimeOffset.UtcNow,
+                    queue,
+                    eta: eta,
+                    expires: signature.Expires,
+                    maxRetries: signature.MaxRetries,
+                    priority: signature.Priority,
+                    headers: signature.Headers,
+                    batchId: batchId
+                ) with
                 {
-                    Id = taskId,
-                    Task = signature.TaskName,
-                    Args = signature.Args ?? [],
-                    ContentType = _serializer.ContentType,
-                    Timestamp = DateTimeOffset.UtcNow,
-                    Eta = eta,
-                    Expires = signature.Expires,
-                    MaxRetries = signature.MaxRetries,
-                    Priority = signature.Priority,
-                    Queue = string.IsNullOrWhiteSpace(signature.Queue)
-                        ? _options.DefaultQueue
-                        : signature.Queue,
-                    Headers = signature.Headers,
                     RootId = canvasId,
                     ParentId = parentId,
                     Chain = chain is { Count: > 0 } ? chain : null,
                     Link = signature.Link,
                     LinkError = signature.LinkError,
-                    BatchId = batchId,
                 },
                 cancellationToken
             )

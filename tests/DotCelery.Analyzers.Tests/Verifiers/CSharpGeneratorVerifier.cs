@@ -32,6 +32,11 @@ public static class CSharpGeneratorVerifier<TGenerator>
             MetadataReference.CreateFromFile(
                 typeof(DotCelery.Core.Abstractions.ITask).Assembly.Location
             ),
+            // The generated registration calls the builder, which stays in Core while the task
+            // contracts live in Abstractions.
+            MetadataReference.CreateFromFile(
+                typeof(DotCelery.Core.Extensions.DotCeleryBuilder).Assembly.Location
+            ),
         };
 
         var compilation = CSharpCompilation.Create(

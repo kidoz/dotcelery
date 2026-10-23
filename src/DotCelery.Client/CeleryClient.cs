@@ -370,23 +370,22 @@ public sealed class CeleryClient : ICeleryClient
 
         var headersWithTrace = TraceContextPropagation.InjectCurrent(options?.Headers);
 
-        var message = new TaskMessage
-        {
-            Id = taskId,
-            Task = taskName,
-            Args = _serializer.Serialize(input),
-            ContentType = _serializer.ContentType,
-            Timestamp = DateTimeOffset.UtcNow,
-            Eta = eta,
-            Expires = options?.Expires,
-            MaxRetries = options?.MaxRetries ?? _options.DefaultMaxRetries,
-            Priority = options?.Priority ?? 0,
-            Queue = queue,
-            CorrelationId = options?.CorrelationId,
-            TenantId = options?.TenantId,
-            PartitionKey = options?.PartitionKey,
-            Headers = headersWithTrace,
-        };
+        var message = TaskMessageFactory.ForTask(
+            taskId,
+            taskName,
+            _serializer.Serialize(input),
+            _serializer.ContentType,
+            DateTimeOffset.UtcNow,
+            queue,
+            eta: eta,
+            expires: options?.Expires,
+            maxRetries: options?.MaxRetries ?? _options.DefaultMaxRetries,
+            priority: options?.Priority ?? 0,
+            correlationId: options?.CorrelationId,
+            tenantId: options?.TenantId,
+            partitionKey: options?.PartitionKey,
+            headers: headersWithTrace
+        );
 
         // Dispatch BeforeTaskPublish signal
         await _signalDispatcher

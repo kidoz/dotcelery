@@ -501,21 +501,20 @@ public sealed class SagaOrchestrator : ISagaOrchestrator
             eta = _timeProvider.GetUtcNow().Add(signature.Countdown.Value);
         }
 
-        var message = new TaskMessage
-        {
-            Id = taskId,
-            Task = signature.TaskName,
-            Args = signature.Args ?? [],
-            ContentType = _serializer.ContentType,
-            Timestamp = _timeProvider.GetUtcNow(),
-            Eta = eta,
-            Expires = signature.Expires,
-            MaxRetries = signature.MaxRetries,
-            Priority = signature.Priority,
-            Queue = signature.Queue,
-            CorrelationId = correlationId,
-            Headers = signature.Headers,
-        };
+        var message = TaskMessageFactory.ForTask(
+            taskId,
+            signature.TaskName,
+            signature.Args ?? [],
+            _serializer.ContentType,
+            _timeProvider.GetUtcNow(),
+            signature.Queue,
+            eta: eta,
+            expires: signature.Expires,
+            maxRetries: signature.MaxRetries,
+            priority: signature.Priority,
+            correlationId: correlationId,
+            headers: signature.Headers
+        );
 
         await _broker.PublishAsync(message, cancellationToken).ConfigureAwait(false);
         await _backend

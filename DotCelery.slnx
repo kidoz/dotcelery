@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/DotCelery.Abstractions/DotCelery.Abstractions.csproj" />
     <Project Path="src/DotCelery.Analyzers/DotCelery.Analyzers.csproj" />
     <Project Path="src/DotCelery.Backend.InMemory/DotCelery.Backend.InMemory.csproj" />
     <Project Path="src/DotCelery.Backend.Mongo/DotCelery.Backend.Mongo.csproj" />

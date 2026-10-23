@@ -1,0 +1,9 @@
+#nullable enable
+static DotCelery.Core.Models.TaskMessageFactory.ForFollowUp(DotCelery.Core.Models.TaskMessage! parent, string! id, DotCelery.Core.Canvas.Signature! signature, byte[]! args, string! contentType, System.DateTimeOffset timestamp, string! queue, System.Collections.Generic.IReadOnlyList<DotCelery.Core.Canvas.ChainStep!>? chain = null) -> DotCelery.Core.Models.TaskMessage!
+static DotCelery.Core.Models.TaskMessageFactory.ForSignatureCheck() -> DotCelery.Core.Models.TaskMessage!
+static DotCelery.Core.Models.TaskMessageFactory.ForTask(string! id, string! task, byte[]! args, string! contentType, System.DateTimeOffset timestamp, string! queue, System.DateTimeOffset? eta = null, System.DateTimeOffset? expires = null, int maxRetries = 0, int priority = 0, string? correlationId = null, string? tenantId = null, string? partitionKey = null, System.Collections.Generic.IReadOnlyDictionary<string!, string!>? headers = null, string? batchId = null) -> DotCelery.Core.Models.TaskMessage!
+DotCelery.Core.Models.TaskMessageFactory
+DotCelery.Core.Abstractions.MessageBrokerCapabilities.HoldsRequeuedMessagesUntilEta.get -> bool
+DotCelery.Core.Abstractions.MessageBrokerCapabilities.HoldsRequeuedMessagesUntilEta.init -> void
+DotCelery.Core.Abstractions.MessageBrokerCapabilities.RejectsStaleSettlements.get -> bool
+DotCelery.Core.Abstractions.MessageBrokerCapabilities.RejectsStaleSettlements.init -> void

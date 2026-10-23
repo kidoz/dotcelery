@@ -169,19 +169,18 @@ public sealed class BatchCompletionHandler
         {
             await _broker
                 .PublishAsync(
-                    new TaskMessage
-                    {
-                        Id = callback.TaskId ?? Guid.NewGuid().ToString("N"),
-                        Task = callback.TaskName,
-                        Args = callback.Args ?? [],
-                        ContentType = callback.ContentType ?? _serializer.ContentType,
-                        Timestamp = _timeProvider.GetUtcNow(),
-                        Queue = callback.Queue,
-                        Priority = callback.Priority ?? 0,
-                        MaxRetries = callback.MaxRetries ?? 0,
-                        Headers = callback.Headers,
-                        BatchId = batch.Id,
-                    },
+                    TaskMessageFactory.ForTask(
+                        callback.TaskId ?? Guid.NewGuid().ToString("N"),
+                        callback.TaskName,
+                        callback.Args ?? [],
+                        callback.ContentType ?? _serializer.ContentType,
+                        _timeProvider.GetUtcNow(),
+                        callback.Queue,
+                        maxRetries: callback.MaxRetries ?? 0,
+                        priority: callback.Priority ?? 0,
+                        headers: callback.Headers,
+                        batchId: batch.Id
+                    ),
                     cancellationToken
                 )
                 .ConfigureAwait(false);
