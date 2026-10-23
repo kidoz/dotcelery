@@ -1,5 +1,6 @@
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.RateLimiting;
+using DotCelery.Core.Resilience;
 using DotCelery.Core.TimeLimits;
 
 namespace DotCelery.Worker.Registry;
@@ -16,6 +17,7 @@ namespace DotCelery.Worker.Registry;
 /// <param name="Queue">The default queue for this task (null to use default).</param>
 /// <param name="TimeLimitPolicy">The time limit policy for this task (null if no time limits).</param>
 /// <param name="Invoker">The typed adapter that invokes the task, when one was generated.</param>
+/// <param name="RetryPolicy">The retry policy for this task (null to use the worker's default).</param>
 public sealed record TaskRegistration(
     string TaskName,
     Type TaskType,
@@ -25,5 +27,6 @@ public sealed record TaskRegistration(
     IReadOnlyList<Type>? FilterTypes = null,
     string? Queue = null,
     TimeLimitPolicy? TimeLimitPolicy = null,
-    ITaskInvoker? Invoker = null
+    ITaskInvoker? Invoker = null,
+    RetryPolicy? RetryPolicy = null
 );

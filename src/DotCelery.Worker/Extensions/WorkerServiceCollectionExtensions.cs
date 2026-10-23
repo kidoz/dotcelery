@@ -356,6 +356,31 @@ public static class WorkerServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Adds task-execution resilience to the worker: a default retry policy with backoff,
+    /// optional automatic retry on failure, and a worker-side limit on the publisher-supplied
+    /// MaxRetries of every message.
+    /// </summary>
+    /// <param name="builder">The DotCelery builder.</param>
+    /// <param name="configure">Optional configuration action.</param>
+    /// <returns>The builder.</returns>
+    /// <remarks>
+    /// A task's <see cref="DotCelery.Core.Attributes.RetryAttribute"/> overrides
+    /// <see cref="ResilienceOptions.DefaultRetryPolicy"/> for that task.
+    /// </remarks>
+    public static DotCeleryBuilder UseResilience(
+        this DotCeleryBuilder builder,
+        Action<ResilienceOptions>? configure = null
+    )
+    {
+        builder.Services.Configure<ResilienceOptions>(options =>
+        {
+            configure?.Invoke(options);
+            options.Validate();
+        });
+        return builder;
+    }
+
+    /// <summary>
     /// Adds transactional outbox functionality to the worker.
     /// Messages are stored in the same transaction as the business operation, so the write
     /// is atomic with it; the outbox dispatcher then publishes stored messages

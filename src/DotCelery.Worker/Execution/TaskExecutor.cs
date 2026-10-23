@@ -8,11 +8,13 @@ using DotCelery.Core.Filters;
 using DotCelery.Core.Instrumentation;
 using DotCelery.Core.Models;
 using DotCelery.Core.MultiTenancy;
+using DotCelery.Core.Resilience;
 using DotCelery.Core.Signals;
 using DotCelery.Core.Storage.Stores;
 using DotCelery.Core.TimeLimits;
 using DotCelery.Worker.Filters;
 using DotCelery.Worker.Registry;
+using DotCelery.Worker.Resilience;
 using DotCelery.Worker.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -37,6 +39,7 @@ public sealed class TaskExecutor
     private readonly CompiledTaskInvoker _taskInvoker;
     private readonly OutcomeRecorder? _outcomes;
     private readonly MultiTenancyOptions? _multiTenancyOptions;
+    private readonly ResilienceOptions? _resilienceOptions;
     private readonly WorkerOptions _options;
     private readonly ILogger<TaskExecutor> _logger;
     private readonly TimeProvider _timeProvider;
@@ -58,7 +61,8 @@ public sealed class TaskExecutor
         TimeLimitEnforcer? timeLimitEnforcer = null,
         IInboxStore? inboxStore = null,
         IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
-        TimeProvider? timeProvider = null
+        TimeProvider? timeProvider = null,
+        IOptions<ResilienceOptions>? resilienceOptions = null
     )
     {
         _registry = registry;
@@ -78,6 +82,7 @@ public sealed class TaskExecutor
 
         var tenantOptions = multiTenancyOptions?.Value;
         _multiTenancyOptions = tenantOptions is { Enabled: true } ? tenantOptions : null;
+        _resilienceOptions = resilienceOptions?.Value;
     }
 
     /// <summary>
@@ -112,6 +117,9 @@ public sealed class TaskExecutor
             _logger.LogError("Unknown task: {TaskName}", message.Task);
             throw new UnknownTaskException(message.Task);
         }
+
+        // A task's [Retry] attribute wins over the worker's default policy
+        var retryPolicy = registration.RetryPolicy ?? _resilienceOptions?.DefaultRetryPolicy;
 
         // Check revocation before execution
         if (_options.EnableRevocation && _options.CheckRevocationBeforeExecution)
@@ -208,7 +216,8 @@ public sealed class TaskExecutor
                 resultBackend: _resultBackend,
                 signalDispatcher: _signalDispatcher,
                 workerName: workerName,
-                timeProvider: _timeProvider
+                timeProvider: _timeProvider,
+                maxRetriesLimit: _resilienceOptions?.MaxRetriesLimit
             );
 
             // Get filters for this task
@@ -400,6 +409,10 @@ public sealed class TaskExecutor
                 ex.Message
             );
 
+            // An explicit countdown always wins; without one, the effective policy's
+            // backoff applies, and without a policy the task is republished immediately
+            var retryAfter = ex.Countdown ?? retryPolicy?.ComputeDelay(message.Retries);
+
             var taskResult = new TaskResult
             {
                 TaskId = message.Id,
@@ -409,7 +422,7 @@ public sealed class TaskExecutor
                 Duration = _timeProvider.GetUtcNow() - startTime,
                 Retries = message.Retries,
                 Worker = workerName,
-                RetryAfter = ex.Countdown,
+                RetryAfter = retryAfter,
             };
 
             await RecordOutcomeAsync(taskResult, cancellationToken).ConfigureAwait(false);
@@ -457,6 +470,72 @@ public sealed class TaskExecutor
         }
         catch (Exception ex) when (!taskCompleted)
         {
+            // Automatic retry: a retryable failure with retries remaining becomes a retry
+            // with the policy's backoff instead of a failure; exhaustion falls through
+            if (
+                _resilienceOptions is { AutoRetryOnFailure: true }
+                && retryPolicy is not null
+                && retryPolicy.ShouldRetry(ex)
+                && message.Retries < retryPolicy.MaxRetries
+            )
+            {
+                var retryAfter = retryPolicy.ComputeDelay(message.Retries);
+
+                _logger.LogInformation(
+                    ex,
+                    "Task {TaskId} failed and will be retried after {RetryAfter}",
+                    message.Id,
+                    retryAfter
+                );
+
+                var retryResult = new TaskResult
+                {
+                    TaskId = message.Id,
+                    State = TaskState.Retry,
+                    Exception = TaskExceptionInfo.FromException(ex),
+                    CompletedAt = _timeProvider.GetUtcNow(),
+                    Duration = _timeProvider.GetUtcNow() - startTime,
+                    Retries = message.Retries,
+                    Worker = workerName,
+                    RetryAfter = retryAfter,
+                };
+
+                await RecordOutcomeAsync(retryResult, cancellationToken).ConfigureAwait(false);
+
+                await _signalDispatcher
+                    .DispatchAsync(
+                        new TaskRetrySignal
+                        {
+                            TaskId = message.Id,
+                            TaskName = message.Task,
+                            Timestamp = _timeProvider.GetUtcNow(),
+                            Exception = ex,
+                            RetryCount = message.Retries,
+                            Countdown = retryAfter,
+                            Worker = workerName,
+                        },
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+
+                await _signalDispatcher
+                    .DispatchAsync(
+                        new TaskPostRunSignal
+                        {
+                            TaskId = message.Id,
+                            TaskName = message.Task,
+                            Timestamp = _timeProvider.GetUtcNow(),
+                            State = TaskState.Retry,
+                            Duration = retryResult.Duration,
+                            Worker = workerName,
+                        },
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+
+                return retryResult;
+            }
+
             _logger.LogError(ex, "Task {TaskId} failed", message.Id);
 
             var taskResult = new TaskResult

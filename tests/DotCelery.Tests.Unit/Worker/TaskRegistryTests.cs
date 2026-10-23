@@ -1,4 +1,6 @@
 using DotCelery.Core.Abstractions;
+using DotCelery.Core.Attributes;
+using DotCelery.Core.Resilience;
 using DotCelery.Worker.Registry;
 
 namespace DotCelery.Tests.Unit.Worker;
@@ -179,6 +181,32 @@ public class TaskRegistryTests
         Assert.Throws<ArgumentException>(() => registry.Register(typeof(TestTask), string.Empty));
     }
 
+    [Fact]
+    public void Register_TaskWithRetryAttribute_CapturesTheRetryPolicy()
+    {
+        var registry = new TaskRegistry();
+
+        registry.Register<RetryAttributedTask>();
+
+        var registration = registry.GetTask(RetryAttributedTask.TaskName);
+        Assert.NotNull(registration);
+        Assert.NotNull(registration.RetryPolicy);
+        Assert.Equal(5, registration.RetryPolicy.MaxRetries);
+        Assert.Equal(BackoffStrategy.Constant, registration.RetryPolicy.Strategy);
+        Assert.Equal(TimeSpan.FromSeconds(2), registration.RetryPolicy.InitialDelay);
+        Assert.False(registration.RetryPolicy.Jitter);
+    }
+
+    [Fact]
+    public void Register_TaskWithoutRetryAttribute_HasNoRetryPolicy()
+    {
+        var registry = new TaskRegistry();
+
+        registry.Register<TestTask>();
+
+        Assert.Null(registry.GetTask(TestTask.TaskName)?.RetryPolicy);
+    }
+
     private abstract class AbstractTask : ITask<TestInput, TestOutput>
     {
         public static string TaskName => "abstract.task";
@@ -188,6 +216,27 @@ public class TaskRegistryTests
             ITaskContext context,
             CancellationToken cancellationToken = default
         );
+    }
+
+    [Retry(
+        MaxRetries = 5,
+        Strategy = BackoffStrategy.Constant,
+        InitialDelaySeconds = 2,
+        MaxDelaySeconds = 2,
+        Jitter = false
+    )]
+    private sealed class RetryAttributedTask : ITask<TestInput, TestOutput>
+    {
+        public static string TaskName => "retry.attributed.task";
+
+        public Task<TestOutput> ExecuteAsync(
+            TestInput input,
+            ITaskContext context,
+            CancellationToken cancellationToken = default
+        )
+        {
+            return Task.FromResult(new TestOutput { Result = input.Value });
+        }
     }
 
     private sealed class TestTask : ITask<TestInput, TestOutput>

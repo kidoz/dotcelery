@@ -21,6 +21,17 @@ public sealed class TaskExecutionContext : ITaskContext
     /// <summary>
     /// Initializes a new instance of the <see cref="TaskExecutionContext"/> class.
     /// </summary>
+    /// <param name="message">The task message.</param>
+    /// <param name="serviceProvider">The scoped service provider.</param>
+    /// <param name="resultBackend">The result backend.</param>
+    /// <param name="signalDispatcher">The signal dispatcher.</param>
+    /// <param name="workerName">The worker name.</param>
+    /// <param name="blockedServiceTypes">Service types the task must not resolve.</param>
+    /// <param name="timeProvider">The time provider.</param>
+    /// <param name="maxRetriesLimit">
+    /// A worker-side limit applied to the message's MaxRetries; when set, the effective
+    /// <see cref="MaxRetries"/> is the smaller of the two.
+    /// </param>
     public TaskExecutionContext(
         TaskMessage message,
         IServiceProvider serviceProvider,
@@ -28,14 +39,17 @@ public sealed class TaskExecutionContext : ITaskContext
         ITaskSignalDispatcher? signalDispatcher = null,
         string? workerName = null,
         IEnumerable<Type>? blockedServiceTypes = null,
-        TimeProvider? timeProvider = null
+        TimeProvider? timeProvider = null,
+        int? maxRetriesLimit = null
     )
     {
         Message = message;
         TaskId = message.Id;
         TaskName = message.Task;
         RetryCount = message.Retries;
-        MaxRetries = message.MaxRetries;
+        MaxRetries = maxRetriesLimit is { } limit
+            ? Math.Min(message.MaxRetries, limit)
+            : message.MaxRetries;
         Queue = message.Queue;
         SentAt = message.Timestamp;
         Eta = message.Eta;

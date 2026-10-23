@@ -4,6 +4,7 @@ using DotCelery.Core.Abstractions;
 using DotCelery.Core.Attributes;
 using DotCelery.Core.Filters;
 using DotCelery.Core.RateLimiting;
+using DotCelery.Core.Resilience;
 using DotCelery.Core.Routing;
 using DotCelery.Core.TimeLimits;
 using Microsoft.Extensions.Logging;
@@ -123,7 +124,8 @@ public sealed class TaskRegistry
             FilterTypes: GetFilterTypes(taskType),
             Queue: GetQueue(taskType),
             TimeLimitPolicy: GetTimeLimitPolicy(taskType),
-            Invoker: invoker
+            Invoker: invoker,
+            RetryPolicy: GetRetryPolicy(taskType)
         );
 
         lock (_lock)
@@ -257,6 +259,16 @@ public sealed class TaskRegistry
         var attribute = taskType
             .GetCustomAttributes(typeof(TimeLimitAttribute), inherit: true)
             .OfType<TimeLimitAttribute>()
+            .FirstOrDefault();
+
+        return attribute?.ToPolicy();
+    }
+
+    private static RetryPolicy? GetRetryPolicy(Type taskType)
+    {
+        var attribute = taskType
+            .GetCustomAttributes(typeof(RetryAttribute), inherit: true)
+            .OfType<RetryAttribute>()
             .FirstOrDefault();
 
         return attribute?.ToPolicy();

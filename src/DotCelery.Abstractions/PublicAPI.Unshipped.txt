@@ -7,3 +7,57 @@ DotCelery.Core.Abstractions.MessageBrokerCapabilities.HoldsRequeuedMessagesUntil
 DotCelery.Core.Abstractions.MessageBrokerCapabilities.HoldsRequeuedMessagesUntilEta.init -> void
 DotCelery.Core.Abstractions.MessageBrokerCapabilities.RejectsStaleSettlements.get -> bool
 DotCelery.Core.Abstractions.MessageBrokerCapabilities.RejectsStaleSettlements.init -> void
+DotCelery.Core.Attributes.RetryAttribute
+DotCelery.Core.Attributes.RetryAttribute.BackoffMultiplier.get -> double
+DotCelery.Core.Attributes.RetryAttribute.BackoffMultiplier.init -> void
+DotCelery.Core.Attributes.RetryAttribute.DontRetryFor.get -> System.Type![]?
+DotCelery.Core.Attributes.RetryAttribute.DontRetryFor.init -> void
+DotCelery.Core.Attributes.RetryAttribute.InitialDelaySeconds.get -> double
+DotCelery.Core.Attributes.RetryAttribute.InitialDelaySeconds.init -> void
+DotCelery.Core.Attributes.RetryAttribute.Jitter.get -> bool
+DotCelery.Core.Attributes.RetryAttribute.Jitter.init -> void
+DotCelery.Core.Attributes.RetryAttribute.MaxDelaySeconds.get -> double
+DotCelery.Core.Attributes.RetryAttribute.MaxDelaySeconds.init -> void
+DotCelery.Core.Attributes.RetryAttribute.MaxRetries.get -> int
+DotCelery.Core.Attributes.RetryAttribute.MaxRetries.init -> void
+DotCelery.Core.Attributes.RetryAttribute.RetryAttribute() -> void
+DotCelery.Core.Attributes.RetryAttribute.RetryFor.get -> System.Type![]?
+DotCelery.Core.Attributes.RetryAttribute.RetryFor.init -> void
+DotCelery.Core.Attributes.RetryAttribute.Strategy.get -> DotCelery.Core.Resilience.BackoffStrategy
+DotCelery.Core.Attributes.RetryAttribute.Strategy.init -> void
+DotCelery.Core.Attributes.RetryAttribute.ToPolicy() -> DotCelery.Core.Resilience.RetryPolicy!
+DotCelery.Core.Resilience.BackoffStrategy
+DotCelery.Core.Resilience.BackoffStrategy.Constant = 0 -> DotCelery.Core.Resilience.BackoffStrategy
+DotCelery.Core.Resilience.BackoffStrategy.Exponential = 1 -> DotCelery.Core.Resilience.BackoffStrategy
+DotCelery.Core.Resilience.RetryPolicy
+DotCelery.Core.Resilience.RetryPolicy.<Clone>$() -> DotCelery.Core.Resilience.RetryPolicy!
+DotCelery.Core.Resilience.RetryPolicy.BackoffMultiplier.get -> double
+DotCelery.Core.Resilience.RetryPolicy.BackoffMultiplier.init -> void
+DotCelery.Core.Resilience.RetryPolicy.ComputeDelay(int retriesAlreadyPerformed) -> System.TimeSpan
+DotCelery.Core.Resilience.RetryPolicy.Equals(DotCelery.Core.Resilience.RetryPolicy? other) -> bool
+DotCelery.Core.Resilience.RetryPolicy.InitialDelay.get -> System.TimeSpan
+DotCelery.Core.Resilience.RetryPolicy.InitialDelay.init -> void
+DotCelery.Core.Resilience.RetryPolicy.Jitter.get -> bool
+DotCelery.Core.Resilience.RetryPolicy.Jitter.init -> void
+DotCelery.Core.Resilience.RetryPolicy.MaxDelay.get -> System.TimeSpan
+DotCelery.Core.Resilience.RetryPolicy.MaxDelay.init -> void
+DotCelery.Core.Resilience.RetryPolicy.MaxRetries.get -> int
+DotCelery.Core.Resilience.RetryPolicy.MaxRetries.init -> void
+DotCelery.Core.Resilience.RetryPolicy.NonRetryableExceptions.get -> System.Collections.Generic.IReadOnlyList<System.Type!>?
+DotCelery.Core.Resilience.RetryPolicy.NonRetryableExceptions.init -> void
+DotCelery.Core.Resilience.RetryPolicy.RetryPolicy() -> void
+DotCelery.Core.Resilience.RetryPolicy.RetryableExceptions.get -> System.Collections.Generic.IReadOnlyList<System.Type!>?
+DotCelery.Core.Resilience.RetryPolicy.RetryableExceptions.init -> void
+DotCelery.Core.Resilience.RetryPolicy.ShouldRetry(System.Exception! exception) -> bool
+DotCelery.Core.Resilience.RetryPolicy.Strategy.get -> DotCelery.Core.Resilience.BackoffStrategy
+DotCelery.Core.Resilience.RetryPolicy.Strategy.init -> void
+DotCelery.Core.Resilience.RetryPolicy.Validate() -> void
+override DotCelery.Core.Resilience.RetryPolicy.Equals(object? obj) -> bool
+override DotCelery.Core.Resilience.RetryPolicy.GetHashCode() -> int
+override DotCelery.Core.Resilience.RetryPolicy.ToString() -> string!
+static DotCelery.Core.Resilience.RetryPolicy.Constant(int maxRetries = 3, System.TimeSpan? delay = null, bool jitter = true) -> DotCelery.Core.Resilience.RetryPolicy!
+static DotCelery.Core.Resilience.RetryPolicy.Default() -> DotCelery.Core.Resilience.RetryPolicy!
+static DotCelery.Core.Resilience.RetryPolicy.Exponential(int maxRetries = 3, System.TimeSpan? initialDelay = null, System.TimeSpan? maxDelay = null, double multiplier = 2, bool jitter = true) -> DotCelery.Core.Resilience.RetryPolicy!
+static DotCelery.Core.Resilience.RetryPolicy.None() -> DotCelery.Core.Resilience.RetryPolicy!
+static DotCelery.Core.Resilience.RetryPolicy.operator !=(DotCelery.Core.Resilience.RetryPolicy? left, DotCelery.Core.Resilience.RetryPolicy? right) -> bool
+static DotCelery.Core.Resilience.RetryPolicy.operator ==(DotCelery.Core.Resilience.RetryPolicy? left, DotCelery.Core.Resilience.RetryPolicy? right) -> bool
