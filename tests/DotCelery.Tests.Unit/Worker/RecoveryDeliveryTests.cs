@@ -1,7 +1,9 @@
 using DotCelery.Backend.InMemory.Storage;
+using DotCelery.Broker.InMemory;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Canvas;
 using DotCelery.Core.Models;
+using DotCelery.Core.Sagas;
 using DotCelery.Core.Serialization;
 using DotCelery.Core.Signals;
 using DotCelery.Core.Storage.Stores;
@@ -9,6 +11,7 @@ using DotCelery.Worker;
 using DotCelery.Worker.Execution;
 using DotCelery.Worker.Filters;
 using DotCelery.Worker.Registry;
+using DotCelery.Worker.Sagas;
 using DotCelery.Worker.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -22,6 +25,9 @@ public sealed class RecoveryDeliveryTests : IAsyncDisposable
     private readonly FakeTimeProvider _time = new();
     private readonly ResultBackend _results;
     private readonly InboxStore _inbox;
+    private readonly SagaStore _sagas;
+    private readonly InMemoryBroker _broker = new();
+    private readonly SagaOrchestrator _orchestrator;
     private readonly ServiceProvider _services;
     private readonly Counter _counter = new();
     private readonly CriticalHandler _handler = new();
@@ -33,12 +39,32 @@ public sealed class RecoveryDeliveryTests : IAsyncDisposable
         var storage = new InMemoryStorageProvider(_time);
         _results = new ResultBackend(storage, timeProvider: _time);
         _inbox = new InboxStore(storage, timeProvider: _time);
+        _sagas = new SagaStore(storage, timeProvider: _time);
+        var sagaOptions = Options.Create(new SagaOptions { DispatchSignals = false });
+        _orchestrator = new SagaOrchestrator(
+            _sagas,
+            _broker,
+            new JsonMessageSerializer(),
+            _results,
+            sagaOptions,
+            NullLogger<SagaOrchestrator>.Instance,
+            timeProvider: _time
+        );
+        var sagaHandler = new SagaCompletionHandler(
+            _sagas,
+            _orchestrator,
+            sagaOptions,
+            NullLogger<SagaCompletionHandler>.Instance,
+            timeProvider: _time
+        );
         _services = new ServiceCollection()
             .AddLogging()
             .AddSingleton(_counter)
             .AddSingleton<IInboxStore>(_inbox)
             .AddTransient<InboxDeduplicationFilter>()
             .AddSingleton<ITaskSignalHandler<TaskSuccessSignal>>(_handler)
+            .AddSingleton<ITaskSignalHandler<TaskSuccessSignal>>(sagaHandler)
+            .AddSingleton<ITaskSignalHandler<TaskPostRunSignal>>(_handler)
             .AddTransient<EchoTask>()
             .BuildServiceProvider();
         var options = Options.Create(
@@ -93,6 +119,73 @@ public sealed class RecoveryDeliveryTests : IAsyncDisposable
         Assert.Equal(recorded.CompletedAt, recovered.CompletedAt);
         Assert.Equal(1, _counter.Calls);
         Assert.Equal(2, _handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PostRunFailure_ReplaysSuccessWithoutAdvancingAnUnrelatedSagaStep(
+        bool nextStepCompleted
+    )
+    {
+        await _sagas.CreateAsync(
+            new Saga
+            {
+                Id = "saga",
+                Name = "replay",
+                State = SagaState.Executing,
+                CreatedAt = _time.GetUtcNow(),
+                Steps =
+                [
+                    new SagaStep
+                    {
+                        Id = "step-0",
+                        Name = "first",
+                        Order = 0,
+                        State = SagaStepState.Executing,
+                        ExecuteTaskId = "saga-first",
+                        ExecuteTask = new Signature { TaskName = EchoTask.TaskName },
+                    },
+                    new SagaStep
+                    {
+                        Id = "step-1",
+                        Name = "second",
+                        Order = 1,
+                        ExecuteTask = new Signature { TaskName = EchoTask.TaskName },
+                    },
+                ],
+            }
+        );
+        _handler.PostRun = async () =>
+        {
+            Assert.Equal(1, (await _sagas.GetAsync("saga"))!.CurrentStepIndex);
+            if (nextStepCompleted)
+                await _sagas.UpdateStepStateAsync("saga", "step-1", SagaStepState.Completed);
+            throw new IOException("Stopped after success dispatch, before its checkpoint");
+        };
+        var delivery = Delivery("saga-first");
+        await Assert.ThrowsAsync<IOException>(() =>
+            _executor.ExecuteAsync(delivery, "worker", CancellationToken.None)
+        );
+        var recorded = (await _results.GetResultAsync("saga-first"))!;
+        Assert.False(recorded.SignalsPublished);
+        Assert.True(await _inbox.IsProcessedAsync("saga-first"));
+        _handler.PostRun = null;
+
+        var replayed = await _executor.ExecuteAsync(delivery, "recovery", CancellationToken.None);
+
+        Assert.True(replayed.IsDuplicate);
+        Assert.True(replayed.SignalsPublished);
+        Assert.Equal(recorded.Result, replayed.Result);
+        Assert.Equal(1, _counter.Calls);
+        var saga = (await _sagas.GetAsync("saga"))!;
+        Assert.Equal(1, saga.CurrentStepIndex);
+        Assert.Equal(SagaState.Executing, saga.State);
+        Assert.Equal(1, _broker.GetQueueLength("celery"));
+        if (!nextStepCompleted)
+            await _sagas.UpdateStepStateAsync("saga", "step-1", SagaStepState.Completed);
+        await _orchestrator.ContinueStepAsync("saga", "step-1");
+        Assert.Equal(SagaState.Completed, (await _sagas.GetAsync("saga"))!.State);
     }
 
     [Theory]
@@ -168,6 +261,8 @@ public sealed class RecoveryDeliveryTests : IAsyncDisposable
         await _services.DisposeAsync();
         await _results.DisposeAsync();
         await _inbox.DisposeAsync();
+        await _sagas.DisposeAsync();
+        await _broker.DisposeAsync();
     }
 
     private sealed class Counter
@@ -194,9 +289,21 @@ public sealed class RecoveryDeliveryTests : IAsyncDisposable
 
     private sealed class CriticalHandler
         : ITaskSignalHandler<TaskSuccessSignal>,
+            ITaskSignalHandler<TaskPostRunSignal>,
             ICriticalTaskSignalHandler
     {
         public bool Fail { get; set; }
+        public Func<Task>? PostRun { get; set; }
+
+        public async ValueTask HandleAsync(
+            TaskPostRunSignal signal,
+            CancellationToken cancellationToken = default
+        )
+        {
+            if (PostRun is not null)
+                await PostRun();
+        }
+
         public int Calls { get; private set; }
 
         public ValueTask HandleAsync(

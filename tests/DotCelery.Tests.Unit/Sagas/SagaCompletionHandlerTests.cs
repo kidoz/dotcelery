@@ -77,6 +77,59 @@ public sealed class SagaCompletionHandlerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task LateDuplicateCompletion_DoesNotAdvanceADifferentCompletedStep()
+    {
+        var saga = await SetupSagaWithExecutingStep();
+        var first = new TaskSuccessSignal
+        {
+            TaskId = "task-0",
+            TaskName = "task.execute.0",
+            Timestamp = DateTimeOffset.UtcNow,
+            Duration = TimeSpan.Zero,
+        };
+        await _handler.HandleAsync(first, CancellationToken.None);
+        var current = (await _sagaStore.GetAsync(saga.Id))!;
+        var secondTaskId = current.Steps[1].ExecuteTaskId!;
+        // The next step has recorded completion, but its continuation has not advanced yet.
+        await _sagaStore.UpdateStepStateAsync(
+            saga.Id,
+            current.Steps[1].Id,
+            SagaStepState.Completed
+        );
+        var published = _broker.GetQueueLength("celery");
+
+        await _handler.HandleAsync(first, CancellationToken.None);
+
+        var replayed = (await _sagaStore.GetAsync(saga.Id))!;
+        Assert.Equal(1, replayed.CurrentStepIndex);
+        Assert.Equal(SagaState.Executing, replayed.State);
+        Assert.Equal(published, _broker.GetQueueLength("celery"));
+        await _handler.HandleAsync(first with { TaskId = secondTaskId }, CancellationToken.None);
+        Assert.Equal(SagaState.Completed, (await _sagaStore.GetAsync(saga.Id))!.State);
+    }
+
+    [Fact]
+    public async Task ReplayAfterCompletionBeforeAdvancement_StillContinuesThatStep()
+    {
+        var saga = await SetupSagaWithExecutingStep();
+        await _sagaStore.UpdateStepStateAsync(saga.Id, "step-0", SagaStepState.Completed);
+        await _handler.HandleAsync(
+            new TaskSuccessSignal
+            {
+                TaskId = "task-0",
+                TaskName = "task.execute.0",
+                Timestamp = DateTimeOffset.UtcNow,
+                Duration = TimeSpan.Zero,
+            },
+            CancellationToken.None
+        );
+        var stored = (await _sagaStore.GetAsync(saga.Id))!;
+        Assert.Equal(1, stored.CurrentStepIndex);
+        Assert.Equal(SagaStepState.Executing, stored.Steps[1].State);
+        Assert.Equal(1, _broker.GetQueueLength("celery"));
+    }
+
+    [Fact]
     public async Task HandleAsync_TaskSuccessSignal_UpdatesStepState()
     {
         // Arrange

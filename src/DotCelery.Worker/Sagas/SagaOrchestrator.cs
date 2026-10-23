@@ -109,14 +109,26 @@ public sealed class SagaOrchestrator : ISagaOrchestrator
             return saga;
         }
 
-        // Advance to next step
+        if (saga.CurrentStep is not { } currentStep)
+            return saga;
+        return await ContinueStepAsync(sagaId, currentStep.Id, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<Saga?> ContinueStepAsync(
+        string sagaId,
+        string completedStepId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        // Check identity in the same versioned update as advancement. A separate read check
+        // can race another completion and accidentally advance its completed successor.
         var updatedSaga = await _sagaStore
-            .AdvanceStepAsync(sagaId, cancellationToken)
+            .TryAdvanceStepAsync(sagaId, completedStepId, cancellationToken)
             .ConfigureAwait(false);
         if (updatedSaga is null)
-        {
-            return null;
-        }
+            return await _sagaStore.GetAsync(sagaId, cancellationToken).ConfigureAwait(false);
 
         if (updatedSaga.IsFinished)
         {

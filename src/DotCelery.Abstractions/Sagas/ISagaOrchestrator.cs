@@ -21,6 +21,17 @@ public interface ISagaOrchestrator
     /// <returns>The updated saga.</returns>
     ValueTask<Saga?> ContinueAsync(string sagaId, CancellationToken cancellationToken = default);
 
+    /// <summary>Continues only the named completed step; replay cannot advance another step.</summary>
+    /// <param name="sagaId">The saga ID.</param>
+    /// <param name="completedStepId">The step whose completion authorizes continuation.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The latest saga, or null if it no longer exists.</returns>
+    ValueTask<Saga?> ContinueStepAsync(
+        string sagaId,
+        string completedStepId,
+        CancellationToken cancellationToken = default
+    );
+
     /// <summary>
     /// Triggers compensation for a saga manually.
     /// </summary>

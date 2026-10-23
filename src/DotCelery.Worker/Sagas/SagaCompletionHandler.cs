@@ -196,7 +196,9 @@ public sealed class SagaCompletionHandler
         // Continue to next step if saga is still executing
         if (saga.State == SagaState.Executing)
         {
-            await _orchestrator.ContinueAsync(saga.Id, cancellationToken).ConfigureAwait(false);
+            await _orchestrator
+                .ContinueStepAsync(saga.Id, step.Id, cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 

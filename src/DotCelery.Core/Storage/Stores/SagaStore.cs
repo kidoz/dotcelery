@@ -247,26 +247,68 @@ public sealed class SagaStore : ISagaStore
     }
 
     /// <inheritdoc />
-    public ValueTask<Saga?> AdvanceStepAsync(
+    public async ValueTask<Saga?> AdvanceStepAsync(
         string sagaId,
         CancellationToken cancellationToken = default
-    ) =>
-        UpdateAsync(
-            sagaId,
-            saga =>
-                saga.State != SagaState.Executing
-                || saga.CurrentStep?.State != SagaStepState.Completed
-                    ? saga
-                : saga.CurrentStepIndex + 1 >= saga.TotalSteps
+    )
+    {
+        var saga = await GetAsync(sagaId, cancellationToken).ConfigureAwait(false);
+        if (saga?.CurrentStep is not { State: SagaStepState.Completed } step)
+            return saga;
+        return await TryAdvanceStepAsync(sagaId, step.Id, cancellationToken).ConfigureAwait(false)
+            ?? await GetAsync(sagaId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<Saga?> TryAdvanceStepAsync(
+        string sagaId,
+        string completedStepId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentException.ThrowIfNullOrEmpty(completedStepId);
+        while (true)
+        {
+            var current = await _documents
+                .GetAsync(_sagas, sagaId, SagaTypeInfo, cancellationToken)
+                .ConfigureAwait(false);
+            if (
+                current is null
+                || current.Value.State != SagaState.Executing
+                || current.Value.CurrentStep is not { State: SagaStepState.Completed } step
+                || step.Id != completedStepId
+            )
+                return null;
+            var saga = current.Value;
+            var advanced =
+                saga.CurrentStepIndex + 1 >= saga.TotalSteps
                     ? saga with
                     {
                         CurrentStepIndex = saga.CurrentStepIndex + 1,
                         State = SagaState.Completed,
                         CompletedAt = _timeProvider.GetUtcNow(),
                     }
-                : saga with { CurrentStepIndex = saga.CurrentStepIndex + 1 },
-            cancellationToken
-        );
+                    : saga with
+                    {
+                        CurrentStepIndex = saga.CurrentStepIndex + 1,
+                    };
+            if (
+                await _documents
+                    .TryReplaceAsync(
+                        _sagas,
+                        sagaId,
+                        advanced,
+                        current.Version,
+                        SagaTypeInfo,
+                        WriteOptions(advanced),
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false)
+                is not null
+            )
+                return advanced;
+        }
+    }
 
     /// <inheritdoc />
     public async ValueTask<Saga?> TryClaimStepDispatchAsync(

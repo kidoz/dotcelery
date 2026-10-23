@@ -79,10 +79,13 @@ have recoverable publication claims in their durable documents. `AddBatchSupport
 and `AddSagaSupport` register a recovery service that scans pending publications.
 Expired claims can be reclaimed after `StorageStoreOptions.ClaimTimeout`.
 
-Each recovered publication reuses its task ID. Saga advancement requires a
-completed current step, and duplicate completion cannot advance an unfinished
-step. A broker can accept publication before the checkpoint is saved; recovery
-can therefore publish the same ID twice. Enable inbox deduplication on receiving
+Each recovered publication reuses its task ID. Saga advancement atomically checks
+that the named completed step is still current. A replay cannot advance a
+different step, even if that later step has already completed. The handler and
+recovery scanner use `ContinueStepAsync` with that identity; a crash after
+recording completion but before advancement can still continue the same step.
+A broker can accept publication before the checkpoint is saved; recovery can
+therefore publish the same ID twice. Enable inbox deduplication on receiving
 workers and design business effects to tolerate concurrent duplicate delivery.
 This protocol does not provide exactly-once task effects.
 
@@ -90,7 +93,12 @@ Custom `IBatchStore` implementations must implement `CompleteCallbackAsync` and
 `GetPendingCallbacksAsync`, and make callback claims reclaimable after timeout.
 Custom `ISagaStore` implementations must implement `TryClaimStepDispatchAsync`
 and `CompleteStepDispatchAsync`, persist task mappings before publication, and
-advance only a completed current step. Custom inbox stores can implement
+implement `TryAdvanceStepAsync` with the expected step identity and completion
+state checked inside the atomic update. It returns null on a stale or unfinished
+step. Custom `ISagaOrchestrator` implementations must implement `ContinueStepAsync`
+and carry that identity through to the store. The existing `ContinueAsync` is
+for resuming the current completed step, rather than replaying a particular
+completion event. Custom inbox stores can implement
 `IInboxOutcomeStore`; a marker-only implementation cannot recover an expired
 continuation result. A legacy marker with no continuation data is rejected and
 sent through the dead-letter path instead of being retried indefinitely.

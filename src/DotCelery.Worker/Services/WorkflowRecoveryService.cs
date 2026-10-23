@@ -77,7 +77,11 @@ internal sealed class WorkflowRecoveryService(
                             {
                                 if (saga.CurrentStep?.State == SagaStepState.Completed)
                                     await orchestrator
-                                        .ContinueAsync(saga.Id, stoppingToken)
+                                        .ContinueStepAsync(
+                                            saga.Id,
+                                            saga.CurrentStep.Id,
+                                            stoppingToken
+                                        )
                                         .ConfigureAwait(false);
                                 else
                                     await orchestrator

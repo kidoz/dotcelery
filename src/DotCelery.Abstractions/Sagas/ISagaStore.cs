@@ -86,6 +86,17 @@ public interface ISagaStore : IAsyncDisposable
     /// <returns>The updated saga or null if not found.</returns>
     ValueTask<Saga?> AdvanceStepAsync(string sagaId, CancellationToken cancellationToken = default);
 
+    /// <summary>Atomically advances only when the named step is the completed current step.</summary>
+    /// <param name="sagaId">The saga ID.</param>
+    /// <param name="completedStepId">The step whose completion authorizes advancement.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The advanced saga, or null if the step is no longer current, is unfinished, or the saga is unavailable.</returns>
+    ValueTask<Saga?> TryAdvanceStepAsync(
+        string sagaId,
+        string completedStepId,
+        CancellationToken cancellationToken = default
+    );
+
     /// <summary>Claims publication of a pending or interrupted step using a stable task ID.</summary>
     /// <param name="sagaId">The saga ID.</param>
     /// <param name="stepId">The current step ID.</param>

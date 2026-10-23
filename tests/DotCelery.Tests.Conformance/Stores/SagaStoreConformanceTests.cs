@@ -575,6 +575,46 @@ public abstract class SagaStoreConformanceTests : StoreConformanceTests
         Assert.Equal(SagaStepState.Compensated, saga.Steps[0].State);
     }
 
+    [Fact]
+    public async Task TryAdvanceStepAsync_RequiresTheNamedCompletedCurrentStep()
+    {
+        await _store.CreateAsync(CreateSaga("identified", 2));
+        Assert.Null(await _store.TryAdvanceStepAsync("identified", "step-0"));
+        await _store.UpdateStepStateAsync("identified", "step-0", SagaStepState.Completed);
+        Assert.Equal(
+            1,
+            (await _store.TryAdvanceStepAsync("identified", "step-0"))!.CurrentStepIndex
+        );
+        await _store.UpdateStepStateAsync("identified", "step-1", SagaStepState.Completed);
+        Assert.Null(await _store.TryAdvanceStepAsync("identified", "step-0"));
+        Assert.Equal(1, (await _store.GetAsync("identified"))!.CurrentStepIndex);
+        Assert.Equal(
+            SagaState.Completed,
+            (await _store.TryAdvanceStepAsync("identified", "step-1"))!.State
+        );
+        Assert.Null(await _store.TryAdvanceStepAsync("identified", "step-1"));
+        Assert.Null(await _store.TryAdvanceStepAsync("missing", "step-0"));
+    }
+
+    [Fact]
+    public async Task TryAdvanceStepAsync_ConcurrentReplaysAdvanceOnlyTheirOwnStep()
+    {
+        await _store.CreateAsync(CreateSaga("replays", 3));
+        await _store.UpdateStepStateAsync("replays", "step-0", SagaStepState.Completed);
+        await _store.UpdateStepStateAsync("replays", "step-1", SagaStepState.Completed);
+        var results = await RunConcurrentlyAsync(
+            8,
+            async _ =>
+                await new SagaStore(Provider, CreateOptions(), Time).TryAdvanceStepAsync(
+                    "replays",
+                    "step-0"
+                )
+        );
+        Assert.Single(results, result => result is not null);
+        Assert.Equal(1, (await _store.GetAsync("replays"))!.CurrentStepIndex);
+        Assert.Equal(2, (await _store.TryAdvanceStepAsync("replays", "step-1"))!.CurrentStepIndex);
+    }
+
     private static Saga CreateSaga(string id, int stepCount) =>
         new()
         {

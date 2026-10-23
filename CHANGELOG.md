@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Saga success replay advances only its named completed step using an atomic version check, including replay after success dispatch but before the signal checkpoint
 - Inbox records retain successful outcomes and publication checkpoints through the deduplication period, allowing recovery after the public result expires
 - Critical workflow signal failures remain retryable; chord callbacks and saga execution/compensation publications recover from expired claims using stable task IDs, and duplicate saga completion cannot advance an unfinished step
 - Redis atomically quarantines unreadable stream entries before acknowledging or deleting them; failed quarantine writes leave the original entry pending
@@ -17,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Enabled multi-tenancy defaults to authenticated isolation: independent signing keys, explicit tenant queues, scoped built-in stores, and authenticated dashboard tenant claims. Existing deployments require configuration and data migration; trusted metadata-only routing can opt out with `RequireAuthenticatedTenants = false`
-- Custom batch and saga stores must implement the new publication claim/checkpoint/recovery methods; custom inbox stores can implement `IInboxOutcomeStore` to retain recovery outcomes
+- Custom batch and saga stores must implement the new publication claim/checkpoint/recovery methods, including identity-checked `ISagaStore.TryAdvanceStepAsync`; custom orchestrators must implement `ISagaOrchestrator.ContinueStepAsync`; custom inbox stores can implement `IInboxOutcomeStore` to retain recovery outcomes
 
 ## [1.1.0] - 2026-10-23
 
