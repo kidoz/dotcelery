@@ -28,7 +28,7 @@
       Version="5.9.0"
       PrivateAssets="all"
     />
-    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.401" />
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.402" />
   </ItemGroup>
 
   <!-- Pack analyzer DLL in the 'analyzers' folder -->
