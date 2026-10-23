@@ -207,7 +207,7 @@ public sealed class DashboardTaskSignalHandlerTests
         var rejected = await _records.GetAsync("t1");
         Assert.NotNull(rejected);
         Assert.Equal(TaskState.Rejected.ToString(), rejected.State);
-        Assert.Equal("Rejected: signature invalid", rejected.ExceptionMessage);
+        Assert.Equal("TaskRejected: Task execution failed", rejected.ExceptionMessage);
     }
 
     [Fact]

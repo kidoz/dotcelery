@@ -204,7 +204,11 @@ public sealed class DashboardTaskSignalHandler
                         TaskName = signal.TaskName,
                         State = TaskState.Rejected.ToString(),
                         Worker = signal.Worker,
-                        ExceptionMessage = $"Rejected: {signal.Reason}",
+                        ExceptionMessage = TaskExceptionSanitizer.Sanitize(
+                            "TaskRejected",
+                            signal.Reason,
+                            _options
+                        ),
                     }
                 ),
             cancellationToken
