@@ -284,12 +284,7 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
         var (streamKey, messageId) = ParseDeliveryTag(deliveryTag);
 
         var db = await GetDatabaseAsync(cancellationToken).ConfigureAwait(false);
-        await db.StreamAcknowledgeAsync(streamKey, _options.ConsumerGroupName, messageId)
-            .ConfigureAwait(false);
-
-        // The entry goes with the acknowledgement: it is never delivered again, and leaving it
-        // would grow the stream for the lifetime of the queue
-        await db.StreamDeleteAsync(streamKey, [(RedisValue)messageId]).ConfigureAwait(false);
+        await SettleEntryAsync(db, streamKey, messageId).ConfigureAwait(false);
 
         _deliveries.TryRemove(deliveryTag, out _);
 
@@ -327,9 +322,7 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
             // duplicate delivery instead of losing the message. The requeue is not recorded as
             // a fresh enqueue: the message was counted when it was first published.
             await PublishCoreAsync(message.Message, cancellationToken).ConfigureAwait(false);
-            await db.StreamAcknowledgeAsync(streamKey, _options.ConsumerGroupName, messageId)
-                .ConfigureAwait(false);
-            await db.StreamDeleteAsync(streamKey, [(RedisValue)messageId]).ConfigureAwait(false);
+            await SettleEntryAsync(db, streamKey, messageId).ConfigureAwait(false);
             _deliveries.TryRemove(deliveryTag, out _);
 
             _logger.LogDebug(
@@ -341,9 +334,7 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
         else
         {
             // Acknowledge to remove from pending list (message is lost)
-            await db.StreamAcknowledgeAsync(streamKey, _options.ConsumerGroupName, messageId)
-                .ConfigureAwait(false);
-            await db.StreamDeleteAsync(streamKey, [(RedisValue)messageId]).ConfigureAwait(false);
+            await SettleEntryAsync(db, streamKey, messageId).ConfigureAwait(false);
             _deliveries.TryRemove(deliveryTag, out _);
 
             _logger.LogDebug(
@@ -552,9 +543,7 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
             }
             else
             {
-                await db.StreamAcknowledgeAsync(streamKey, _options.ConsumerGroupName, entry.Id)
-                    .ConfigureAwait(false);
-                await db.StreamDeleteAsync(streamKey, [entry.Id]).ConfigureAwait(false);
+                await SettleEntryAsync(db, streamKey, entry.Id).ConfigureAwait(false);
             }
         }
 
@@ -812,13 +801,7 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
                     }
                     else
                     {
-                        await db.StreamAcknowledgeAsync(
-                                streamKey,
-                                _options.ConsumerGroupName,
-                                entry.Id
-                            )
-                            .ConfigureAwait(false);
-                        await db.StreamDeleteAsync(streamKey, [entry.Id]).ConfigureAwait(false);
+                        await SettleEntryAsync(db, streamKey, entry.Id).ConfigureAwait(false);
                     }
                 }
 
@@ -839,6 +822,16 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
         return reclaimed;
     }
 
+    private async Task SettleEntryAsync(IDatabase db, string streamKey, RedisValue messageId)
+    {
+        await db.ScriptEvaluateAsync(
+                "redis.call('XACK', KEYS[1], ARGV[1], ARGV[2]); return redis.call('XDEL', KEYS[1], ARGV[2])",
+                [(RedisKey)streamKey],
+                [(RedisValue)_options.ConsumerGroupName, messageId]
+            )
+            .ConfigureAwait(false);
+    }
+
     private BrokerMessage? ParseStreamEntry(string streamKey, StreamEntry entry)
     {
         try
@@ -852,8 +845,15 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
 
             var signature = entry["signature"];
             var signatureText = signature.IsNullOrEmpty ? null : signature.ToString();
-            var payloadText = payload.ToString();
-            var payloadBytes = Encoding.UTF8.GetBytes(payloadText);
+            var payloadBytes = (byte[])payload!;
+            if (
+                _options.MaxMessageSizeBytes > 0
+                && payloadBytes.Length > _options.MaxMessageSizeBytes
+            )
+            {
+                _logger.LogWarning("Rejecting oversized Redis stream entry {EntryId}", entry.Id);
+                return null;
+            }
             if (!_messageSecurityValidator.IsSignatureValid(payloadBytes, signatureText))
             {
                 _logger.LogWarning(
@@ -864,7 +864,7 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
             }
 
             // Deserialize using AOT-friendly type info
-            var taskMessage = JsonSerializer.Deserialize(payloadText, TaskMessageTypeInfo);
+            var taskMessage = JsonSerializer.Deserialize(payloadBytes, TaskMessageTypeInfo);
 
             if (taskMessage is null)
             {

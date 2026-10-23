@@ -799,6 +799,30 @@ public class RedisBrokerIntegrationTests : IAsyncLifetime
         return messages;
     }
 
+    [Fact]
+    public async Task OversizedDirectBrokerWrite_IsRemovedBeforeDeserializing()
+    {
+        var queue = $"size-{Guid.NewGuid():N}";
+        await using var receiver = CreateBroker(options => options.MaxMessageSizeBytes = 2048);
+        await _broker!.PublishAsync(
+            CreateTestMessage() with
+            {
+                Queue = queue,
+                Args = new byte[4096],
+            }
+        );
+        var valid = CreateTestMessage() with { Queue = queue };
+        await _broker.PublishAsync(valid);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await foreach (var delivery in receiver.ConsumeAsync([queue], timeout.Token))
+        {
+            Assert.Equal(valid.Id, delivery.Message.Id);
+            await receiver.AckAsync(delivery, timeout.Token);
+            break;
+        }
+        Assert.Equal(0, await StreamLengthAsync(queue));
+    }
+
     private async Task<long> StreamLengthAsync(string queue)
     {
         await using var redis = await ConnectionMultiplexer.ConnectAsync(
