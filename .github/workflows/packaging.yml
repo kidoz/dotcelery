@@ -34,6 +34,15 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - name: Restore dashboard dependencies
+        run: npm ci
+
       - name: Restore packages
         run: dotnet restore DotCelery.slnx
 
