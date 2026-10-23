@@ -6,6 +6,7 @@ Thank you for your interest in contributing to DotCelery! This document provides
 
 - [Getting Started](#getting-started)
 - [Development Setup](#development-setup)
+- [Documentation](#documentation)
 - [Coding Standards](#coding-standards)
 - [C# 14 Features](#c-14-features)
 - [Native AOT and Trimming](#native-aot-and-trimming)
@@ -68,123 +69,16 @@ The `justfile` wraps the common commands:
 
 ### Dashboard frontend checks
 
-Dashboard tooling requires Node.js 24.3 or later. From the repository root:
-
-```bash
-npm ci
-npm run check
-```
-
-This runs ESLint, Prettier, strict TypeScript checks, and the dashboard request,
-formatting, and URL-state tests. Use `npm run lint:fix` and `npm run format` to apply
-automatic fixes. ESLint and Prettier use TypeScript configuration files
-(`eslint.config.mts` and `prettier.config.mts`); ESLint enables type-aware rules and
-React Hooks checks. C# formatting remains with CSharpier.
-
-The pinned TypeScript version follows the supported range of `typescript-eslint`;
-upgrade those dependencies together. The root `tsconfig.json` checks tooling and
-browser test specifications. The frontend has a separate DOM-enabled TypeScript
-configuration using bundler module resolution.
-
-The React application lives in `src/DotCelery.Dashboard/Frontend/`. Tailwind 4's
-Vite plugin compiles the shared component styles and utility classes. Vite writes
-hashed production assets to `src/DotCelery.Dashboard/obj/dashboard/`; the dashboard
-project builds and embeds them automatically. Source builds restore npm packages
-when the lockfile changes and rebuild assets when frontend inputs change. NuGet
-consumers use the compiled assets and do not need Node.js.
-
-Frontend source follows these dependency boundaries, enforced by ESLint:
-
-```text
-src/
-  app/                 # Application composition, routing, polling, and global styles
-  features/
-    overview/          # Overview page and completion chart
-    tasks/             # Task history, search query, selection, and task dialogs
-    queues/            # Queue page
-    workers/           # Worker page
-  shared/
-    api/               # REST v1 contracts, HTTP client, errors, and request sessions
-    domain/            # Task states and labels
-    lib/               # Dependency-free display formatting
-    model/             # Shared filters, navigation, and dashboard data types
-    ui/                # Reusable controls, tables, and modal primitives
-  main.tsx             # React entry point
-```
-
-The application composes features; features depend on shared modules. Shared code
-does not import features or application orchestration. Keep feature-specific
-components beside their feature and import modules directly. Explicit source
-extensions let the dependency-free modules run in the Node.js test runner too.
-
-For hot reload, run the demo backend and Vite in separate terminals:
-
-```bash
-dotnet run --project samples/DotCelery.Dashboard.Demo --no-launch-profile -- --urls http://localhost:5099
-npm run dev
-```
-
-Open Vite's local URL. Its development shell uses `/celery` and proxies API/hub
-requests to `http://localhost:5099`. Set `DOTCELERY_DASHBOARD_BACKEND` to change the
-backend URL. The proxy preserves the request host so state-changing requests
-continue to satisfy the backend's origin verification.
-
-Run the browser regression suite with:
-
-```bash
-npx playwright install chromium
-npm run test:browser
-```
-
-Playwright starts the demo on port 5099 with the custom prefix `/jobs/monitor`.
-Stop an existing server on that port before running it. The suite checks embedded
-assets, deep links, filters, paging, read-only access, action previews, uncertain
-results, stale responses, and responsive layout. CI installs Chromium and runs it.
-
-The migration keeps ASP.NET Core as the host and the existing HTTP contracts.
-The UI continues polling; adopting the existing SignalR endpoints is separate
-work. Each view requests only its data. The task view refreshes its task page at
-the configured interval and caches task names, queue options, and worker options
-for 60 seconds. A manual refresh also refreshes these lists. Independent responses
-render immediately; an endpoint cannot start a second request while one is pending.
-The overview reuses queue gauges and matching-window metrics already included in
-its overview response, requesting separate metrics only for a different window.
-Selection, dialogs, hidden tabs, and the pause control suspend automatic requests.
-Runtime title/prefix injection and a prefix-specific HTML base support
-slashless roots and nested SPA paths without hardcoding a build-time mount path.
-Explicit resource paths preserve hashed asset names. The build uses the approach
-documented by [Vite](https://vite.dev/guide/backend-integration), with relative
-asset URLs described in its [build guide](https://vite.dev/guide/build#relative-base).
-Tailwind integration follows its [Vite plugin guide](https://tailwindcss.com/docs/installation/using-vite).
+Follow [Develop the dashboard](docs/how-to/develop-dashboard.md) for hot reload,
+formatting, linting, and browser checks. The [architecture explanation](docs/explanation/dashboard-architecture.md)
+describes module boundaries, polling, and embedded assets.
 
 ### Dashboard REST API versions
 
-The dashboard requires an explicit version in the URL: for example,
-`GET /celery/api/v1/capabilities` and `GET /celery/api/v1/tasks/search`.
-Unversioned `/celery/api/*` URLs and unsupported versions return 404. The configured
-dashboard prefix also applies to every versioned route; the SignalR hub stays at
-`{prefix}/hub`.
-
-The API uses `Asp.Versioning.Mvc` with a URL-segment reader, explicit v1 controller
-metadata, and `api-supported-versions` response headers. It registers Problem
-Details services and the version-aware API Explorer, whose `v1` group contains
-concrete URLs for a host's OpenAPI integration. Hosts own their documentation
-endpoints. These are shared MVC versioning services: host controllers should
-declare their versions or use `[ApiVersionNeutral]` when they are unversioned.
-Applications already using API versioning should configure shared options after
-registering the dashboard and retain a URL-segment reader for dashboard routes.
-
-Keep existing v1 payloads and meanings compatible. Adding optional fields can
-stay in v1; removing fields, changing types, or changing operation semantics
-requires a new major API version. Introduce a new controller contract alongside
-v1 and verify both versions before deprecating an old one. API versions are
-independent of the NuGet package version.
-
-State-changing calls continue to require `X-DotCelery-Dashboard: 1`, authorization,
-and the origin checks described in the README. Search remains bounded by the
-server's page-size limit, and retry/cancellation still require a capability-aware
-preview. See the [API versioning guide](https://dotnet.github.io/aspnet-api-versioning/aspnet-core/quick-starts/new-services.html)
-and [API Explorer options](https://dotnet.github.io/aspnet-api-versioning/aspnet-core/docs/options.html).
+The API requires an explicit `/api/v1/` URL. Use the
+[REST API reference](docs/reference/dashboard-api.md) for versioning integration,
+endpoint contracts, and the compatibility policy, and
+[Host the dashboard](docs/how-to/host-dashboard.md) for application setup.
 
 ### Project Structure
 
@@ -224,6 +118,14 @@ dotcelery/
 └── benchmarks/
     └── DotCelery.Benchmarks/        # BenchmarkDotNet benchmarks
 ```
+
+## Documentation
+
+Product documentation lives under [docs/](docs/README.md), organized into
+Diátaxis tutorials, how-to guides, reference, and explanation. Follow
+[Add or update documentation](docs/how-to/write-documentation.md) to choose a form,
+connect navigation, and verify examples. Keep this file as the entry point for
+repository development conventions.
 
 ## Coding Standards
 

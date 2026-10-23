@@ -6,6 +6,17 @@
 
 A distributed task queue for .NET 10, inspired by Python's [Celery](https://docs.celeryq.dev/). DotCelery provides asynchronous task execution, scheduling, and distributed processing with enterprise-grade reliability.
 
+## Documentation
+
+Use the [documentation index](docs/README.md) to choose the kind of help you need:
+
+- [Tutorials](docs/tutorials/README.md): learn by running a task and exploring the dashboard.
+- [How-to guides](docs/how-to/README.md): complete a specific setup or development task.
+- [Reference](docs/reference/README.md): look up packages, contracts, API routes, and defaults.
+- [Explanation](docs/explanation/README.md): understand execution, delivery, and architecture.
+
+New to DotCelery? Start with [Run your first task](docs/tutorials/first-task.md).
+
 ## Features
 
 ### Core Features
@@ -54,19 +65,8 @@ dotnet add package DotCelery.Backend.Redis
 compilation. It is optional — without it, register tasks by hand with `AddTask<TTask>()` or scan
 with `AddTasksFromAssembly`, and the worker falls back to the compiled invoker.
 
-| Package | Purpose |
-|---------|---------|
-| `DotCelery.Abstractions` | Interfaces, models, options, and JSON contracts shared by every package |
-| `DotCelery.Core` | Storage stores, JSON serialization, and the core registration extensions |
-| `DotCelery.Client` | Sending tasks and canvas workflows |
-| `DotCelery.Worker` | Worker, execution, filters, sagas, batches, outbox/inbox |
-| `DotCelery.Analyzers` | Duplicate-name analysis and the source-generated registration and invokers |
-| `DotCelery.Broker.InMemory`, `.RabbitMQ`, `.Redis`, `.Sqs` | Message brokers |
-| `DotCelery.Backend.InMemory`, `.Redis`, `.Postgres`, `.SqlServer`, `.Mongo` | Result backends and their storage stores |
-| `DotCelery.Storage.Sql` | SQL schema, migrations, and the SQL storage dialect shared by the SQL providers |
-| `DotCelery.Beat`, `DotCelery.Cron` | Periodic scheduling and cron expressions |
-| `DotCelery.Dashboard` | Monitoring API, SignalR hub, and UI |
-| `DotCelery.Telemetry` | OpenTelemetry metrics and tracing |
+See the [package reference](docs/reference/packages.md) for package responsibilities,
+provider registration names, and build requirements.
 
 ### Canvas Workflow Example
 
@@ -631,12 +631,12 @@ The React/TypeScript UI, compiled Tailwind CSS, and logo are embedded in `DotCel
 serving the dashboard needs no external scripts, CDN, or Node.js runtime. Building from source
 requires Node.js 24.3 or later. Run `npm ci` and `npm run check` for frontend linting,
 formatting, type checking, and presentation tests; `npm run test:browser` runs the Chromium
-regression suite. See [frontend development](CONTRIBUTING.md#dashboard-frontend-checks) for hot reload.
+regression suite. See [frontend development](docs/how-to/develop-dashboard.md) for hot reload.
 
 REST clients must use an explicit API version, such as `/celery/api/v1/overview`
 or `/celery/api/v1/tasks/search`. Unversioned URLs and unsupported versions return
 404. Responses advertise supported versions; version-aware API Explorer metadata
-is available for host OpenAPI integration. See the [API version policy](CONTRIBUTING.md#dashboard-rest-api-versions).
+is available for host OpenAPI integration. See the [API version policy](docs/reference/dashboard-api.md#versioning-and-discovery).
 
 Add the dashboard to a host that also runs a worker. With the default in-memory worker registry it
 shows the workers of its own process; a shared registry (see the note below) shows workers in other
