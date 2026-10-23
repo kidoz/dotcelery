@@ -8,6 +8,7 @@ using DotCelery.Core.Serialization;
 using DotCelery.Core.Storage.Stores;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 
 namespace DotCelery.Tests.Unit.Client;
 
@@ -28,6 +29,74 @@ public class CeleryClientTests : IAsyncDisposable
             options,
             NullLogger<CeleryClient>.Instance
         );
+    }
+
+    [Fact]
+    public async Task PendingWriteFailure_DoesNotPublishAnUntrackableTask()
+    {
+        var backend = Substitute.For<IResultBackend>();
+        var broker = Substitute.For<IMessageBroker>();
+#pragma warning disable CA2012 // NSubstitute consumes the configured ValueTask.
+        backend
+            .UpdateStateAsync(
+                Arg.Any<string>(),
+                TaskState.Pending,
+                Arg.Any<object?>(),
+                Arg.Any<CancellationToken>()
+            )
+            .Returns(_ => ValueTask.FromException(new IOException("Metadata unavailable")));
+#pragma warning restore CA2012
+        var client = new CeleryClient(
+            broker,
+            backend,
+            _serializer,
+            Options.Create(new CeleryClientOptions()),
+            NullLogger<CeleryClient>.Instance
+        );
+        await Assert.ThrowsAsync<IOException>(() =>
+            client.SendAsync<TestTask, TestInput, TestOutput>(new TestInput { Value = 42 }).AsTask()
+        );
+        await broker
+            .DidNotReceive()
+            .PublishAsync(Arg.Any<TaskMessage>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AmbiguousPublicationFailure_ExposesTheIdAndAllowsARetryWithThatId()
+    {
+        var broker = Substitute.For<IMessageBroker>();
+        TaskMessage? attempted = null;
+        var fail = true;
+#pragma warning disable CA2012 // NSubstitute consumes the configured ValueTask.
+        broker
+            .PublishAsync(Arg.Any<TaskMessage>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                attempted = call.Arg<TaskMessage>();
+                return fail
+                    ? ValueTask.FromException(new IOException("Connection closed after acceptance"))
+                    : ValueTask.CompletedTask;
+            });
+#pragma warning restore CA2012
+        var client = new CeleryClient(
+            broker,
+            _backend,
+            _serializer,
+            Options.Create(new CeleryClientOptions()),
+            NullLogger<CeleryClient>.Instance
+        );
+        var exception = await Assert.ThrowsAsync<TaskSubmissionException>(() =>
+            client.SendAsync<TestTask, TestInput, TestOutput>(new TestInput { Value = 42 }).AsTask()
+        );
+        Assert.Equal(attempted!.Id, exception.TaskId);
+        Assert.Equal(TaskState.Pending, await _backend.GetStateAsync(exception.TaskId));
+        fail = false;
+        var retried = await client.SendAsync<TestTask, TestInput, TestOutput>(
+            new TestInput { Value = 42 },
+            new SendOptions { TaskId = exception.TaskId }
+        );
+        Assert.Equal(exception.TaskId, retried.TaskId);
+        Assert.Equal(exception.TaskId, attempted.Id);
     }
 
     [Fact]

@@ -446,26 +446,43 @@ public sealed class CeleryClient : ICeleryClient
             queue
         );
 
-        await _broker.PublishAsync(message, cancellationToken).ConfigureAwait(false);
-        DotCeleryMetrics.RecordTaskSent(taskName, queue);
-
+        // Persist submission metadata before publication: a metadata outage must not hide
+        // the ID of a task already accepted by the broker.
         await _backend
             .UpdateStateAsync(taskId, TaskState.Pending, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
+        try
+        {
+            await _broker.PublishAsync(message, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Broker acceptance can be ambiguous after a connection failure. Preserve the
+            // exact ID so callers can inspect it or retry with SendOptions.TaskId.
+            throw new TaskSubmissionException(taskId, ex);
+        }
+        DotCeleryMetrics.RecordTaskSent(taskName, queue);
 
-        // Dispatch AfterTaskPublish signal
-        await _signalDispatcher
-            .DispatchAsync(
-                new AfterTaskPublishSignal
-                {
-                    TaskId = taskId,
-                    TaskName = taskName,
-                    Timestamp = DateTimeOffset.UtcNow,
-                    Queue = queue,
-                },
-                cancellationToken
-            )
-            .ConfigureAwait(false);
+        try
+        {
+            // Dispatch AfterTaskPublish signal
+            await _signalDispatcher
+                .DispatchAsync(
+                    new AfterTaskPublishSignal
+                    {
+                        TaskId = taskId,
+                        TaskName = taskName,
+                        Timestamp = DateTimeOffset.UtcNow,
+                        Queue = queue,
+                    },
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Post-publication observation failed for task {TaskId}", taskId);
+        }
 
         _logger.LogInformation("Task {TaskName} sent with ID {TaskId}", taskName, taskId);
 

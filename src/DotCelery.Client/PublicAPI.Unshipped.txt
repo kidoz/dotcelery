@@ -1,3 +1,6 @@
 #nullable enable
 DotCelery.Client.CeleryClient.GetStateAsync(string! taskId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Models.TaskState?>
 DotCelery.Client.ICeleryClient.GetStateAsync(string! taskId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Models.TaskState?>
+DotCelery.Client.TaskSubmissionException
+DotCelery.Client.TaskSubmissionException.TaskId.get -> string!
+DotCelery.Client.TaskSubmissionException.TaskSubmissionException(string! taskId, System.Exception! innerException) -> void
