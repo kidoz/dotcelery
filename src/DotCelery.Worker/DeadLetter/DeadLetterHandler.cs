@@ -76,7 +76,7 @@ public sealed class DeadLetterHandler : IDeadLetterHandler
             TaskName = message.Task,
             Queue = message.Queue,
             Reason = reason,
-            OriginalMessage = SerializeMessage(message),
+            OriginalMessage = _serializer.Serialize(message),
             ExceptionMessage = exception?.Message,
             ExceptionType = exception?.GetType().FullName,
             StackTrace = _options.IncludeStackTrace ? exception?.StackTrace : null,
@@ -100,19 +100,7 @@ public sealed class DeadLetterHandler : IDeadLetterHandler
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to store task {TaskId} in dead letter queue", message.Id);
-        }
-    }
-
-    private byte[] SerializeMessage(TaskMessage message)
-    {
-        try
-        {
-            return _serializer.Serialize(message);
-        }
-        catch
-        {
-            // If serialization fails, return empty array
-            return [];
+            throw;
         }
     }
 }

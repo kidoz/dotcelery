@@ -66,18 +66,18 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
     [InlineData("rejected")]
     public async Task DeadLetterFailure_RequeuesWithoutAcknowledgingOrDiscarding(string kind)
     {
-        var handler = Substitute.For<IDeadLetterHandler>();
+        var store = Substitute.For<IDeadLetterStore>();
 #pragma warning disable CA2012 // NSubstitute consumes the configured ValueTask.
-        handler
-            .HandleAsync(
-                Arg.Any<TaskMessage>(),
-                Arg.Any<DeadLetterReason>(),
-                Arg.Any<Exception?>(),
-                Arg.Any<string?>(),
-                Arg.Any<CancellationToken>()
-            )
+        store
+            .StoreAsync(Arg.Any<DeadLetterMessage>(), Arg.Any<CancellationToken>())
             .Returns(_ => ValueTask.FromException(new IOException("DLQ unavailable")));
 #pragma warning restore CA2012
+        var handler = new DeadLetterHandler(
+            _serializer,
+            Options.Create(new DeadLetterOptions()),
+            NullLogger<DeadLetterHandler>.Instance,
+            store
+        );
         var worker = CreateWorker(deadLetterHandler: handler);
         var message = CreateMessage(
             "t1",

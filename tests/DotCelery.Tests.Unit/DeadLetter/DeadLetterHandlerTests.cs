@@ -30,6 +30,24 @@ public sealed class DeadLetterHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_SerializationFailure_PropagatesWithoutStoringAnEmptyBody()
+    {
+        _serializer
+            .Serialize(Arg.Any<TaskMessage>())
+            .Returns<byte[]>(_ => throw new InvalidOperationException("Cannot serialize"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _handler
+                .HandleAsync(CreateTaskMessage("unreadable"), DeadLetterReason.Rejected)
+                .AsTask()
+        );
+
+        await _store
+            .DidNotReceive()
+            .StoreAsync(Arg.Any<DeadLetterMessage>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task HandleAsync_WithMaxRetriesExceeded_StoresMessage()
     {
         // Arrange
