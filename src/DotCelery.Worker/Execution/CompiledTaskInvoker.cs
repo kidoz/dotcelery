@@ -13,7 +13,10 @@ namespace DotCelery.Worker.Execution;
 /// </summary>
 public sealed class CompiledTaskInvoker
 {
-    private readonly ConcurrentDictionary<Type, CachedInvoker> _delegateCache = new();
+    private readonly ConcurrentDictionary<
+        (Type Task, Type? Input, Type? Output),
+        CachedInvoker
+    > _delegateCache = new();
 
     /// <summary>
     /// Delegate for executing a task with input.
@@ -67,8 +70,8 @@ public sealed class CompiledTaskInvoker
     )
     {
         var compiledDelegate = _delegateCache.GetOrAdd(
-            registration.TaskType,
-            type => CompileDelegate(type, registration.InputType, registration.OutputType)
+            (registration.TaskType, registration.InputType, registration.OutputType),
+            key => CompileDelegate(key.Task, key.Input, key.Output)
         );
 
         // Validate delegate matches expected signature
@@ -115,8 +118,8 @@ public sealed class CompiledTaskInvoker
     public void PreCompile(TaskRegistration registration)
     {
         _delegateCache.GetOrAdd(
-            registration.TaskType,
-            type => CompileDelegate(type, registration.InputType, registration.OutputType)
+            (registration.TaskType, registration.InputType, registration.OutputType),
+            key => CompileDelegate(key.Task, key.Input, key.Output)
         );
     }
 
