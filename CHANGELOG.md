@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Inbox records retain successful outcomes and publication checkpoints through the deduplication period, allowing recovery after the public result expires
+- Critical workflow signal failures remain retryable; chord callbacks and saga execution/compensation publications recover from expired claims using stable task IDs, and duplicate saga completion cannot advance an unfinished step
+- Redis atomically quarantines unreadable stream entries before acknowledging or deleting them; failed quarantine writes leave the original entry pending
+- Beat renews leadership during publication and stores shared cursors and pending occurrences when storage is registered
+- Task submissions write Pending before publication; ambiguous broker failures expose the assigned ID through `TaskSubmissionException`
+- Signed custom-broker deliveries without original body bytes are rejected, and dashboard rejection text follows exception sanitization settings
+
+### Changed
+- Enabled multi-tenancy defaults to authenticated isolation: independent signing keys, explicit tenant queues, scoped built-in stores, and authenticated dashboard tenant claims. Existing deployments require configuration and data migration; trusted metadata-only routing can opt out with `RequireAuthenticatedTenants = false`
+- Custom batch and saga stores must implement the new publication claim/checkpoint/recovery methods; custom inbox stores can implement `IInboxOutcomeStore` to retain recovery outcomes
+
 ## [1.1.0] - 2026-10-23
 
 ### Added

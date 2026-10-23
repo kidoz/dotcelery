@@ -2,7 +2,7 @@
 
 This document tracks implemented features, known gaps, and planned work in the checked-out
 source. See [CHANGELOG.md](CHANGELOG.md) for release history.
-Status and scope may change as the project evolves. Last reviewed: 2026-10-23.
+Status and scope may change as the project evolves. Last reviewed: 2026-10-24.
 
 Known gaps take priority over new features. Planned items have no committed release date.
 
@@ -35,7 +35,7 @@ Known gaps take priority over new features. Planned items have no committed rele
 - A message over a broker's configured maximum size is refused as it is published; RabbitMQ, Redis, and SQS also enforce receive size limits before deserializing the envelope, and the worker checks payload size before deserializing task input
 - Schema-version and payload-size validation apply to every worker message. Signing, the task-name allowlist, message-age checks, and tenant rejection are configurable; enabled checks run before task input deserialization and task-start recording, and refused messages enter the dead-letter path
 - Startup warnings identify disabled signing, task allowlisting, and tenant validation; tenant validation without a configured tenant list is refused
-- Tenant validation against a configured tenant list, with the tenant context visible to the task
+- Enabled tenant isolation authenticates independent message keys and authorized delivery queues, scopes built-in stores and dashboard requests, and carries tenant context through continuations; trusted metadata routing remains an explicit opt-out
 - Dashboard authorization runs before model binding and applies to controllers, the SignalR hub, and the middleware; state-changing API requests must carry the dashboard request header and an allowed origin, and paging and bulk operations are bounded
 - Dashboard route prefixing via `DashboardRoutePrefixConvention`
 
@@ -49,8 +49,8 @@ Known gaps take priority over new features. Planned items have no committed rele
 ### Workflows and Scheduling
 - Canvas chains, groups, chords, nested canvases, and success/error links execute through `ICanvasClient` and workers; chain steps receive the previous result, and batch tracking drives group/chord completion callbacks
 - `AddSagaSupport()` registers orchestration and completion handlers for advancing and compensating sagas
-- Batch completion callbacks are claimed through the batch store, coordinating concurrent completions
-- Beat persists last-run times when `PersistState` is enabled and can run a missed entry once at startup with `RunMissedOnStartup`; schedulers sharing storage elect one leader per `SchedulerName`
+- Batch callbacks and saga execution/compensation use recoverable publication claims and stable task IDs; background scans resume interrupted publications
+- Beat stores shared cursors and pending occurrences when storage is registered and renews leadership through publication; without storage, `PersistState` uses a local file
 - `samples/DotCelery.CanvasExample` demonstrates chains, groups, chords, and nested canvases end to end
 
 ### Resilience
@@ -87,7 +87,7 @@ Known gaps take priority over new features. Planned items have no committed rele
 
 ### Deployment and Compatibility Constraints
 - Dashboard worker visibility and consumer counts are in-process by default; deployments with workers in other processes must register a worker registry on shared storage
-- Beat leader election requires shared storage; without it every scheduler instance runs its schedule. Last-run persistence is opt-in and file-based, and missed-run handling runs an entry once rather than replaying every missed occurrence
+- Beat coordination requires shared storage; without it every scheduler instance runs its schedule and optional file persistence is local. Missed-run handling runs an entry once rather than replaying every missed occurrence
 - Beat entries evaluate five-field cron in UTC; richer formats and time-zone overloads in the standalone cron library do not extend Beat's scheduling contract
 - Migration guides map concepts and application changes; no cross-framework stored-job importer or wire-format compatibility layer is supplied
 

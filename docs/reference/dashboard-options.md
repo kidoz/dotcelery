@@ -11,6 +11,7 @@
 | `Title`                     | `DotCelery Dashboard` | Title injected into the page                                                                   |
 | `RequireAuthorization`      | `true`                | Requires an authorization callback that grants access                                          |
 | `AuthorizationCallback`     | `null`                | `Func<HttpContext, Task<bool>>` deciding access                                                |
+| `TenantIdClaimType`         | `dotcelery:tenant`     | Authenticated principal claim used when tenant isolation is enabled                             |
 | `ReadOnly`                  | `false`               | Disables task mutations when true                                                              |
 | `AllowTaskOperations`       | `true`                | Allows task mutations when stores and permissions also permit them                             |
 | `VerifyRequestOrigin`       | `true`                | Requires the dashboard header on state-changing API requests and validates any supplied origin |

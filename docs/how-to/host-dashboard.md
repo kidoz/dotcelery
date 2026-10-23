@@ -50,6 +50,9 @@ The UI is at `/jobs/monitor/`, the REST API is under `/jobs/monitor/api/v1`, and
 hub is at `/jobs/monitor/hub`. Verify that an authorized user can open the page and
 that a user rejected by your callback receives 403.
 
+For shared tenants, also [configure authenticated tenant claims and scoped
+storage](isolate-tenants.md); the access callback alone does not select a tenant.
+
 ## Connect the data you need
 
 - Keep the worker and dashboard in the same process to use the default worker

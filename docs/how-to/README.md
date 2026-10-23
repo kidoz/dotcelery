@@ -9,6 +9,7 @@ you need.
 - [Migrate background work to DotCelery](migrate-to-dotcelery.md): Hangfire,
   Quartz.NET, Coravel/hosted services, and eligible MassTransit/NServiceBus work.
 - [Host and authorize the dashboard](host-dashboard.md).
+- [Isolate tenants on shared workers](isolate-tenants.md).
 - [Develop the dashboard with hot reload](develop-dashboard.md).
 - [Run project checks](run-checks.md).
 - [Add or update documentation](write-documentation.md).
