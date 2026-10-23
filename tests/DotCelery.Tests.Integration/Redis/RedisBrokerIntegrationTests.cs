@@ -1,10 +1,14 @@
 using System.Diagnostics;
+using System.Text.Json;
 using System.Threading.Channels;
 using DotCelery.Broker.Redis;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
+using DotCelery.Core.Security;
+using DotCelery.Core.Serialization;
 using DotCelery.Tests.Conformance.Stores;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using Testcontainers.Redis;
@@ -821,6 +825,157 @@ public class RedisBrokerIntegrationTests : IAsyncLifetime
             break;
         }
         Assert.Equal(0, await StreamLengthAsync(queue));
+    }
+
+    [Theory]
+    [InlineData("empty")]
+    [InlineData("json")]
+    [InlineData("signature")]
+    [InlineData("oversized")]
+    public async Task UnreadableEntry_IsAtomicallyMovedToQuarantineWithItsOriginalBytes(string kind)
+    {
+        var queue = "quarantine";
+        var source = $"dotcelery:stream:{queue}";
+        var quarantine = $"dotcelery:dead-letter:{source}";
+        using var validator = new MessageSecurityValidator(
+            Options.Create(
+                new MessageSecurityOptions
+                {
+                    EnableMessageSigning = true,
+                    SigningKey = Enumerable.Repeat((byte)3, 32).ToArray(),
+                }
+            ),
+            NullLogger<MessageSecurityValidator>.Instance
+        );
+        await using var receiver = new RedisBroker(
+            Options.Create(
+                new RedisBrokerOptions
+                {
+                    ConnectionString = _container.GetConnectionString(),
+                    BlockTimeout = TimeSpan.FromMilliseconds(50),
+                    MaxMessageSizeBytes = 1024,
+                }
+            ),
+            NullLogger<RedisBroker>.Instance,
+            validator
+        );
+        await using var redis = await ConnectionMultiplexer.ConnectAsync(
+            _container.GetConnectionString()
+        );
+        var db = redis.GetDatabase();
+        byte[] payload = kind switch
+        {
+            "empty" => [],
+            "json" => "{bad-json"u8.ToArray(),
+            "oversized" => new byte[2048],
+            _ => JsonSerializer.SerializeToUtf8Bytes(
+                CreateTestMessage() with
+                {
+                    Queue = queue,
+                },
+                DotCeleryJsonContext.Default.TaskMessage
+            ),
+        };
+        var signature =
+            kind == "signature" ? Convert.ToBase64String(new byte[32]) : validator.Sign(payload)!;
+        var sourceId = await db.StreamAddAsync(
+            source,
+            [new("payload", payload), new("signature", signature)]
+        );
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await using var consumer = receiver
+            .ConsumeAsync([queue], timeout.Token)
+            .GetAsyncEnumerator();
+        var pendingRead = consumer.MoveNextAsync().AsTask();
+        while (await db.StreamLengthAsync(source) != 0)
+            await Task.Delay(20, timeout.Token);
+
+        var retained = Assert.Single(await db.StreamRangeAsync(quarantine));
+        Assert.Equal(sourceId, retained["source-id"]);
+        Assert.Equal(source, retained["source-stream"].ToString());
+        Assert.Equal(payload, (byte[])retained["payload"]!);
+        Assert.Equal(signature, retained["signature"].ToString());
+        Assert.False(pendingRead.IsCompleted);
+        await timeout.CancelAsync();
+        try
+        {
+            await pendingRead;
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    [Fact]
+    public async Task QuarantineWriteFailure_KeepsTheEntryPendingAndRecoversAfterStorageIsRepaired()
+    {
+        var queue = "quarantine-failure";
+        var source = $"dotcelery:stream:{queue}";
+        var quarantine = $"dotcelery:dead-letter:{source}";
+        await using var redis = await ConnectionMultiplexer.ConnectAsync(
+            _container.GetConnectionString()
+        );
+        var db = redis.GetDatabase();
+        await db.StringSetAsync(quarantine, "wrong-type");
+        var id = await db.StreamAddAsync(source, [new("payload", "{bad-json")]);
+        var logger = new QuarantineFailureLogger();
+        await using var receiver = new RedisBroker(
+            Options.Create(
+                new RedisBrokerOptions
+                {
+                    ConnectionString = _container.GetConnectionString(),
+                    ClaimTimeout = TimeSpan.FromMilliseconds(100),
+                    PendingCheckInterval = TimeSpan.FromMilliseconds(100),
+                    BlockTimeout = TimeSpan.FromMilliseconds(50),
+                }
+            ),
+            logger
+        );
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var consumer = receiver
+            .ConsumeAsync([queue], timeout.Token)
+            .GetAsyncEnumerator();
+        var pendingRead = consumer.MoveNextAsync().AsTask();
+        await logger.Failed.Task.WaitAsync(timeout.Token);
+        Assert.Equal(1, await db.StreamLengthAsync(source));
+        Assert.Equal(
+            1,
+            (await db.StreamPendingAsync(source, "dotcelery-workers")).PendingMessageCount
+        );
+        await db.KeyDeleteAsync(quarantine);
+        while (await db.StreamLengthAsync(source) != 0)
+            await Task.Delay(20, timeout.Token);
+        Assert.Equal(id, Assert.Single(await db.StreamRangeAsync(quarantine))["source-id"]);
+        await timeout.CancelAsync();
+        try
+        {
+            await pendingRead;
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private sealed class QuarantineFailureLogger : ILogger<RedisBroker>
+    {
+        public TaskCompletionSource Failed { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter
+        )
+        {
+            if (
+                exception is RedisServerException
+                && exception.Message.Contains("WRONGTYPE", StringComparison.Ordinal)
+            )
+                Failed.TrySetResult();
+        }
     }
 
     private async Task<long> StreamLengthAsync(string queue)

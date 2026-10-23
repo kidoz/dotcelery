@@ -1,1 +1,3 @@
 #nullable enable
+DotCelery.Broker.Redis.RedisBrokerOptions.DeadLetterStreamPrefix.get -> string!
+DotCelery.Broker.Redis.RedisBrokerOptions.DeadLetterStreamPrefix.set -> void

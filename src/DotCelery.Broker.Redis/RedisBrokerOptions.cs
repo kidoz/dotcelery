@@ -6,6 +6,12 @@ namespace DotCelery.Broker.Redis;
 public sealed class RedisBrokerOptions
 {
     /// <summary>
+    /// Gets or sets the prefix of quarantine streams for unreadable or unauthenticated
+    /// entries. Each source stream has its own durable quarantine stream.
+    /// </summary>
+    public string DeadLetterStreamPrefix { get; set; } = "dotcelery:dead-letter:";
+
+    /// <summary>
     /// The built-in development connection string. Cleartext, no AUTH —
     /// only safe for a developer laptop.
     /// </summary>

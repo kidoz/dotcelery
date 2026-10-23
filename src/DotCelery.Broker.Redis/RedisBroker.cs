@@ -59,6 +59,7 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
     )
     {
         _options = options.Value;
+        ArgumentException.ThrowIfNullOrWhiteSpace(_options.DeadLetterStreamPrefix);
         _logger = logger;
         _messageSecurityValidator = messageSecurityValidator;
         _queueMetrics = queueMetrics;
@@ -551,7 +552,7 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
             }
             else
             {
-                await SettleEntryAsync(db, streamKey, entry.Id).ConfigureAwait(false);
+                await QuarantineEntryAsync(db, streamKey, entry.Id).ConfigureAwait(false);
             }
         }
 
@@ -809,7 +810,7 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
                     }
                     else
                     {
-                        await SettleEntryAsync(db, streamKey, entry.Id).ConfigureAwait(false);
+                        await QuarantineEntryAsync(db, streamKey, entry.Id).ConfigureAwait(false);
                     }
                 }
 
@@ -839,6 +840,24 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
             );
         }
     }
+
+    // Preserve the exact entry before acknowledging it. The Lua script makes quarantine
+    // and removal atomic, including a retry after an ambiguous connection failure.
+    private Task<RedisResult> QuarantineEntryAsync(
+        IDatabase db,
+        string streamKey,
+        RedisValue entryId
+    ) =>
+        db.ScriptEvaluateAsync(
+            "local entries = redis.call('XRANGE', KEYS[1], ARGV[2], ARGV[2]); "
+                + "if #entries == 0 then return 0 end; "
+                + "redis.call('XADD', KEYS[2], '*', 'source-stream', KEYS[1], 'source-id', ARGV[2], "
+                + "'reason', 'Unreadable or invalid payload', unpack(entries[1][2])); "
+                + "redis.call('XACK', KEYS[1], ARGV[1], ARGV[2]); "
+                + "return redis.call('XDEL', KEYS[1], ARGV[2])",
+            [(RedisKey)streamKey, (RedisKey)(_options.DeadLetterStreamPrefix + streamKey)],
+            [(RedisValue)_options.ConsumerGroupName, entryId]
+        );
 
     private async Task SettleEntryAsync(IDatabase db, string streamKey, RedisValue messageId)
     {
