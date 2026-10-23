@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-24
+
+### Added
+- `ICeleryClient.GetStateAsync` and `AsyncResult.GetStateAsync` read a task's state before a result is stored
+- `TaskSubmissionException` exposes the task ID assigned when publication fails ambiguously
+- `RedisBrokerOptions.DeadLetterStreamPrefix` names the operator quarantine streams that receive unreadable entries
+- Multi-tenancy can require authenticated isolation: `MultiTenancyOptions.RequireAuthenticatedTenants`, per-tenant `MessageSecurityOptions.TenantSigningKeys`, `TenantStorageScope`, `TenantContext.SetTenant`, and `DashboardOptions.TenantIdClaimType`
+- `IInboxOutcomeStore`, batch callback publication (`IBatchStore.CompleteCallbackAsync`, `GetPendingCallbacksAsync`), and saga dispatch and advancement (`ISagaStore.TryClaimStepDispatchAsync`, `CompleteStepDispatchAsync`, `TryAdvanceStepAsync`, `ISagaOrchestrator.ContinueStepAsync`) let custom stores recover interrupted publications
+- Migration guides for Hangfire, Quartz.NET, Coravel and hosted services, and MassTransit/NServiceBus, with a compatibility reference for contracts that do not transfer
+
+### Changed
+- Enabled multi-tenancy defaults to authenticated isolation: independent signing keys, explicit tenant queues, scoped built-in stores, and authenticated dashboard tenant claims. Existing deployments require configuration and data migration; trusted metadata-only routing can opt out with `RequireAuthenticatedTenants = false`
+- Custom batch and saga stores must implement the new publication claim/checkpoint/recovery methods, including identity-checked `ISagaStore.TryAdvanceStepAsync`; custom orchestrators must implement `ISagaOrchestrator.ContinueStepAsync`; custom inbox stores can implement `IInboxOutcomeStore` to retain recovery outcomes
+
 ### Fixed
 - Saga success replay advances only its named completed step using an atomic version check, including replay after success dispatch but before the signal checkpoint
 - Inbox records retain successful outcomes and publication checkpoints through the deduplication period, allowing recovery after the public result expires
@@ -14,11 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Redis atomically quarantines unreadable stream entries before acknowledging or deleting them; failed quarantine writes leave the original entry pending
 - Beat renews leadership during publication and stores shared cursors and pending occurrences when storage is registered
 - Task submissions write Pending before publication; ambiguous broker failures expose the assigned ID through `TaskSubmissionException`
+- Scheduled cancellation requires a revocation store and records the revocation before removing the delayed entry, so a concurrently dispatched task cannot run; terminal state updates create a result, completing result waits for cancellation and failure
+- Overlapping-task filters renew the execution lease while the task runs and requeue an overlapped delivery; a skipped execution no longer stores `Started` or runs `TaskPreRun`
+- Delayed messages stay claimed for retry when their retry write fails, instead of being completed and lost
+- Dead-letter serialization failures propagate instead of settling the delivery with an empty original message
 - Signed custom-broker deliveries without original body bytes are rejected, and dashboard rejection text follows exception sanitization settings
-
-### Changed
-- Enabled multi-tenancy defaults to authenticated isolation: independent signing keys, explicit tenant queues, scoped built-in stores, and authenticated dashboard tenant claims. Existing deployments require configuration and data migration; trusted metadata-only routing can opt out with `RequireAuthenticatedTenants = false`
-- Custom batch and saga stores must implement the new publication claim/checkpoint/recovery methods, including identity-checked `ISagaStore.TryAdvanceStepAsync`; custom orchestrators must implement `ISagaOrchestrator.ContinueStepAsync`; custom inbox stores can implement `IInboxOutcomeStore` to retain recovery outcomes
 
 ## [1.1.0] - 2026-10-23
 
@@ -274,6 +288,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Requires .NET 10.0 and C# 14
 - First public release
 
-[Unreleased]: https://github.com/kidoz/dotcelery/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/kidoz/dotcelery/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/kidoz/dotcelery/releases/tag/v1.2.0
+[1.1.0]: https://github.com/kidoz/dotcelery/releases/tag/v1.1.0
 [1.0.0]: https://github.com/kidoz/dotcelery/releases/tag/v1.0.0
 [0.1.0]: https://github.com/kidoz/dotcelery/releases/tag/v0.1.0
