@@ -1,5 +1,6 @@
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Extensions;
+using DotCelery.Core.Security;
 using DotCelery.Worker.Extensions;
 using DotCelery.Worker.Registry;
 using Microsoft.Extensions.DependencyInjection;
@@ -62,6 +63,19 @@ public sealed class WorkerRegistrationTests
 
         Assert.True(registry.IsRegistered(FirstTask.TaskName));
         Assert.True(registry.IsRegistered(SecondTask.TaskName));
+    }
+
+    [Fact]
+    public void AddWorker_RegistersDefaultMessageSecurityValidation()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        services.AddDotCelery(builder => builder.AddWorker());
+
+        using var provider = services.BuildServiceProvider();
+
+        Assert.NotNull(provider.GetService<IMessageSecurityValidator>());
     }
 
     [Fact]

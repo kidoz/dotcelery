@@ -16,6 +16,7 @@ using DotCelery.Worker.Resilience;
 using DotCelery.Worker.Sagas;
 using DotCelery.Worker.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -88,6 +89,16 @@ public static class WorkerServiceCollectionExtensions
         builder.Services.AddSingleton<IDeadLetterHandler, DeadLetterHandler>();
         builder.Services.AddSingleton<IGracefulShutdownHandler, GracefulShutdownHandler>();
         builder.Services.AddSingleton<TaskExecutor>();
+
+        // Schema version and payload size validation apply to every message without
+        // configuration. Signing and the task allowlist remain opt-in, and the startup
+        // diagnostics say when they are off.
+        builder.Services.AddOptions<MessageSecurityOptions>();
+        builder.Services.TryAddSingleton<IMessageSecurityValidator, MessageSecurityValidator>();
+        builder.Services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, WorkerStartupDiagnostics>()
+        );
+
         builder.Services.AddSingleton(sp => new RevocationManager(
             sp.GetRequiredService<IOptions<WorkerOptions>>(),
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<RevocationManager>>(),
@@ -538,7 +549,7 @@ public static class WorkerServiceCollectionExtensions
             options.Validate();
         });
 
-        builder.Services.AddSingleton<IMessageSecurityValidator, MessageSecurityValidator>();
+        builder.Services.TryAddSingleton<IMessageSecurityValidator, MessageSecurityValidator>();
 
         return builder;
     }
