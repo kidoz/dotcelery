@@ -41,7 +41,7 @@ internal sealed class MongoQueueStore(MongoContext context) : IQueueStore
         };
 
         // Two enqueues of a missing item race on the unique index; the loser replaces
-        while (true)
+        for (var attempt = 0; ; attempt++)
         {
             try
             {
@@ -55,7 +55,11 @@ internal sealed class MongoQueueStore(MongoContext context) : IQueueStore
                     .ConfigureAwait(false);
                 return;
             }
-            catch (MongoException ex) when (MongoContext.IsDuplicateKey(ex)) { }
+            catch (MongoException ex) when (MongoContext.IsDuplicateKey(ex) && attempt < 7)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(1 << attempt), cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
     }
 

@@ -40,7 +40,7 @@ internal sealed class MongoCounterStore(MongoContext context) : ICounterStore
             },
         };
 
-        while (true)
+        for (var attempt = 0; ; attempt++)
         {
             var incremented = await counters
                 .FindOneAndUpdateAsync(
@@ -78,7 +78,11 @@ internal sealed class MongoCounterStore(MongoContext context) : ICounterStore
                     .ConfigureAwait(false);
                 return delta;
             }
-            catch (MongoException ex) when (MongoContext.IsDuplicateKey(ex)) { }
+            catch (MongoException ex) when (MongoContext.IsDuplicateKey(ex) && attempt < 7)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(1 << attempt), cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
     }
 
@@ -190,7 +194,7 @@ internal sealed class MongoCounterStore(MongoContext context) : ICounterStore
         );
 
         BsonDocument result;
-        while (true)
+        for (var attempt = 0; ; attempt++)
         {
             try
             {
@@ -208,7 +212,11 @@ internal sealed class MongoCounterStore(MongoContext context) : ICounterStore
                     .ConfigureAwait(false);
                 break;
             }
-            catch (MongoException ex) when (MongoContext.IsDuplicateKey(ex)) { }
+            catch (MongoException ex) when (MongoContext.IsDuplicateKey(ex) && attempt < 7)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(1 << attempt), cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
 
         var events = result["e"].AsBsonArray;
