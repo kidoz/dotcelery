@@ -9,6 +9,7 @@ using DotCelery.Worker;
 using DotCelery.Worker.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 
 namespace DotCelery.Tests.Unit.Worker;
 
@@ -81,6 +82,45 @@ public sealed class DelayedMessageDispatcherTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task PublishAndRetryWriteFail_LeavesTheOriginalClaimForRecovery()
+    {
+        await _store.AddAsync(CreateMessage("t1"), DateTimeOffset.UtcNow.AddMinutes(-1));
+        _broker.FailPublish = true;
+        var retryFailed = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        var store = Substitute.For<IDelayedMessageStore>();
+        store
+            .GetDueMessagesAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+                _store.GetDueMessagesAsync(
+                    call.Arg<DateTimeOffset>(),
+                    call.Arg<CancellationToken>()
+                )
+            );
+#pragma warning disable CA2012 // NSubstitute consumes the configured ValueTask.
+        store
+            .AddAsync(
+                Arg.Any<TaskMessage>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>()
+            )
+            .Returns(_ =>
+            {
+                retryFailed.TrySetResult();
+                return ValueTask.FromException(new IOException("Storage unavailable"));
+            });
+#pragma warning restore CA2012
+        var dispatcher = CreateDispatcher(store: store);
+        await dispatcher.StartAsync(CancellationToken.None);
+        await retryFailed.Task.WaitAsync(WaitTimeout);
+        await dispatcher.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, await _store.GetPendingCountAsync());
+        Assert.Empty(_broker.Published);
+    }
+
+    [Fact]
     public async Task ADisabledDispatcher_DoesNotPublish()
     {
         await _store.AddAsync(CreateMessage("t1"), DateTimeOffset.UtcNow.AddMinutes(-1));
@@ -99,9 +139,12 @@ public sealed class DelayedMessageDispatcherTests : IAsyncDisposable
         await _broker.DisposeAsync();
     }
 
-    private DelayedMessageDispatcher CreateDispatcher(bool enabled = true) =>
+    private DelayedMessageDispatcher CreateDispatcher(
+        bool enabled = true,
+        IDelayedMessageStore? store = null
+    ) =>
         new(
-            _store,
+            store ?? _store,
             _broker,
             Options.Create(
                 new WorkerOptions

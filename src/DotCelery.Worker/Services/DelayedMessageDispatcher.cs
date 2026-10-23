@@ -116,22 +116,12 @@ public sealed class DelayedMessageDispatcher : BackgroundService
             {
                 _logger.LogError(ex, "Failed to dispatch delayed message {TaskId}", message.Id);
 
-                // Re-add the message to the store for retry
-                try
-                {
-                    var retryTime = now.Add(_options.DelayedMessageRetryInterval);
-                    await _delayedMessageStore
-                        .AddAsync(message, retryTime, cancellationToken)
-                        .ConfigureAwait(false);
-                }
-                catch (Exception retryEx)
-                {
-                    _logger.LogError(
-                        retryEx,
-                        "Failed to re-add message {TaskId} to delay store",
-                        message.Id
-                    );
-                }
+                // Replacing the entry releases its claim for retry. If this fails, stop
+                // enumeration so the original claim is not completed and can expire.
+                var retryTime = now.Add(_options.DelayedMessageRetryInterval);
+                await _delayedMessageStore
+                    .AddAsync(message, retryTime, cancellationToken)
+                    .ConfigureAwait(false);
             }
         }
 
