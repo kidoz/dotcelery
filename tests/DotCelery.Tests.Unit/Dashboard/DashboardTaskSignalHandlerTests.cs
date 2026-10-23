@@ -1,6 +1,7 @@
 using System.Text.Json;
 using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Core.Models;
+using DotCelery.Core.MultiTenancy;
 using DotCelery.Core.Signals;
 using DotCelery.Dashboard;
 using DotCelery.Dashboard.Hubs;
@@ -36,7 +37,7 @@ public sealed class DashboardTaskSignalHandlerTests
         var clients = Substitute.For<IHubClients>();
         clients.Group("task:t1").Returns(_taskProxy);
         clients.Group("task-updates").Returns(_updatesProxy);
-        clients.All.Returns(_overviewProxy);
+        clients.Group("dashboard").Returns(_overviewProxy);
         var hubContext = Substitute.For<IHubContext<DashboardHub>>();
         hubContext.Clients.Returns(clients);
 
@@ -46,6 +47,34 @@ public sealed class DashboardTaskSignalHandlerTests
             NullLogger<DashboardTaskSignalHandler>.Instance,
             new DashboardNotificationService(hubContext)
         );
+    }
+
+    [Fact]
+    public async Task TenantNotifications_UseDisjointGroupsForTheSameTaskId()
+    {
+        var clients = Substitute.For<IHubClients>();
+        var tenantA = Substitute.For<IClientProxy>();
+        var tenantB = Substitute.For<IClientProxy>();
+        clients.Group("tenant:1:a:task:t1").Returns(tenantA);
+        clients.Group("tenant:1:a:task-updates").Returns(tenantA);
+        clients.Group("tenant:1:b:task:t1").Returns(tenantB);
+        clients.Group("tenant:1:b:task-updates").Returns(tenantB);
+        var hub = Substitute.For<IHubContext<DashboardHub>>();
+        hub.Clients.Returns(clients);
+        var notifications = new DashboardNotificationService(hub);
+        using (TenantContext.SetTenant("a"))
+            await notifications.NotifyTaskStateChangedAsync("t1", "Success");
+        await tenantA
+            .Received(2)
+            .SendCoreAsync("TaskStateChanged", Arg.Any<object?[]>(), Arg.Any<CancellationToken>());
+        await tenantB.DidNotReceiveWithAnyArgs().SendCoreAsync(default!, default!, default);
+        using (TenantContext.SetTenant("b"))
+            await notifications.NotifyTaskStateChangedAsync("t1", "Failure");
+        await tenantB
+            .Received(2)
+            .SendCoreAsync("TaskStateChanged", Arg.Any<object?[]>(), Arg.Any<CancellationToken>());
+        _ = clients.DidNotReceive().All;
+        clients.DidNotReceive().Group("task:t1");
     }
 
     [Fact]

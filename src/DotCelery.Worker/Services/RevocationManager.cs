@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
+using DotCelery.Core.MultiTenancy;
 using DotCelery.Core.Storage.Stores;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -20,6 +21,15 @@ public sealed class RevocationManager : BackgroundService
     private readonly ILogger<RevocationManager> _logger;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _runningTasks = new();
     private readonly ConcurrentDictionary<string, RevocationEvent> _pendingRevocations = new();
+
+    private string?[] _tenants = [null];
+
+    internal void SetTenants(IEnumerable<string?> tenants) => _tenants = tenants.ToArray();
+
+    private static string TaskKey(string taskId) =>
+        TenantContext.Current.TenantId is { } tenant
+            ? $"{tenant.Length}:{tenant}:{taskId}"
+            : taskId;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RevocationManager"/> class.
@@ -64,7 +74,7 @@ public sealed class RevocationManager : BackgroundService
     public CancellationTokenSource RegisterTask(string taskId, CancellationToken parentToken)
     {
         var cts = CancellationTokenSource.CreateLinkedTokenSource(parentToken);
-        if (!_runningTasks.TryAdd(taskId, cts))
+        if (!_runningTasks.TryAdd(TaskKey(taskId), cts))
         {
             cts.Dispose();
             throw new InvalidOperationException($"Task {taskId} is already registered as running.");
@@ -92,7 +102,7 @@ public sealed class RevocationManager : BackgroundService
     /// <param name="taskId">The task ID.</param>
     public void UnregisterTask(string taskId)
     {
-        if (_runningTasks.TryRemove(taskId, out var cts))
+        if (_runningTasks.TryRemove(TaskKey(taskId), out var cts))
         {
             cts.Dispose();
         }
@@ -126,14 +136,14 @@ public sealed class RevocationManager : BackgroundService
     /// <returns>The revoke options if the task was cancelled via revocation, null otherwise.</returns>
     public RevokeOptions? GetRevocationOptions(string taskId)
     {
-        if (!_pendingRevocations.TryGetValue(taskId, out var revocation))
+        if (!_pendingRevocations.TryGetValue(TaskKey(taskId), out var revocation))
         {
             return null;
         }
         if (IsExpired(revocation))
         {
             ((ICollection<KeyValuePair<string, RevocationEvent>>)_pendingRevocations).Remove(
-                new(taskId, revocation)
+                new(TaskKey(taskId), revocation)
             );
             return null;
         }
@@ -141,8 +151,12 @@ public sealed class RevocationManager : BackgroundService
     }
 
     /// <inheritdoc />
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+        Task.WhenAll(_tenants.Select(tenant => RunTenantAsync(tenant, stoppingToken)));
+
+    private async Task RunTenantAsync(string? tenant, CancellationToken stoppingToken)
     {
+        using var tenantScope = TenantContext.SetTenant(tenant);
         if (_revocationStore is null)
         {
             _logger.LogInformation("Revocation manager disabled - no revocation store configured");
@@ -252,7 +266,7 @@ public sealed class RevocationManager : BackgroundService
         {
             return;
         }
-        _pendingRevocations[evt.TaskId] = evt;
+        _pendingRevocations[TaskKey(evt.TaskId)] = evt;
         _logger.LogDebug(
             "Received revocation event for task {TaskId}, terminate={Terminate}",
             evt.TaskId,
@@ -268,7 +282,7 @@ public sealed class RevocationManager : BackgroundService
 
     private void CancelTask(string taskId, RevokeOptions options)
     {
-        if (!_runningTasks.TryGetValue(taskId, out var cts))
+        if (!_runningTasks.TryGetValue(TaskKey(taskId), out var cts))
         {
             return;
         }
@@ -321,9 +335,12 @@ public sealed class RevocationManager : BackgroundService
         {
             while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
             {
-                foreach (var taskId in _pendingRevocations.Keys)
+                foreach (var entry in _pendingRevocations)
                 {
-                    _ = GetRevocationOptions(taskId);
+                    if (IsExpired(entry.Value))
+                        (
+                            (ICollection<KeyValuePair<string, RevocationEvent>>)_pendingRevocations
+                        ).Remove(entry);
                 }
             }
         }

@@ -1,11 +1,13 @@
 using Asp.Versioning;
 using DotCelery.Core.Dashboard;
+using DotCelery.Core.MultiTenancy;
 using DotCelery.Core.Signals;
 using DotCelery.Dashboard.Hubs;
 using DotCelery.Dashboard.Middleware;
 using DotCelery.Dashboard.Routing;
 using DotCelery.Dashboard.Security;
 using DotCelery.Dashboard.Services;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace DotCelery.Dashboard.Extensions;
@@ -80,6 +82,8 @@ public static class DashboardExtensions
         services.AddScoped<IDashboardDataProvider, DashboardDataService>();
         services.AddSingleton<DashboardNotificationService>();
         services.AddScoped<DashboardAuthorizationFilter>();
+        services.AddScoped<DashboardTenantFilter>();
+        services.AddSingleton<DashboardTenantHubFilter>();
         services.AddScoped<DashboardRequestVerificationFilter>();
 
         // The task record store indexes the tasks this host runs, so the dashboard can list and
@@ -110,11 +114,11 @@ public static class DashboardExtensions
         services.AddScoped<ITaskSignalHandler<TaskRejectedSignal>>(sp =>
             sp.GetRequiredService<DashboardTaskSignalHandler>()
         );
-        services.AddHostedService<DashboardWorkerMonitor>();
-        services.AddHostedService<DashboardMetricsCollector>();
+        services.AddHostedService<TenantHostedService<DashboardWorkerMonitor>>();
+        services.AddHostedService<TenantHostedService<DashboardMetricsCollector>>();
 
         // Add SignalR
-        services.AddSignalR();
+        services.AddSignalR(options => options.AddFilter<DashboardTenantHubFilter>());
 
         // Add controllers for API endpoints
         services.AddProblemDetails();
@@ -137,6 +141,7 @@ public static class DashboardExtensions
                 );
                 options.Filters.AddService<DashboardRequestVerificationFilter>();
                 options.Filters.AddService<DashboardAuthorizationFilter>();
+                options.Filters.AddService<DashboardTenantFilter>();
             })
             .AddApplicationPart(typeof(DashboardExtensions).Assembly);
     }

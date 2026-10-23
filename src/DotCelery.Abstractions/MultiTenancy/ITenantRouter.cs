@@ -51,6 +51,12 @@ public sealed class MultiTenancyOptions
     public bool Enabled { get; set; }
 
     /// <summary>
+    /// Gets or sets whether enabled multi-tenancy requires independent signed identities,
+    /// queue authorization and scoped storage. Disable only for legacy trusted metadata routing.
+    /// </summary>
+    public bool RequireAuthenticatedTenants { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets the header name for tenant ID.
     /// Default is "X-Tenant-Id".
     /// </summary>

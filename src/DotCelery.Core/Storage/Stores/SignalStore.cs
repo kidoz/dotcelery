@@ -38,8 +38,8 @@ public sealed class SignalStore : ISignalStore
     )
     {
         ArgumentNullException.ThrowIfNull(storage);
-        _queues = storage.Queues;
-        _documents = storage.Documents;
+        _queues = TenantStorageScope.For(storage, options).Queues;
+        _documents = TenantStorageScope.For(storage, options).Documents;
         _options = options?.Value ?? new StorageStoreOptions();
         ArgumentOutOfRangeException.ThrowIfLessThan(_options.SignalMaxAttempts, 1);
         _failedCollection = _options.Name("signals.failed");

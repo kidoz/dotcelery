@@ -310,6 +310,12 @@ public sealed class CeleryClient : ICeleryClient
         where TInput : class
     {
         ArgumentNullException.ThrowIfNull(input);
+        var tenantId = options?.TenantId ?? TenantContext.Current.TenantId;
+        if (TenantContext.Current.TenantId is { } ambient && tenantId != ambient)
+            throw new InvalidOperationException(
+                "A task submission cannot change its authenticated tenant."
+            );
+        using var tenantScope = TenantContext.SetTenant(tenantId);
 
         var taskName = TTask.TaskName;
         var taskId = options?.TaskId ?? Guid.NewGuid().ToString("N");
@@ -367,9 +373,20 @@ public sealed class CeleryClient : ICeleryClient
             ?? _taskRouter?.GetQueue(taskName, _options.DefaultQueue)
             ?? _options.DefaultQueue;
         var queue =
-            options?.TenantId is not null && options.Queue is null && _tenantRouter is not null
-                ? _tenantRouter.GetQueue(options.TenantId, baseQueue)
+            tenantId is not null && options?.Queue is null && _tenantRouter is not null
+                ? _tenantRouter.GetQueue(tenantId, baseQueue)
                 : baseQueue;
+
+        if (tenantId is not null && _tenantRouter is TenantRouter { EnforcesIsolation: true })
+        {
+            var authorizedQueue = _tenantRouter.GetQueue(tenantId, baseQueue);
+            if (options?.Queue is { } requested && requested != authorizedQueue)
+                throw new InvalidOperationException(
+                    "A task cannot be published outside its authenticated tenant queue."
+                );
+            queue = authorizedQueue;
+        }
+        using var publicationRoute = TenantContext.SetTenant(tenantId, queue);
 
         var eta = options?.Eta;
         if (options?.Countdown.HasValue == true)
@@ -401,7 +418,7 @@ public sealed class CeleryClient : ICeleryClient
             maxRetries: options?.MaxRetries ?? _options.DefaultMaxRetries,
             priority: options?.Priority ?? 0,
             correlationId: options?.CorrelationId,
-            tenantId: options?.TenantId,
+            tenantId: tenantId,
             partitionKey: options?.PartitionKey,
             headers: headersWithTrace
         );

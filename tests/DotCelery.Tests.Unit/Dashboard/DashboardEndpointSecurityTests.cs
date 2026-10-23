@@ -1,13 +1,18 @@
 using System.Net;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Asp.Versioning.ApiExplorer;
 using DotCelery.Backend.InMemory.Extensions;
 using DotCelery.Broker.InMemory.Extensions;
 using DotCelery.Core.Extensions;
+using DotCelery.Core.MultiTenancy;
+using DotCelery.Core.Security;
+using DotCelery.Core.Storage.Stores;
 using DotCelery.Dashboard;
 using DotCelery.Dashboard.Extensions;
 using DotCelery.Dashboard.Security;
+using DotCelery.Dashboard.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -161,18 +166,85 @@ public sealed class DashboardEndpointSecurityTests
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    [Fact]
+    public async Task TenantClaims_ScopeDashboardQueriesAndCannotBeOverriddenByARequestHeader()
+    {
+        await using var host = await StartAsync(
+            options => options.RequireAuthorization = false,
+            isolateTenants: true
+        );
+        var records = host.App.Services.GetRequiredService<TaskRecordStore>();
+        using (TenantContext.SetTenant("a"))
+            await records.RecordAsync(
+                new()
+                {
+                    TaskId = "same",
+                    TaskName = "private-a",
+                    State = "Success",
+                }
+            );
+        using (TenantContext.SetTenant("b"))
+            await records.RecordAsync(
+                new()
+                {
+                    TaskId = "same",
+                    TaskName = "private-b",
+                    State = "Success",
+                }
+            );
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            (await host.Client.GetAsync("/celery/api/v1/tasks/same")).StatusCode
+        );
+        foreach (var tenant in new[] { "a", "b" })
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/celery/api/v1/tasks/same");
+            request.Headers.Add("test-authenticated-tenant", tenant);
+            request.Headers.Add("X-Tenant-Id", tenant == "a" ? "b" : "a");
+            var response = await host.Client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadAsStringAsync();
+            Assert.Contains($"private-{tenant}", body, StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                tenant == "a" ? "private-b" : "private-a",
+                body,
+                StringComparison.Ordinal
+            );
+        }
+    }
+
     private static StringContent JsonContent() =>
         new("""{"terminate": true}""", Encoding.UTF8, "application/json");
 
-    private static async Task<TestHost> StartAsync(Action<DashboardOptions> configure)
+    private static async Task<TestHost> StartAsync(
+        Action<DashboardOptions> configure,
+        bool isolateTenants = false
+    )
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
 
         builder.Services.AddDotCelery(celery =>
-            celery.UseInMemoryBroker().UseInMemoryBackend().AddInMemoryRevocationStore()
-        );
+        {
+            celery.UseInMemoryBroker().UseInMemoryBackend().AddInMemoryRevocationStore();
+            if (isolateTenants)
+                celery.AddTenantRouting(options =>
+                {
+                    options.Enabled = true;
+                    options.ValidTenants = ["a", "b"];
+                });
+        });
+        if (isolateTenants)
+            builder.Services.Configure<MessageSecurityOptions>(options =>
+            {
+                options.EnableMessageSigning = true;
+                options.TenantSigningKeys = new()
+                {
+                    ["a"] = Enumerable.Repeat((byte)1, 32).ToArray(),
+                    ["b"] = Enumerable.Repeat((byte)2, 32).ToArray(),
+                };
+            });
         builder.Services.AddDotCeleryDashboard(o =>
         {
             o.PathPrefix = "/celery";
@@ -180,6 +252,26 @@ public sealed class DashboardEndpointSecurityTests
         });
 
         var app = builder.Build();
+        if (isolateTenants)
+        {
+            var router = app.Services.GetRequiredService<ITenantRouter>();
+            router.AddTenantQueue("a", "queue-a");
+            router.AddTenantQueue("b", "queue-b");
+        }
+        if (isolateTenants)
+            app.Use(
+                async (context, next) =>
+                {
+                    if (
+                        context.Request.Headers["test-authenticated-tenant"].FirstOrDefault() is
+                        { } tenant
+                    )
+                        context.User = new ClaimsPrincipal(
+                            new ClaimsIdentity([new Claim("dotcelery:tenant", tenant)], "test")
+                        );
+                    await next(context);
+                }
+            );
         app.UseDotCeleryDashboard();
         app.MapDotCeleryDashboard("/celery");
         await app.StartAsync();

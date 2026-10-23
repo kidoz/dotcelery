@@ -39,7 +39,7 @@ public sealed class HistoricalDataStore : IHistoricalDataStore
     )
     {
         ArgumentNullException.ThrowIfNull(storage);
-        _documents = storage.Documents;
+        _documents = TenantStorageScope.For(storage, storeOptions).Documents;
         _options = options?.Value ?? new HistoricalDataOptions();
         _timeProvider = timeProvider ?? TimeProvider.System;
         _collection = (storeOptions?.Value ?? new StorageStoreOptions()).Name("metrics-history");

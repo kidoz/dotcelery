@@ -44,8 +44,8 @@ public sealed class RevocationStore : IRevocationStore
     )
     {
         ArgumentNullException.ThrowIfNull(storage);
-        _documents = storage.Documents;
-        _notifications = storage.Notifications;
+        _documents = TenantStorageScope.For(storage, options).Documents;
+        _notifications = TenantStorageScope.For(storage, options).Notifications;
         _options = options?.Value ?? new StorageStoreOptions();
         _collection = _options.Name("revocations");
         _timeProvider = timeProvider ?? TimeProvider.System;

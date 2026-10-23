@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.MultiTenancy;
+using DotCelery.Core.Security;
 using DotCelery.Core.Serialization;
 using DotCelery.Core.Storage;
 using DotCelery.Core.Storage.Stores;
@@ -69,6 +70,21 @@ public static class ServiceCollectionExtensions
             builder.Services.Configure(configure);
         }
 
+        builder.Services.AddOptions<MultiTenancyOptions>().ValidateOnStart();
+        builder.Services.AddOptions<MessageSecurityOptions>();
+        builder.Services.AddSingleton<
+            IValidateOptions<MultiTenancyOptions>,
+            TenantIsolationOptionsValidator
+        >();
+        builder
+            .Services.AddOptions<StorageStoreOptions>()
+            .Configure<IOptions<MultiTenancyOptions>>(
+                (stores, tenancy) =>
+                {
+                    if (tenancy.Value.Enabled && tenancy.Value.RequireAuthenticatedTenants)
+                        stores.RequireTenantScope = true;
+                }
+            );
         builder.Services.AddSingleton<ITenantRouter, TenantRouter>();
         builder.Services.AddSingleton<ITenantContext>(TenantContext.Current);
         return builder;

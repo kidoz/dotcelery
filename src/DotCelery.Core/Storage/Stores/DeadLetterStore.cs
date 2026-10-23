@@ -49,7 +49,7 @@ public sealed class DeadLetterStore : IDeadLetterStore
         ArgumentNullException.ThrowIfNull(storage);
         ArgumentNullException.ThrowIfNull(broker);
         ArgumentNullException.ThrowIfNull(serializer);
-        _documents = storage.Documents;
+        _documents = TenantStorageScope.For(storage, storeOptions).Documents;
         _broker = broker;
         _serializer = serializer;
         _options = options?.Value ?? new DeadLetterOptions();

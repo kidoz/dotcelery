@@ -1,4 +1,5 @@
 using DotCelery.Core.Models;
+using DotCelery.Core.MultiTenancy;
 using DotCelery.Core.Storage;
 using DotCelery.Core.Storage.Stores;
 
@@ -19,6 +20,72 @@ public abstract class ResultBackendConformanceTests : StoreConformanceTests
         }
 
         await base.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task TenantScope_IsolatesIdenticalTaskIdsAndRejectsUnscopedAccess()
+    {
+        StoreOptions.RequireTenantScope = true;
+        var backend = CreateBackend();
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            backend.GetResultAsync("same").AsTask()
+        );
+        using (TenantContext.SetTenant("a"))
+            await backend.StoreResultAsync(
+                Success("same") with
+                {
+                    Result = "tenant-a"u8.ToArray(),
+                }
+            );
+        using (TenantContext.SetTenant("b"))
+        {
+            Assert.Null(await backend.GetResultAsync("same"));
+            await backend.StoreResultAsync(
+                Success("same") with
+                {
+                    Result = "tenant-b"u8.ToArray(),
+                }
+            );
+            Assert.Equal("tenant-b"u8.ToArray(), (await backend.GetResultAsync("same"))!.Result);
+        }
+        using (TenantContext.SetTenant("a"))
+            Assert.Equal("tenant-a"u8.ToArray(), (await backend.GetResultAsync("same"))!.Result);
+    }
+
+    [Fact]
+    public async Task TenantScope_IsolatesQueuesLeasesAndCounters()
+    {
+        StoreOptions.RequireTenantScope = true;
+        var scoped = TenantStorageScope.For(Provider, CreateOptions());
+        using (TenantContext.SetTenant("a"))
+        {
+            await scoped.Queues.EnqueueAsync("shared", "same", "a"u8.ToArray(), Start);
+            Assert.NotNull(
+                await scoped.Leases.TryAcquireAsync("shared", "owner", TimeSpan.FromMinutes(1))
+            );
+            await scoped.Counters.IncrementAsync("shared", 42);
+        }
+        using (TenantContext.SetTenant("b"))
+        {
+            Assert.Equal(0, await scoped.Queues.CountAsync("shared"));
+            Assert.Null(await scoped.Leases.GetAsync("shared"));
+            Assert.Equal(0, await scoped.Counters.GetAsync("shared"));
+            Assert.NotNull(
+                await scoped.Leases.TryAcquireAsync("shared", "other", TimeSpan.FromMinutes(1))
+            );
+        }
+        using (TenantContext.SetTenant("a"))
+        {
+            var claimed = Assert.Single(
+                await scoped.Queues.ClaimAsync("shared", 1, TimeSpan.FromMinutes(1))
+            );
+            Assert.Equal("a"u8.ToArray(), claimed.Payload.ToArray());
+            Assert.True(await scoped.Queues.CompleteAsync(claimed));
+            var lease = Assert.Single(await scoped.Leases.ListAsync("shared").ToListAsync());
+            Assert.Equal("shared", lease.Key);
+            Assert.True(await scoped.Leases.ReleaseAsync(lease));
+            Assert.Equal(42, await scoped.Counters.GetAsync("shared"));
+        }
     }
 
     [Fact]

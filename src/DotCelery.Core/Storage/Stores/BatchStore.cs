@@ -34,7 +34,7 @@ public sealed class BatchStore : IBatchStore
     )
     {
         ArgumentNullException.ThrowIfNull(storage);
-        _documents = storage.Documents;
+        _documents = TenantStorageScope.For(storage, options).Documents;
         _timeProvider = timeProvider ?? TimeProvider.System;
         var storeOptions = options?.Value ?? new StorageStoreOptions();
         _batches = storeOptions.Name("batches");

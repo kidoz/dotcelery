@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 using DotCelery.Core.Models;
+using DotCelery.Core.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -17,6 +19,7 @@ public sealed class MessageSecurityValidator : IMessageSecurityValidator, IDispo
     // HMACSHA256 instances are not thread-safe, and this validator is a shared singleton,
     // so each signature is computed with the stateless HMACSHA256.HashData API.
     private readonly byte[]? _signingKey;
+    private readonly Dictionary<string, byte[]> _tenantKeys = new(StringComparer.Ordinal);
     private bool _disposed;
 
     /// <summary>
@@ -34,6 +37,12 @@ public sealed class MessageSecurityValidator : IMessageSecurityValidator, IDispo
         _options = options.Value;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
+
+        if (_options.EnableMessageSigning)
+        {
+            foreach (var (tenant, key) in _options.TenantSigningKeys)
+                _tenantKeys.Add(tenant, (byte[])key.Clone());
+        }
 
         if (_options.EnableMessageSigning && _options.SigningKey is not null)
         {
@@ -152,30 +161,50 @@ public sealed class MessageSecurityValidator : IMessageSecurityValidator, IDispo
     /// <inheritdoc />
     public string? Sign(byte[] payload)
     {
-        if (_signingKey is null)
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var key = ResolveKey(payload);
+        if (key is null)
+        {
+            if (_tenantKeys.Count > 0)
+                throw new InvalidOperationException(
+                    "No signing key is available for the message's explicit tenant ID."
+                );
+            return null;
+        }
+        return Convert.ToBase64String(HMACSHA256.HashData(key, payload));
+    }
+
+    private byte[]? ResolveKey(byte[] payload)
+    {
+        if (_tenantKeys.Count == 0)
+            return _signingKey;
+        try
+        {
+            var message = JsonSerializer.Deserialize(
+                payload,
+                DotCeleryJsonContext.Default.TaskMessage
+            );
+            return message?.TenantId is { } tenant && _tenantKeys.TryGetValue(tenant, out var key)
+                ? key
+                : null;
+        }
+        catch (JsonException)
         {
             return null;
         }
-
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var hash = HMACSHA256.HashData(_signingKey, payload);
-        return Convert.ToBase64String(hash);
     }
 
     /// <inheritdoc />
     public bool VerifySignature(byte[] payload, string signature)
     {
-        if (_signingKey is null)
-        {
-            return false;
-        }
-
         ObjectDisposedException.ThrowIf(_disposed, this);
+        var key = ResolveKey(payload);
+        if (key is null)
+            return false;
 
         try
         {
-            var expectedHash = HMACSHA256.HashData(_signingKey, payload);
+            var expectedHash = HMACSHA256.HashData(key, payload);
             var actualHash = Convert.FromBase64String(signature);
 
             return CryptographicOperations.FixedTimeEquals(expectedHash, actualHash);
@@ -196,6 +225,9 @@ public sealed class MessageSecurityValidator : IMessageSecurityValidator, IDispo
         }
 
         _disposed = true;
+
+        foreach (var key in _tenantKeys.Values)
+            CryptographicOperations.ZeroMemory(key);
 
         if (_signingKey is not null)
         {

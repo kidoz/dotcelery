@@ -3,13 +3,17 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using DotCelery.Core.Abstractions;
+using DotCelery.Core.DeadLetter;
 using DotCelery.Core.Exceptions;
 using DotCelery.Core.Filters;
 using DotCelery.Core.Instrumentation;
 using DotCelery.Core.Models;
 using DotCelery.Core.MultiTenancy;
 using DotCelery.Core.Resilience;
+using DotCelery.Core.Security;
+using DotCelery.Core.Serialization;
 using DotCelery.Core.Signals;
+using DotCelery.Core.Storage;
 using DotCelery.Core.Storage.Stores;
 using DotCelery.Core.TimeLimits;
 using DotCelery.Worker.Filters;
@@ -106,6 +110,9 @@ public sealed class TaskExecutor
         CancellationToken cancellationToken
     )
     {
+        if (ValidateTenantDelivery(brokerMessage) is { } tenantFailure)
+            throw new RejectException(tenantFailure);
+        using var deliveryTenant = EnterTenantScope(brokerMessage.Message);
         var message = brokerMessage.Message;
         var startTime = _timeProvider.GetUtcNow();
 
@@ -984,12 +991,128 @@ public sealed class TaskExecutor
         }
     }
 
+    internal async ValueTask QuarantineDeliveryAsync(
+        BrokerMessage delivery,
+        CancellationToken cancellationToken
+    )
+    {
+        // Unauthenticated deliveries must never write into a tenant's namespace. This
+        // operator-only collection is intentionally outside tenant dashboard/query stores.
+        var storage =
+            _serviceProvider.GetService<IStorageProvider>()
+            ?? (_resultBackend as IStorageBackedStore)?.Storage
+            ?? throw new InvalidOperationException(
+                "Durable storage is required to quarantine an untrusted delivery."
+            );
+        var options =
+            _serviceProvider.GetService<IOptions<StorageStoreOptions>>()?.Value
+            ?? new StorageStoreOptions();
+        var deadLetters =
+            _serviceProvider.GetService<IOptions<DeadLetterOptions>>()?.Value
+            ?? new DeadLetterOptions();
+        var now = _timeProvider.GetUtcNow();
+        var record = new DeadLetterMessage
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            TaskId = delivery.Message.Id,
+            TaskName = delivery.Message.Task,
+            Queue = delivery.Queue,
+            Reason = DeadLetterReason.Rejected,
+            OriginalMessage =
+                delivery.RawBody
+                ?? JsonSerializer.SerializeToUtf8Bytes(
+                    delivery.Message,
+                    DotCeleryJsonContext.Default.TaskMessage
+                ),
+            ExceptionMessage = "Tenant authentication or delivery policy rejected this message.",
+            Timestamp = now,
+            ExpiresAt = now + deadLetters.RetentionPeriod,
+        };
+        await storage
+            .Documents.UpsertAsync(
+                options.Prefix + ".quarantine",
+                record.Id,
+                record,
+                DotCeleryJsonContext.Default.DeadLetterMessage,
+                new DocumentWriteOptions
+                {
+                    TimeToLive = deadLetters.RetentionPeriod,
+                    SortKey = now,
+                },
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+    }
+
+    internal bool RequiresTenantAuthentication =>
+        _multiTenancyOptions is { RequireAuthenticatedTenants: true };
+
+    internal IDisposable? EnterTenantScope(TaskMessage message) => SetTenantContext(message);
+
+    internal string? ValidateTenantDelivery(BrokerMessage delivery)
+    {
+        if (_multiTenancyOptions is not { RequireAuthenticatedTenants: true } tenancy)
+            return null;
+        var message = delivery.Message;
+        var security = _serviceProvider.GetService<IOptions<MessageSecurityOptions>>()?.Value;
+        var validator = _serviceProvider.GetService<IMessageSecurityValidator>();
+        if (
+            message.TenantId is not { Length: > 0 } tenant
+            || security is null
+            || validator is null
+            || !security.EnableMessageSigning
+            || !security.RejectUnsignedMessages
+            || !security.TenantSigningKeys.ContainsKey(tenant)
+            || delivery.RawBody is not { Length: > 0 } body
+            || string.IsNullOrEmpty(delivery.Signature)
+            || !validator.VerifySignature(body, delivery.Signature)
+        )
+            return "The delivery has no authenticated tenant identity.";
+        if (tenancy.ValidTenants.Count > 0 && !tenancy.ValidTenants.Contains(tenant))
+            return "The tenant is not authorized on this worker.";
+        if (message.Headers.GetTenantId(tenancy.TenantIdHeader) is { } header && header != tenant)
+            return "The tenant header conflicts with the authenticated identity.";
+        var router = _serviceProvider.GetService<ITenantRouter>();
+        if (
+            router is null
+            || !router
+                .GetTenantQueues()
+                .Any(pair => pair.Key == tenant && pair.Value == delivery.Queue)
+        )
+            return "Tenant isolation requires an explicit tenant-to-delivery-queue mapping.";
+        if (!string.Equals(message.Queue, delivery.Queue, StringComparison.Ordinal))
+            return "The declared queue does not match the delivery queue.";
+        try
+        {
+            var parsed = JsonSerializer.Deserialize(body, DotCeleryJsonContext.Default.TaskMessage);
+            if (
+                parsed is null
+                || !JsonSerializer
+                    .SerializeToUtf8Bytes(parsed, DotCeleryJsonContext.Default.TaskMessage)
+                    .AsSpan()
+                    .SequenceEqual(
+                        JsonSerializer.SerializeToUtf8Bytes(
+                            message,
+                            DotCeleryJsonContext.Default.TaskMessage
+                        )
+                    )
+            )
+                return "The delivered task does not match its authenticated body.";
+        }
+        catch (JsonException)
+        {
+            return "The authenticated body is unreadable.";
+        }
+        return null;
+    }
+
     // Makes the tenant of the message ambient for the task and its remaining filters, and
     // restores the previous tenant when the task is done
     private IDisposable? SetTenantContext(TaskMessage message) =>
-        _multiTenancyOptions is null
-            ? null
-            : TenantContext.SetTenant(_multiTenancyOptions.ResolveTenantId(message));
+        _multiTenancyOptions is null ? null
+        : _multiTenancyOptions.RequireAuthenticatedTenants
+            ? TenantContext.SetTenant(_multiTenancyOptions.ResolveTenantId(message), message.Queue)
+        : TenantContext.SetTenant(_multiTenancyOptions.ResolveTenantId(message));
 
     private async Task<object?> ExecuteWithTimeLimitsAsync(
         string taskId,

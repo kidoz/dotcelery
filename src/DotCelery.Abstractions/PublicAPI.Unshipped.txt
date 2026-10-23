@@ -65,3 +65,10 @@ DotCelery.Core.Models.TaskResult.IsDuplicate.get -> bool
 DotCelery.Core.Models.TaskResult.IsDuplicate.init -> void
 DotCelery.Core.Models.TaskResult.FollowUpsPublished.get -> bool
 DotCelery.Core.Models.TaskResult.FollowUpsPublished.init -> void
+DotCelery.Core.MultiTenancy.MultiTenancyOptions.RequireAuthenticatedTenants.get -> bool
+DotCelery.Core.MultiTenancy.MultiTenancyOptions.RequireAuthenticatedTenants.set -> void
+DotCelery.Core.Security.MessageSecurityOptions.TenantSigningKeys.get -> System.Collections.Generic.Dictionary<string!, byte[]!>!
+DotCelery.Core.Security.MessageSecurityOptions.TenantSigningKeys.set -> void
+DotCelery.Core.Storage.Stores.StorageStoreOptions.RequireTenantScope.get -> bool
+DotCelery.Core.Storage.Stores.StorageStoreOptions.RequireTenantScope.set -> void
+static DotCelery.Core.MultiTenancy.TenantContext.SetTenant(string? tenantId, string? queue) -> System.IDisposable!

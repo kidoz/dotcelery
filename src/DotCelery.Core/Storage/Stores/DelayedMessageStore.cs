@@ -36,7 +36,7 @@ public sealed class DelayedMessageStore : IDelayedMessageStore
     )
     {
         ArgumentNullException.ThrowIfNull(storage);
-        _queues = storage.Queues;
+        _queues = TenantStorageScope.For(storage, options).Queues;
         _options = options?.Value ?? new StorageStoreOptions();
         _queue = _options.Name("delayed");
     }

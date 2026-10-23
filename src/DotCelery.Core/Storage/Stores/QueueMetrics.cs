@@ -47,9 +47,9 @@ public sealed class QueueMetrics : IQueueMetrics
     )
     {
         ArgumentNullException.ThrowIfNull(storage);
-        _counters = storage.Counters;
-        _leases = storage.Leases;
-        _documents = storage.Documents;
+        _counters = TenantStorageScope.For(storage, options).Counters;
+        _leases = TenantStorageScope.For(storage, options).Leases;
+        _documents = TenantStorageScope.For(storage, options).Documents;
         _options = options?.Value ?? new StorageStoreOptions();
         _timeProvider = timeProvider ?? TimeProvider.System;
         _counterPrefix = _options.Name("queue-metrics/");

@@ -5,6 +5,9 @@ namespace DotCelery.Dashboard;
 /// </summary>
 public sealed class DashboardOptions
 {
+    /// <summary>Gets or sets the authenticated principal claim that selects a tenant in isolation mode.</summary>
+    public string TenantIdClaimType { get; set; } = "dotcelery:tenant";
+
     /// <summary>
     /// Gets or sets the URL path prefix for the dashboard.
     /// Default is "/celery".

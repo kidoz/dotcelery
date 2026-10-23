@@ -46,7 +46,7 @@ public sealed class InboxStore : IInboxStore, IStorageBackedStore
     {
         ArgumentNullException.ThrowIfNull(storage);
         _storage = storage;
-        _documents = storage.Documents;
+        _documents = TenantStorageScope.For(storage, options).Documents;
         _options = options?.Value ?? new StorageStoreOptions();
         _collection = _options.Name("inbox");
         _timeProvider = timeProvider ?? TimeProvider.System;

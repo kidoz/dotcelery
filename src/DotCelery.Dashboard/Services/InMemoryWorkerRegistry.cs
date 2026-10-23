@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using DotCelery.Core.Dashboard;
+using DotCelery.Core.MultiTenancy;
 
 namespace DotCelery.Dashboard.Services;
 
@@ -13,6 +14,11 @@ public sealed class InMemoryWorkerRegistry : IWorkerRegistry
     private readonly ConcurrentDictionary<string, WorkerInfo> _workers = new();
     private readonly TimeProvider _timeProvider;
     private bool _disposed;
+
+    private static string Prefix =>
+        TenantContext.Current.TenantId is { } tenant ? $"{tenant.Length}:{tenant}:" : "global:";
+
+    private static string Key(string workerId) => Prefix + workerId;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="InMemoryWorkerRegistry"/> class.
@@ -32,7 +38,7 @@ public sealed class InMemoryWorkerRegistry : IWorkerRegistry
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(worker);
 
-        _workers[worker.WorkerId] = worker;
+        _workers[Key(worker.WorkerId)] = worker;
         return ValueTask.CompletedTask;
     }
 
@@ -47,7 +53,7 @@ public sealed class InMemoryWorkerRegistry : IWorkerRegistry
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(workerId);
 
-        if (_workers.TryGetValue(workerId, out var existing))
+        if (_workers.TryGetValue(Key(workerId), out var existing))
         {
             var updated = existing with
             {
@@ -57,7 +63,7 @@ public sealed class InMemoryWorkerRegistry : IWorkerRegistry
                 Status = WorkerStatus.Online,
             };
 
-            _workers[workerId] = updated;
+            _workers[Key(workerId)] = updated;
         }
 
         return ValueTask.CompletedTask;
@@ -72,7 +78,7 @@ public sealed class InMemoryWorkerRegistry : IWorkerRegistry
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(workerId);
 
-        _workers.TryRemove(workerId, out _);
+        _workers.TryRemove(Key(workerId), out _);
         return ValueTask.CompletedTask;
     }
 
@@ -83,7 +89,11 @@ public sealed class InMemoryWorkerRegistry : IWorkerRegistry
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        foreach (var worker in _workers.Values)
+        foreach (
+            var worker in _workers
+                .Where(pair => pair.Key.StartsWith(Prefix, StringComparison.Ordinal))
+                .Select(pair => pair.Value)
+        )
         {
             cancellationToken.ThrowIfCancellationRequested();
             yield return worker;
@@ -100,7 +110,7 @@ public sealed class InMemoryWorkerRegistry : IWorkerRegistry
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrEmpty(workerId);
 
-        _workers.TryGetValue(workerId, out var worker);
+        _workers.TryGetValue(Key(workerId), out var worker);
         return ValueTask.FromResult(worker);
     }
 
@@ -118,6 +128,8 @@ public sealed class InMemoryWorkerRegistry : IWorkerRegistry
 
         foreach (var kvp in _workers)
         {
+            if (!kvp.Key.StartsWith(Prefix, StringComparison.Ordinal))
+                continue;
             cancellationToken.ThrowIfCancellationRequested();
 
             if (kvp.Value.LastHeartbeat < cutoff)
@@ -161,5 +173,6 @@ public sealed class InMemoryWorkerRegistry : IWorkerRegistry
     /// <summary>
     /// Gets the current worker count. For testing purposes.
     /// </summary>
-    public int Count => _workers.Count;
+    public int Count =>
+        _workers.Keys.Count(key => key.StartsWith(Prefix, StringComparison.Ordinal));
 }

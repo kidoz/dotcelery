@@ -1,2 +1,10 @@
 #nullable enable
 static DotCelery.Core.Extensions.ServiceCollectionExtensions.AddTenantRouting(this DotCelery.Core.Extensions.DotCeleryBuilder! builder, System.Action<DotCelery.Core.MultiTenancy.MultiTenancyOptions!>? configure = null) -> DotCelery.Core.Extensions.DotCeleryBuilder!
+DotCelery.Core.Storage.TenantStorageScope
+static DotCelery.Core.Storage.TenantStorageScope.For(DotCelery.Core.Storage.IStorageProvider! storage, Microsoft.Extensions.Options.IOptions<DotCelery.Core.Storage.Stores.StorageStoreOptions!>? options) -> DotCelery.Core.Storage.IStorageProvider!
+DotCelery.Core.MultiTenancy.TenantHostedService<T>
+DotCelery.Core.MultiTenancy.TenantHostedService<T>.TenantHostedService(System.IServiceProvider! services, Microsoft.Extensions.Options.IOptions<DotCelery.Core.MultiTenancy.MultiTenancyOptions!>! tenancy, Microsoft.Extensions.Options.IOptions<DotCelery.Core.Security.MessageSecurityOptions!>! security) -> void
+override DotCelery.Core.MultiTenancy.TenantHostedService<T>.Dispose() -> void
+override DotCelery.Core.MultiTenancy.TenantHostedService<T>.StartAsync(System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task!
+override DotCelery.Core.MultiTenancy.TenantHostedService<T>.StopAsync(System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task!
+DotCelery.Core.MultiTenancy.TenantRouter.EnforcesIsolation.get -> bool

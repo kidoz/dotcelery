@@ -24,7 +24,7 @@ public sealed class PartitionLockStore : IPartitionLockStore
     )
     {
         ArgumentNullException.ThrowIfNull(storage);
-        _leases = storage.Leases;
+        _leases = TenantStorageScope.For(storage, options).Leases;
         _keyPrefix = (options?.Value ?? new StorageStoreOptions()).Name("partition/");
     }
 
@@ -118,7 +118,7 @@ public sealed class TaskExecutionTracker : ITaskExecutionTracker
     )
     {
         ArgumentNullException.ThrowIfNull(storage);
-        _leases = storage.Leases;
+        _leases = TenantStorageScope.For(storage, options).Leases;
         _options = options?.Value ?? new StorageStoreOptions();
         _keyPrefix = _options.Name("execution/");
     }

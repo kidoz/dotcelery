@@ -239,7 +239,7 @@ public sealed class CeleryWorkerService : BackgroundService
 
             // Validate before the message reaches a worker, so a refused message is never
             // deserialized, recorded as started, or executed
-            if (_securityValidator is not null)
+            if (_securityValidator is not null || _executor.RequiresTenantAuthentication)
             {
                 if (ValidateMessage(message) is { } rejection)
                 {
@@ -249,6 +249,15 @@ public sealed class CeleryWorkerService : BackgroundService
                         message.Message.Task,
                         rejection.ErrorMessage
                     );
+
+                    if (_executor.RequiresTenantAuthentication)
+                    {
+                        await _executor
+                            .QuarantineDeliveryAsync(message, intakeToken)
+                            .ConfigureAwait(false);
+                        await _settler.AckAsync(message).ConfigureAwait(false);
+                        return;
+                    }
 
                     if (
                         !await _settler
@@ -263,6 +272,7 @@ public sealed class CeleryWorkerService : BackgroundService
                 }
             }
 
+            using var tenant = _executor.EnterTenantScope(message.Message);
             var now = _timeProvider.GetUtcNow();
 
             // Check if task has expired
@@ -355,6 +365,7 @@ public sealed class CeleryWorkerService : BackgroundService
 
     private async Task ProcessMessageAsync(BrokerMessage message, CancellationToken executionToken)
     {
+        using var tenant = _executor.EnterTenantScope(message.Message);
         var taskName = message.Message.Task;
         DotCeleryMetrics.IncrementTasksInProgress(taskName);
         _activity?.IncrementActiveTasks();
@@ -638,7 +649,11 @@ public sealed class CeleryWorkerService : BackgroundService
     // match its signature
     private MessageValidationResult? ValidateMessage(BrokerMessage message)
     {
-        var result = _securityValidator!.Validate(message.Message, message.Signature);
+        if (_securityValidator is null)
+            return _executor.ValidateTenantDelivery(message) is { } error
+                ? MessageValidationResult.Failure(MessageValidationError.TaskNotAllowed, error)
+                : null;
+        var result = _securityValidator.Validate(message.Message, message.Signature);
         if (!result.IsValid)
         {
             return result;
@@ -655,6 +670,11 @@ public sealed class CeleryWorkerService : BackgroundService
             );
         }
 
+        if (_executor.ValidateTenantDelivery(message) is { } tenantFailure)
+            return MessageValidationResult.Failure(
+                MessageValidationError.TaskNotAllowed,
+                tenantFailure
+            );
         return null;
     }
 

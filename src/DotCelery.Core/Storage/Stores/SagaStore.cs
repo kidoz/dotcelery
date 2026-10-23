@@ -35,7 +35,7 @@ public sealed class SagaStore : ISagaStore
     )
     {
         ArgumentNullException.ThrowIfNull(storage);
-        _documents = storage.Documents;
+        _documents = TenantStorageScope.For(storage, options).Documents;
         _timeProvider = timeProvider ?? TimeProvider.System;
         var storeOptions = options?.Value ?? new StorageStoreOptions();
         _sagas = storeOptions.Name("sagas");

@@ -1,4 +1,5 @@
 using DotCelery.Core.Dashboard;
+using DotCelery.Core.MultiTenancy;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -16,6 +17,7 @@ namespace DotCelery.Worker.Services;
 public sealed class WorkerHeartbeatService : BackgroundService
 {
     private readonly IWorkerRegistry? _registry;
+    private readonly ITenantRouter? _tenantRouter;
     private readonly WorkerActivity _activity;
     private readonly WorkerOptions _options;
     private readonly ILogger<WorkerHeartbeatService> _logger;
@@ -31,11 +33,23 @@ public sealed class WorkerHeartbeatService : BackgroundService
         IWorkerRegistry? registry = null,
         TimeProvider? timeProvider = null
     )
+        : this(null, options, logger, activity, registry, timeProvider) { }
+
+    /// <summary>Initializes tenant-aware worker registration with an authenticated queue router.</summary>
+    public WorkerHeartbeatService(
+        ITenantRouter? tenantRouter,
+        IOptions<WorkerOptions> options,
+        ILogger<WorkerHeartbeatService> logger,
+        WorkerActivity activity,
+        IWorkerRegistry? registry = null,
+        TimeProvider? timeProvider = null
+    )
     {
         _options = options.Value;
         _logger = logger;
         _activity = activity;
         _registry = registry;
+        _tenantRouter = tenantRouter;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -68,7 +82,13 @@ public sealed class WorkerHeartbeatService : BackgroundService
                                     WorkerId = workerId,
                                     Hostname = Environment.MachineName,
                                     ProcessId = Environment.ProcessId,
-                                    Queues = _options.Queues,
+                                    Queues =
+                                        TenantContext.Current.TenantId is { } tenant
+                                        && _tenantRouter
+                                            ?.GetTenantQueues()
+                                            .TryGetValue(tenant, out var queue) == true
+                                            ? [queue]
+                                            : _options.Queues,
                                     Concurrency = _options.Concurrency,
                                     StartedAt = startedAt,
                                     LastHeartbeat = _timeProvider.GetUtcNow(),

@@ -42,16 +42,32 @@ public sealed class TenantContext : ITenantContext
     /// </summary>
     /// <param name="tenantId">The tenant ID.</param>
     /// <returns>A disposable that restores the previous tenant on dispose.</returns>
-    public static IDisposable SetTenant(string? tenantId)
+    public static IDisposable SetTenant(string? tenantId) =>
+        SetTenant(
+            tenantId,
+            _currentHolder.Value?.TenantId == tenantId ? _currentHolder.Value?.Queue : null
+        );
+
+    /// <summary>Sets a trusted tenant and its authorized publication queue for this async scope.</summary>
+    /// <param name="tenantId">The authenticated tenant.</param>
+    /// <param name="queue">Its authorized queue, or null when routing is not bound.</param>
+    /// <returns>A scope that restores the previous tenant and queue.</returns>
+    public static IDisposable SetTenant(string? tenantId, string? queue)
     {
         var previousHolder = _currentHolder.Value;
-        _currentHolder.Value = new TenantHolder(tenantId);
+        _currentHolder.Value = new TenantHolder(tenantId, queue);
         return new TenantScope(previousHolder);
     }
 
-    private sealed class TenantHolder(string? tenantId)
+    internal static string? QueueFor(string? tenantId) =>
+        tenantId is not null && _currentHolder.Value?.TenantId == tenantId
+            ? _currentHolder.Value.Queue
+            : null;
+
+    private sealed class TenantHolder(string? tenantId, string? queue)
     {
         public string? TenantId { get; } = tenantId;
+        public string? Queue { get; } = queue;
     }
 
     private sealed class TenantScope(TenantHolder? previousHolder) : IDisposable

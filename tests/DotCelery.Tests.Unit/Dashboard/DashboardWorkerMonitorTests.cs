@@ -68,7 +68,7 @@ public sealed class DashboardWorkerMonitorTests
     private DashboardWorkerMonitor CreateMonitor()
     {
         var clients = Substitute.For<IHubClients>();
-        clients.All.Returns(_proxy);
+        clients.Group("dashboard").Returns(_proxy);
         var hubContext = Substitute.For<IHubContext<DashboardHub>>();
         hubContext.Clients.Returns(clients);
 

@@ -53,8 +53,8 @@ public sealed class OutboxStore : IOutboxStore
     {
         ArgumentNullException.ThrowIfNull(storage);
         _storage = storage;
-        _queues = storage.Queues;
-        _documents = storage.Documents;
+        _queues = TenantStorageScope.For(storage, options).Queues;
+        _documents = TenantStorageScope.For(storage, options).Documents;
         _options = options?.Value ?? new StorageStoreOptions();
         _queue = _options.Name("outbox");
         _failedCollection = _options.Name("outbox.failed");

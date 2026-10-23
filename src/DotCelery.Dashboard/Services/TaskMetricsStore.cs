@@ -39,8 +39,10 @@ public sealed class TaskMetricsStore
     )
     {
         var prefix = (storeOptions?.Value ?? new StorageStoreOptions()).Prefix;
-        _documents = storage?.Documents;
-        _counters = storage?.Counters;
+        _documents = storage is null
+            ? null
+            : TenantStorageScope.For(storage, storeOptions).Documents;
+        _counters = storage is null ? null : TenantStorageScope.For(storage, storeOptions).Counters;
         _counterPrefix = $"{prefix}.dashboard.task-metrics/";
         _names = $"{prefix}.dashboard.task-metrics-names";
         _timeProvider = timeProvider ?? TimeProvider.System;

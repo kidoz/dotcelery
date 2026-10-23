@@ -42,7 +42,7 @@ public sealed class WorkerRegistry : IWorkerRegistry
     {
         ArgumentNullException.ThrowIfNull(storage);
 
-        _documents = storage.Documents;
+        _documents = TenantStorageScope.For(storage, options).Documents;
         _options = options?.Value ?? new StorageStoreOptions();
         _timeProvider = timeProvider ?? TimeProvider.System;
         _collection = _options.Name("workers");

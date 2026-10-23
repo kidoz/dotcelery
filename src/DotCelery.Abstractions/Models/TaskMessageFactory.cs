@@ -59,9 +59,12 @@ public static class TaskMessageFactory
             Expires = expires,
             MaxRetries = maxRetries,
             Priority = priority,
-            Queue = queue,
+            Queue =
+                DotCelery.Core.MultiTenancy.TenantContext.QueueFor(
+                    tenantId ?? DotCelery.Core.MultiTenancy.TenantContext.Current.TenantId
+                ) ?? queue,
             CorrelationId = correlationId,
-            TenantId = tenantId,
+            TenantId = tenantId ?? DotCelery.Core.MultiTenancy.TenantContext.Current.TenantId,
             PartitionKey = partitionKey,
             Headers = headers,
             BatchId = batchId,
@@ -103,7 +106,7 @@ public static class TaskMessageFactory
             ParentId = parent.Id,
             TenantId = parent.TenantId,
             PartitionKey = parent.PartitionKey,
-            Queue = queue,
+            Queue = DotCelery.Core.MultiTenancy.TenantContext.QueueFor(parent.TenantId) ?? queue,
             Priority = signature.Priority,
             MaxRetries = signature.MaxRetries,
             Headers = signature.Headers,

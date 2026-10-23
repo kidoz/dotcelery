@@ -32,7 +32,7 @@ public sealed class WindowRateLimiter : IRateLimiter
     )
     {
         ArgumentNullException.ThrowIfNull(storage);
-        _counters = storage.Counters;
+        _counters = TenantStorageScope.For(storage, options).Counters;
         _keyPrefix = (options?.Value ?? new StorageStoreOptions()).Name("ratelimit/");
         _timeProvider = timeProvider ?? TimeProvider.System;
     }

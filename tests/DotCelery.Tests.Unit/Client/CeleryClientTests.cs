@@ -92,6 +92,7 @@ public class CeleryClientTests : IAsyncDisposable
                 new MultiTenancyOptions
                 {
                     Enabled = true,
+                    RequireAuthenticatedTenants = false,
                     QueueStrategy = TenantQueueStrategy.Suffix,
                 }
             )

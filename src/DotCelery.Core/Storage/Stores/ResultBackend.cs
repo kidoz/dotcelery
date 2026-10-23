@@ -61,8 +61,8 @@ public sealed class ResultBackend : IResultBackend, IStorageBackedStore
     {
         ArgumentNullException.ThrowIfNull(storage);
         _storage = storage;
-        _documents = storage.Documents;
-        _notifications = storage.Notifications;
+        _documents = TenantStorageScope.For(storage, options).Documents;
+        _notifications = options?.Value.RequireTenantScope == true ? null : storage.Notifications;
         _options = options?.Value ?? new StorageStoreOptions();
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger ?? NullLogger<ResultBackend>.Instance;
@@ -108,7 +108,7 @@ public sealed class ResultBackend : IResultBackend, IStorageBackedStore
 
     private async ValueTask NotifyAsync(string taskId, CancellationToken cancellationToken)
     {
-        if (_signals.TryRemove(taskId, out var signal))
+        if (_signals.TryRemove(SignalKey(taskId), out var signal))
         {
             signal.TrySetResult();
         }
@@ -153,7 +153,7 @@ public sealed class ResultBackend : IResultBackend, IStorageBackedStore
             {
                 // Registered before reading, so a result stored after the read wakes this waiter
                 signal = _signals.GetOrAdd(
-                    taskId,
+                    SignalKey(taskId),
                     _ => new TaskCompletionSource(
                         TaskCreationOptions.RunContinuationsAsynchronously
                     )
@@ -188,7 +188,7 @@ public sealed class ResultBackend : IResultBackend, IStorageBackedStore
         {
             if (signal is not null)
             {
-                _signals.TryRemove(KeyValuePair.Create(taskId, signal));
+                _signals.TryRemove(KeyValuePair.Create(SignalKey(taskId), signal));
             }
         }
     }
@@ -289,6 +289,11 @@ public sealed class ResultBackend : IResultBackend, IStorageBackedStore
                 .ConfigureAwait(false)
         )?.Value;
 
+    private static string SignalKey(string taskId) =>
+        DotCelery.Core.MultiTenancy.TenantContext.Current.TenantId is { } tenant
+            ? $"{tenant.Length}:{tenant}:{taskId}"
+            : taskId;
+
     private void EnsureListening()
     {
         if (_notifications is null || _listener is not null)
@@ -318,7 +323,7 @@ public sealed class ResultBackend : IResultBackend, IStorageBackedStore
                         .ConfigureAwait(false)
                 )
                 {
-                    if (_signals.TryRemove(taskId, out var signal))
+                    if (_signals.TryRemove(SignalKey(taskId), out var signal))
                     {
                         signal.TrySetResult();
                     }

@@ -37,6 +37,9 @@ public sealed class DashboardHub : Hub
             return;
         }
 
+        await Groups
+            .AddToGroupAsync(Context.ConnectionId, DashboardTenantScope.Group("dashboard"))
+            .ConfigureAwait(false);
         await base.OnConnectedAsync().ConfigureAwait(false);
     }
 
@@ -67,7 +70,10 @@ public sealed class DashboardHub : Hub
     /// <param name="taskId">The task ID to watch.</param>
     public async Task WatchTask(string taskId)
     {
-        await Groups.AddToGroupAsync(Context.ConnectionId, $"task:{taskId}");
+        await Groups.AddToGroupAsync(
+            Context.ConnectionId,
+            DashboardTenantScope.Group($"task:{taskId}")
+        );
     }
 
     /// <summary>
@@ -76,7 +82,10 @@ public sealed class DashboardHub : Hub
     /// <param name="taskId">The task ID to stop watching.</param>
     public async Task UnwatchTask(string taskId)
     {
-        await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"task:{taskId}");
+        await Groups.RemoveFromGroupAsync(
+            Context.ConnectionId,
+            DashboardTenantScope.Group($"task:{taskId}")
+        );
     }
 
     /// <summary>
@@ -84,7 +93,10 @@ public sealed class DashboardHub : Hub
     /// </summary>
     public async Task SubscribeToTaskUpdates()
     {
-        await Groups.AddToGroupAsync(Context.ConnectionId, "task-updates");
+        await Groups.AddToGroupAsync(
+            Context.ConnectionId,
+            DashboardTenantScope.Group("task-updates")
+        );
     }
 
     /// <summary>
@@ -92,7 +104,10 @@ public sealed class DashboardHub : Hub
     /// </summary>
     public async Task UnsubscribeFromTaskUpdates()
     {
-        await Groups.RemoveFromGroupAsync(Context.ConnectionId, "task-updates");
+        await Groups.RemoveFromGroupAsync(
+            Context.ConnectionId,
+            DashboardTenantScope.Group("task-updates")
+        );
     }
 }
 
@@ -131,10 +146,14 @@ public sealed class DashboardNotificationService
         };
 
         // Notify specific task watchers
-        await _hubContext.Clients.Group($"task:{taskId}").SendAsync("TaskStateChanged", payload);
+        await _hubContext
+            .Clients.Group(DashboardTenantScope.Group($"task:{taskId}"))
+            .SendAsync("TaskStateChanged", payload);
 
         // Notify general subscribers
-        await _hubContext.Clients.Group("task-updates").SendAsync("TaskStateChanged", payload);
+        await _hubContext
+            .Clients.Group(DashboardTenantScope.Group("task-updates"))
+            .SendAsync("TaskStateChanged", payload);
     }
 
     /// <summary>
@@ -143,7 +162,9 @@ public sealed class DashboardNotificationService
     /// <param name="worker">The worker information.</param>
     public async Task NotifyWorkerStatusChangedAsync(WorkerInfo worker)
     {
-        await _hubContext.Clients.All.SendAsync("WorkerStatusChanged", worker);
+        await _hubContext
+            .Clients.Group(DashboardTenantScope.Group("dashboard"))
+            .SendAsync("WorkerStatusChanged", worker);
     }
 
     /// <summary>
@@ -151,6 +172,8 @@ public sealed class DashboardNotificationService
     /// </summary>
     public async Task NotifyOverviewChangedAsync()
     {
-        await _hubContext.Clients.All.SendAsync("OverviewChanged");
+        await _hubContext
+            .Clients.Group(DashboardTenantScope.Group("dashboard"))
+            .SendAsync("OverviewChanged");
     }
 }

@@ -41,6 +41,12 @@ public sealed class MessageSecurityOptions
     public byte[]? SigningKey { get; set; }
 
     /// <summary>
+    /// Gets or sets independent HMAC keys keyed by explicit TenantId. With this map populated,
+    /// signing and verification never fall back to the process-wide key.
+    /// </summary>
+    public Dictionary<string, byte[]> TenantSigningKeys { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// Gets or sets the signing key as a Base64 string.
     /// Convenience property for configuration.
     /// </summary>
@@ -84,13 +90,35 @@ public sealed class MessageSecurityOptions
     /// <exception cref="InvalidOperationException">Thrown when options are invalid.</exception>
     public void Validate()
     {
-        if (EnableMessageSigning && (SigningKey is null || SigningKey.Length < 16))
+        if (
+            EnableMessageSigning
+            && TenantSigningKeys.Count == 0
+            && (SigningKey is null || SigningKey.Length < 16)
+        )
         {
             throw new InvalidOperationException(
                 "Message signing is enabled but SigningKey is not set or is too short. "
                     + "Provide a key of at least 16 bytes (32 bytes recommended)."
             );
         }
+
+        foreach (var (tenant, key) in TenantSigningKeys)
+        {
+            if (string.IsNullOrWhiteSpace(tenant) || key.Length < 16)
+                throw new InvalidOperationException(
+                    "Each tenant needs an explicit ID and an independent signing key of at least 16 bytes."
+                );
+        }
+        var keys = TenantSigningKeys.Values.ToArray();
+        for (var i = 0; i < keys.Length; i++)
+        for (var j = i + 1; j < keys.Length; j++)
+            if (
+                System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                    keys[i],
+                    keys[j]
+                )
+            )
+                throw new InvalidOperationException("Tenant signing keys must be distinct.");
 
         if (MaxPayloadSizeBytes < 0)
         {

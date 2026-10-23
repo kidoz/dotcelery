@@ -23,6 +23,9 @@ public sealed class TenantRouter : ITenantRouter
         _options = options.Value;
     }
 
+    /// <summary>Gets whether this router requires explicit authenticated tenant queues.</summary>
+    public bool EnforcesIsolation => _options.Enabled && _options.RequireAuthenticatedTenants;
+
     /// <inheritdoc />
     public string GetQueue(string tenantId, string baseQueue = "celery")
     {
@@ -33,6 +36,11 @@ public sealed class TenantRouter : ITenantRouter
         {
             return customQueue;
         }
+
+        if (EnforcesIsolation)
+            throw new InvalidOperationException(
+                $"An explicit authorized queue mapping is required for tenant: {tenantId}"
+            );
 
         // Validate tenant if enabled
         if (
@@ -69,6 +77,14 @@ public sealed class TenantRouter : ITenantRouter
 
         lock (_lock)
         {
+            if (
+                _options.Enabled
+                && _options.RequireAuthenticatedTenants
+                && _tenantQueues.Any(pair => pair.Key != tenantId && pair.Value == queue)
+            )
+                throw new InvalidOperationException(
+                    "An isolated delivery queue cannot be assigned to multiple tenants."
+                );
             _tenantQueues[tenantId] = queue;
             _frozenQueues = _tenantQueues.ToFrozenDictionary();
         }

@@ -30,7 +30,12 @@ public sealed class TenantContextFilterTests : IAsyncDisposable
     public async Task RunningATask_SeesTheTenantContextSetAroundIt()
     {
         var executor = CreateExecutor(
-            new MultiTenancyOptions { Enabled = true, DefaultTenantId = "default" }
+            new MultiTenancyOptions
+            {
+                Enabled = true,
+                RequireAuthenticatedTenants = false,
+                DefaultTenantId = "default",
+            }
         );
         TenantAwareTask.Reset();
 
@@ -52,7 +57,12 @@ public sealed class TenantContextFilterTests : IAsyncDisposable
     public async Task ATaskOfAnInvalidTenant_IsRejectedWithoutRunning()
     {
         var executor = CreateExecutor(
-            new MultiTenancyOptions { Enabled = true, ValidTenants = ["acme"] }
+            new MultiTenancyOptions
+            {
+                Enabled = true,
+                RequireAuthenticatedTenants = false,
+                ValidTenants = ["acme"],
+            }
         );
         TenantAwareTask.Reset();
 

@@ -99,20 +99,24 @@ public static class WorkerServiceCollectionExtensions
             ServiceDescriptor.Singleton<IHostedService, WorkerStartupDiagnostics>()
         );
 
-        builder.Services.AddSingleton(sp => new RevocationManager(
-            sp.GetRequiredService<IOptions<WorkerOptions>>(),
-            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<RevocationManager>>(),
-            sp.GetService<IRevocationStore>(),
-            sp.GetService<TimeProvider>() ?? TimeProvider.System,
-            sp.GetRequiredService<IOptions<DotCelery.Core.Storage.Stores.StorageStoreOptions>>()
-        ));
+        builder.Services.AddSingleton(sp =>
+        {
+            var manager = new RevocationManager(
+                sp.GetRequiredService<IOptions<WorkerOptions>>(),
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<RevocationManager>>(),
+                sp.GetService<IRevocationStore>(),
+                sp.GetService<TimeProvider>() ?? TimeProvider.System,
+                sp.GetRequiredService<IOptions<DotCelery.Core.Storage.Stores.StorageStoreOptions>>()
+            );
+            return manager;
+        });
         builder.Services.AddHostedService(sp => sp.GetRequiredService<RevocationManager>());
         builder.Services.AddHostedService<CeleryWorkerService>();
 
         // The heartbeat registers the worker with an IWorkerRegistry when one is registered,
         // such as the dashboard's, and does nothing without one
         builder.Services.AddSingleton<WorkerActivity>();
-        builder.Services.AddHostedService<WorkerHeartbeatService>();
+        builder.Services.AddHostedService<TenantHostedService<WorkerHeartbeatService>>();
 
         // Ensure IHost's shutdown budget is at least as long as the worker's drain budget,
         // otherwise IHostApplicationLifetime cancels the token passed to StopAsync before
@@ -203,7 +207,7 @@ public static class WorkerServiceCollectionExtensions
     /// </remarks>
     public static DotCeleryBuilder AddDelayedMessageDispatcher(this DotCeleryBuilder builder)
     {
-        builder.Services.AddHostedService<DelayedMessageDispatcher>();
+        builder.Services.AddHostedService<TenantHostedService<DelayedMessageDispatcher>>();
         return builder;
     }
 
@@ -398,7 +402,7 @@ public static class WorkerServiceCollectionExtensions
     {
         builder.Services.Configure<OutboxOptions>(configure ?? (_ => { }));
         builder.Services.AddSingleton<IOutboxStore, TOutboxStore>();
-        builder.Services.AddHostedService<OutboxDispatcher>();
+        builder.Services.AddHostedService<TenantHostedService<OutboxDispatcher>>();
         return builder;
     }
 
@@ -533,7 +537,7 @@ public static class WorkerServiceCollectionExtensions
         }
 
         builder.Services.AddSingleton<ITaskSignalDispatcher, QueuedTaskSignalDispatcher>();
-        builder.Services.AddHostedService<SignalQueueProcessor>();
+        builder.Services.AddHostedService<TenantHostedService<SignalQueueProcessor>>();
 
         return builder;
     }

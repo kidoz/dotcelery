@@ -5,6 +5,9 @@ namespace DotCelery.Core.Storage.Stores;
 /// </summary>
 public sealed class StorageStoreOptions
 {
+    /// <summary>Gets or sets whether store operations require an authenticated tenant scope.</summary>
+    public bool RequireTenantScope { get; set; }
+
     /// <summary>
     /// Gets or sets the prefix of the collection, queue, lease, counter, and channel names the
     /// stores use. Applications that share storage but not tasks need different prefixes.

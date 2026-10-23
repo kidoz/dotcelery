@@ -52,7 +52,9 @@ public sealed class TaskRecordStore
     )
     {
         _options = options.Value;
-        _documents = storage?.Documents;
+        _documents = storage is null
+            ? null
+            : TenantStorageScope.For(storage, storeOptions).Documents;
 
         var prefix = (storeOptions?.Value ?? new StorageStoreOptions()).Prefix;
         _collection = $"{prefix}.dashboard.tasks";

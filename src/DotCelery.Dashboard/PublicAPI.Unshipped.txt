@@ -33,3 +33,5 @@ override DotCelery.Dashboard.Models.TaskSearchRequest.GetHashCode() -> int
 override DotCelery.Dashboard.Models.TaskSearchRequest.ToString() -> string!
 static DotCelery.Dashboard.Models.TaskSearchRequest.operator !=(DotCelery.Dashboard.Models.TaskSearchRequest? left, DotCelery.Dashboard.Models.TaskSearchRequest? right) -> bool
 static DotCelery.Dashboard.Models.TaskSearchRequest.operator ==(DotCelery.Dashboard.Models.TaskSearchRequest? left, DotCelery.Dashboard.Models.TaskSearchRequest? right) -> bool
+DotCelery.Dashboard.DashboardOptions.TenantIdClaimType.get -> string!
+DotCelery.Dashboard.DashboardOptions.TenantIdClaimType.set -> void
