@@ -1,1 +1,2 @@
 #nullable enable
+DotCelery.Worker.Services.RevocationManager.RevocationManager(Microsoft.Extensions.Options.IOptions<DotCelery.Worker.WorkerOptions!>! options, Microsoft.Extensions.Logging.ILogger<DotCelery.Worker.Services.RevocationManager!>! logger, DotCelery.Core.Abstractions.IRevocationStore? revocationStore, System.TimeProvider! timeProvider, Microsoft.Extensions.Options.IOptions<DotCelery.Core.Storage.Stores.StorageStoreOptions!>! storageOptions) -> void

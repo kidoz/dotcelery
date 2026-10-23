@@ -64,6 +64,32 @@ public sealed class WorkerHeartbeatServiceTests
         await service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RegistryFailure_RetriesAndResumesHeartbeats(bool registrationFails)
+    {
+        _registry.FailRegistration = registrationFails;
+        _registry.FailHeartbeat = !registrationFails;
+        using var service = CreateService();
+        await service.StartAsync(CancellationToken.None);
+        await WaitForTickAsync(() => _registry.Heartbeats.Count > 0);
+        Assert.False(service.ExecuteTask!.IsCompleted);
+        await service.StopAsync(CancellationToken.None);
+        Assert.Single(_registry.Unregistered);
+    }
+
+    [Fact]
+    public async Task UnregisterFailure_DoesNotFaultShutdown()
+    {
+        _registry.FailUnregister = true;
+        using var service = CreateService();
+        await service.StartAsync(CancellationToken.None);
+        await WaitForTickAsync(() => _registry.Registered.Count > 0);
+        await service.StopAsync(CancellationToken.None);
+        await service.ExecuteTask!;
+    }
+
     private WorkerHeartbeatService CreateService() =>
         new(
             Options.Create(
@@ -92,6 +118,10 @@ public sealed class WorkerHeartbeatServiceTests
 
     private sealed class FakeWorkerRegistry : IWorkerRegistry
     {
+        public bool FailRegistration { get; set; }
+        public bool FailHeartbeat { get; set; }
+        public bool FailUnregister { get; set; }
+
         public List<WorkerInfo> Registered { get; } = [];
 
         public List<(string WorkerId, int ActiveTasks, long ProcessedCount)> Heartbeats { get; } =
@@ -104,6 +134,11 @@ public sealed class WorkerHeartbeatServiceTests
             CancellationToken cancellationToken = default
         )
         {
+            if (FailRegistration)
+            {
+                FailRegistration = false;
+                throw new IOException("registration unavailable");
+            }
             Registered.Add(worker);
             return ValueTask.CompletedTask;
         }
@@ -115,6 +150,11 @@ public sealed class WorkerHeartbeatServiceTests
             CancellationToken cancellationToken = default
         )
         {
+            if (FailHeartbeat)
+            {
+                FailHeartbeat = false;
+                throw new IOException("heartbeat unavailable");
+            }
             Heartbeats.Add((workerId, activeTasks, processedCount));
             return ValueTask.CompletedTask;
         }
@@ -124,6 +164,8 @@ public sealed class WorkerHeartbeatServiceTests
             CancellationToken cancellationToken = default
         )
         {
+            if (FailUnregister)
+                throw new IOException("registry unavailable");
             Unregistered.Add(workerId);
             return ValueTask.CompletedTask;
         }

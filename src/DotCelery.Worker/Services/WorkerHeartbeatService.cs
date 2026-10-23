@@ -51,40 +51,57 @@ public sealed class WorkerHeartbeatService : BackgroundService
         var workerId = WorkerIdentity.Resolve(_options);
         var startedAt = _timeProvider.GetUtcNow();
 
-        await _registry
-            .RegisterWorkerAsync(
-                new WorkerInfo
-                {
-                    WorkerId = workerId,
-                    Hostname = Environment.MachineName,
-                    ProcessId = Environment.ProcessId,
-                    Queues = _options.Queues,
-                    Concurrency = _options.Concurrency,
-                    StartedAt = startedAt,
-                    LastHeartbeat = startedAt,
-                    Status = WorkerStatus.Online,
-                },
-                stoppingToken
-            )
-            .ConfigureAwait(false);
-
-        _logger.LogInformation("Worker {WorkerId} registered with the worker registry", workerId);
-
+        var registered = false;
         try
         {
             using var timer = new PeriodicTimer(_options.WorkerHeartbeatInterval, _timeProvider);
-
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+            do
             {
-                await _registry
-                    .HeartbeatAsync(
-                        workerId,
-                        _activity.ActiveTasks,
-                        _activity.ProcessedTasks,
-                        stoppingToken
-                    )
-                    .ConfigureAwait(false);
-            }
+                try
+                {
+                    if (!registered)
+                    {
+                        await _registry
+                            .RegisterWorkerAsync(
+                                new WorkerInfo
+                                {
+                                    WorkerId = workerId,
+                                    Hostname = Environment.MachineName,
+                                    ProcessId = Environment.ProcessId,
+                                    Queues = _options.Queues,
+                                    Concurrency = _options.Concurrency,
+                                    StartedAt = startedAt,
+                                    LastHeartbeat = _timeProvider.GetUtcNow(),
+                                    Status = WorkerStatus.Online,
+                                },
+                                stoppingToken
+                            )
+                            .ConfigureAwait(false);
+                        registered = true;
+                    }
+                    else
+                    {
+                        await _registry
+                            .HeartbeatAsync(
+                                workerId,
+                                _activity.ActiveTasks,
+                                _activity.ProcessedTasks,
+                                stoppingToken
+                            )
+                            .ConfigureAwait(false);
+                    }
+                }
+                catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+                {
+                    // The registry entry may have expired during the outage.
+                    registered = false;
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to heartbeat worker {WorkerId}; retrying",
+                        workerId
+                    );
+                }
+            } while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -92,15 +109,24 @@ public sealed class WorkerHeartbeatService : BackgroundService
         }
         finally
         {
-            // Settled without the worker's token: unregistering during shutdown must still
-            // reach the registry
-            await _registry
-                .UnregisterWorkerAsync(workerId, CancellationToken.None)
-                .ConfigureAwait(false);
-            _logger.LogInformation(
-                "Worker {WorkerId} unregistered from the worker registry",
-                workerId
-            );
+            try
+            {
+                await _registry
+                    .UnregisterWorkerAsync(workerId, CancellationToken.None)
+                    .ConfigureAwait(false);
+                _logger.LogInformation(
+                    "Worker {WorkerId} unregistered from the worker registry",
+                    workerId
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to unregister worker {WorkerId}; its registration will expire",
+                    workerId
+                );
+            }
         }
     }
 }

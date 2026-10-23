@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
+using DotCelery.Core.Storage.Stores;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -14,10 +15,11 @@ namespace DotCelery.Worker.Services;
 public sealed class RevocationManager : BackgroundService
 {
     private readonly IRevocationStore? _revocationStore;
-    private readonly WorkerOptions _options;
+    private readonly TimeProvider _timeProvider;
+    private readonly TimeSpan _retention;
     private readonly ILogger<RevocationManager> _logger;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _runningTasks = new();
-    private readonly ConcurrentDictionary<string, RevokeOptions> _pendingRevocations = new();
+    private readonly ConcurrentDictionary<string, RevocationEvent> _pendingRevocations = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RevocationManager"/> class.
@@ -27,9 +29,29 @@ public sealed class RevocationManager : BackgroundService
         ILogger<RevocationManager> logger,
         IRevocationStore? revocationStore = null
     )
+        : this(
+            options,
+            logger,
+            revocationStore,
+            TimeProvider.System,
+            Options.Create(new StorageStoreOptions())
+        ) { }
+
+    /// <summary>
+    /// Initializes a revocation manager with the storage retention policy and clock.
+    /// </summary>
+    public RevocationManager(
+        IOptions<WorkerOptions> options,
+        ILogger<RevocationManager> logger,
+        IRevocationStore? revocationStore,
+        TimeProvider timeProvider,
+        IOptions<StorageStoreOptions> storageOptions
+    )
     {
+        ArgumentNullException.ThrowIfNull(options);
         _revocationStore = revocationStore;
-        _options = options.Value;
+        _timeProvider = timeProvider;
+        _retention = storageOptions.Value.RevocationRetention;
         _logger = logger;
     }
 
@@ -42,10 +64,14 @@ public sealed class RevocationManager : BackgroundService
     public CancellationTokenSource RegisterTask(string taskId, CancellationToken parentToken)
     {
         var cts = CancellationTokenSource.CreateLinkedTokenSource(parentToken);
-        _runningTasks[taskId] = cts;
+        if (!_runningTasks.TryAdd(taskId, cts))
+        {
+            cts.Dispose();
+            throw new InvalidOperationException($"Task {taskId} is already registered as running.");
+        }
 
         // Check if there's a pending revocation for this task
-        if (_pendingRevocations.TryRemove(taskId, out var options))
+        if (GetRevocationOptions(taskId) is { } options)
         {
             _logger.LogDebug("Found pending revocation for task {TaskId}", taskId);
 
@@ -100,7 +126,18 @@ public sealed class RevocationManager : BackgroundService
     /// <returns>The revoke options if the task was cancelled via revocation, null otherwise.</returns>
     public RevokeOptions? GetRevocationOptions(string taskId)
     {
-        return _pendingRevocations.GetValueOrDefault(taskId);
+        if (!_pendingRevocations.TryGetValue(taskId, out var revocation))
+        {
+            return null;
+        }
+        if (IsExpired(revocation))
+        {
+            ((ICollection<KeyValuePair<string, RevocationEvent>>)_pendingRevocations).Remove(
+                new(taskId, revocation)
+            );
+            return null;
+        }
+        return revocation.Options;
     }
 
     /// <inheritdoc />
@@ -114,26 +151,44 @@ public sealed class RevocationManager : BackgroundService
 
         _logger.LogInformation("Starting revocation manager");
 
-        // Load existing revocations at startup
-        await LoadExistingRevocationsAsync(stoppingToken).ConfigureAwait(false);
-
-        // Subscribe to new revocations
+        var pruning = PruneExpiredAsync(stoppingToken);
         try
         {
-            await foreach (
-                var evt in _revocationStore.SubscribeAsync(stoppingToken).ConfigureAwait(false)
-            )
+            while (!stoppingToken.IsCancellationRequested)
             {
-                HandleRevocationEvent(evt);
+                try
+                {
+                    // Reconcile after every disconnect so revocations missed during an outage
+                    // still reach tasks that are running.
+                    await LoadExistingRevocationsAsync(stoppingToken).ConfigureAwait(false);
+                    await foreach (
+                        var evt in _revocationStore
+                            .SubscribeAsync(stoppingToken)
+                            .ConfigureAwait(false)
+                    )
+                    {
+                        HandleRevocationEvent(evt);
+                    }
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Revocation subscription failed; reconnecting");
+                }
+                await Task.Delay(TimeSpan.FromSeconds(1), _timeProvider, stoppingToken)
+                    .ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            // Expected during shutdown
+            // Expected during shutdown.
         }
-        catch (Exception ex)
+        finally
         {
-            _logger.LogError(ex, "Error in revocation subscription");
+            await pruning.ConfigureAwait(false);
         }
 
         _logger.LogInformation("Revocation manager stopped");
@@ -149,9 +204,9 @@ public sealed class RevocationManager : BackgroundService
             {
                 await kvp.Value.CancelAsync();
             }
-            catch (ObjectDisposedException)
+            catch (Exception ex)
             {
-                // Already disposed
+                _logger.LogDebug(ex, "Unable to cancel task {TaskId} during shutdown", kvp.Key);
             }
         }
 
@@ -175,7 +230,7 @@ public sealed class RevocationManager : BackgroundService
             )
             {
                 // Store as pending - will be applied when task starts
-                _pendingRevocations[revocation.TaskId] = revocation.Options;
+                HandleRevocationEvent(revocation);
                 count++;
             }
 
@@ -187,11 +242,17 @@ public sealed class RevocationManager : BackgroundService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to load existing revocations");
+            throw; // Retry reconciliation before subscribing, so missed revocations are not skipped.
         }
     }
 
     private void HandleRevocationEvent(RevocationEvent evt)
     {
+        if (IsExpired(evt))
+        {
+            return;
+        }
+        _pendingRevocations[evt.TaskId] = evt;
         _logger.LogDebug(
             "Received revocation event for task {TaskId}, terminate={Terminate}",
             evt.TaskId,
@@ -203,9 +264,6 @@ public sealed class RevocationManager : BackgroundService
             // Cancel running task if exists
             CancelTask(evt.TaskId, evt.Options);
         }
-
-        // Store for future reference (in case task hasn't started yet)
-        _pendingRevocations[evt.TaskId] = evt.Options;
     }
 
     private void CancelTask(string taskId, RevokeOptions options)
@@ -227,13 +285,51 @@ public sealed class RevocationManager : BackgroundService
             {
                 // Graceful cancellation - schedule callbacks asynchronously to allow
                 // current operation to complete its synchronous portion
-                _ = cts.CancelAsync();
+                _ = CancelGracefullyAsync(cts, taskId);
                 _logger.LogInformation("Task {TaskId} cancellation requested (graceful)", taskId);
             }
         }
         catch (ObjectDisposedException)
         {
             // Task already completed
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Cancellation callback failed for task {TaskId}", taskId);
+        }
+    }
+
+    private async Task CancelGracefullyAsync(CancellationTokenSource cts, string taskId)
+    {
+        try
+        {
+            await cts.CancelAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Cancellation callback failed for task {TaskId}", taskId);
+        }
+    }
+
+    private bool IsExpired(RevocationEvent evt) =>
+        _timeProvider.GetUtcNow() - evt.Timestamp >= (evt.Options.Expiry ?? _retention);
+
+    private async Task PruneExpiredAsync(CancellationToken stoppingToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1), _timeProvider);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+            {
+                foreach (var taskId in _pendingRevocations.Keys)
+                {
+                    _ = GetRevocationOptions(taskId);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Expected during shutdown.
         }
     }
 }

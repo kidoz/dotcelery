@@ -88,7 +88,13 @@ public static class WorkerServiceCollectionExtensions
         builder.Services.AddSingleton<IDeadLetterHandler, DeadLetterHandler>();
         builder.Services.AddSingleton<IGracefulShutdownHandler, GracefulShutdownHandler>();
         builder.Services.AddSingleton<TaskExecutor>();
-        builder.Services.AddSingleton<RevocationManager>();
+        builder.Services.AddSingleton(sp => new RevocationManager(
+            sp.GetRequiredService<IOptions<WorkerOptions>>(),
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<RevocationManager>>(),
+            sp.GetService<IRevocationStore>(),
+            sp.GetService<TimeProvider>() ?? TimeProvider.System,
+            sp.GetRequiredService<IOptions<DotCelery.Core.Storage.Stores.StorageStoreOptions>>()
+        ));
         builder.Services.AddHostedService(sp => sp.GetRequiredService<RevocationManager>());
         builder.Services.AddHostedService<CeleryWorkerService>();
 

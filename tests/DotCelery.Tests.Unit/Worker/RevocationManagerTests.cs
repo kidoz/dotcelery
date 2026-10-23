@@ -1,12 +1,16 @@
 namespace DotCelery.Tests.Unit.Worker;
 
+using System.Runtime.CompilerServices;
 using DotCelery.Backend.InMemory.Storage;
+using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
 using DotCelery.Core.Storage.Stores;
 using DotCelery.Worker;
 using DotCelery.Worker.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
+using NSubstitute;
 
 public class RevocationManagerTests : IAsyncDisposable
 {
@@ -148,6 +152,100 @@ public class RevocationManagerTests : IAsyncDisposable
         var options = _manager.GetRevocationOptions("non-existent");
 
         Assert.Null(options);
+    }
+
+    [Fact]
+    public void DuplicateRegistration_IsRefusedWithoutReplacingTheRunningTask()
+    {
+        using var parent = new CancellationTokenSource();
+        using var first = _manager.RegisterTask("duplicate", parent.Token);
+        Assert.Throws<InvalidOperationException>(() =>
+            _manager.RegisterTask("duplicate", parent.Token)
+        );
+        parent.Cancel();
+        Assert.True(first.IsCancellationRequested);
+        _manager.UnregisterTask("duplicate");
+        using var next = _manager.RegisterTask("duplicate", CancellationToken.None);
+        Assert.False(next.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task PendingRevocation_ExpiresWithTheConfiguredStoreRetention()
+    {
+        var time = new FakeTimeProvider();
+        var options = Options.Create(
+            new StorageStoreOptions { RevocationRetention = TimeSpan.FromMinutes(2) }
+        );
+        await using var store = new RevocationStore(
+            new InMemoryStorageProvider(timeProvider: time),
+            options,
+            time
+        );
+        await store.RevokeAsync("expired", RevokeOptions.Immediate);
+        using var manager = new RevocationManager(
+            Options.Create(new WorkerOptions()),
+            NullLogger<RevocationManager>.Instance,
+            store,
+            time,
+            options
+        );
+        await manager.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (manager.GetRevocationOptions("expired") is null)
+            await Task.Delay(10, timeout.Token);
+        time.Advance(TimeSpan.FromMinutes(2));
+        Assert.Null(manager.GetRevocationOptions("expired"));
+        using var task = manager.RegisterTask("expired", CancellationToken.None);
+        Assert.False(task.IsCancellationRequested);
+        await manager.StopAsync(CancellationToken.None);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SubscriptionOrLoadFailure_ReconnectsAndCancelsTheRunningTask(bool loadFails)
+    {
+        var store = Substitute.For<IRevocationStore>();
+        var subscriptions = 0;
+        var loads = 0;
+        store.GetRevocationsAsync(Arg.Any<CancellationToken>()).Returns(_ => Load());
+        store
+            .SubscribeAsync(Arg.Any<CancellationToken>())
+            .Returns(call => Subscribe(call.Arg<CancellationToken>()));
+        async IAsyncEnumerable<RevocationEvent> Subscribe(
+            [EnumeratorCancellation] CancellationToken token
+        )
+        {
+            if (Interlocked.Increment(ref subscriptions) == 1 && !loadFails)
+                throw new IOException("subscription lost");
+            yield return new RevocationEvent
+            {
+                TaskId = "running",
+                Options = RevokeOptions.Immediate,
+                Timestamp = DateTimeOffset.UtcNow,
+            };
+            await Task.Delay(Timeout.Infinite, token);
+        }
+        async IAsyncEnumerable<RevocationEvent> Load()
+        {
+            await Task.CompletedTask;
+            if (Interlocked.Increment(ref loads) == 1 && loadFails)
+                throw new IOException("load unavailable");
+            yield break;
+        }
+        using var manager = new RevocationManager(
+            Options.Create(new WorkerOptions()),
+            NullLogger<RevocationManager>.Instance,
+            store
+        );
+        using var task = manager.RegisterTask("running", CancellationToken.None);
+        await manager.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!task.IsCancellationRequested)
+            await Task.Delay(10, timeout.Token);
+        Assert.True(loadFails ? loads >= 2 : subscriptions >= 2);
+        Assert.False(manager.ExecuteTask!.IsCompleted);
+        await manager.StopAsync(CancellationToken.None);
     }
 
     public async ValueTask DisposeAsync()
