@@ -1,3 +1,4 @@
+using Asp.Versioning;
 using DotCelery.Core.Dashboard;
 using DotCelery.Core.Signals;
 using DotCelery.Dashboard.Hubs;
@@ -116,6 +117,18 @@ public static class DashboardExtensions
         services.AddSignalR();
 
         // Add controllers for API endpoints
+        services.AddProblemDetails();
+        services
+            .AddApiVersioning(options =>
+                options.ApiVersionReader = new UrlSegmentApiVersionReader()
+            )
+            .AddMvc()
+            .AddApiExplorer(options =>
+            {
+                options.GroupNameFormat = "'v'VVV";
+                options.SubstituteApiVersionInUrl = true;
+            });
+
         services
             .AddControllers(options =>
             {

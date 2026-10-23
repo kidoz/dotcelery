@@ -1,3 +1,4 @@
+using Asp.Versioning;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Dashboard;
 using DotCelery.Core.Models;
@@ -11,7 +12,9 @@ namespace DotCelery.Dashboard.Controllers;
 /// API controller for dashboard data.
 /// </summary>
 [ApiController]
-[Route("api")]
+[ApiVersion(1.0)]
+[ReportApiVersions]
+[Route("api/v{version:apiVersion}")]
 public partial class DashboardApiController : ControllerBase
 {
     private readonly IDashboardDataProvider _dataProvider;

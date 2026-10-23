@@ -1,5 +1,7 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
+using Asp.Versioning.ApiExplorer;
 using DotCelery.Backend.InMemory.Extensions;
 using DotCelery.Broker.InMemory.Extensions;
 using DotCelery.Core.Extensions;
@@ -10,6 +12,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Mvc.ApiExplorer;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -22,6 +25,62 @@ namespace DotCelery.Tests.Unit.Dashboard;
 public sealed class DashboardEndpointSecurityTests
 {
     [Fact]
+    public async Task VersionedEndpoints_ReportTheirContractAndRejectUnversionedOrUnknownVersions()
+    {
+        await using var host = await StartAsync(options => options.RequireAuthorization = false);
+        var response = await host.Client.GetAsync("/celery/api/v1/capabilities");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("1.0", response.Headers.GetValues("api-supported-versions"));
+        Assert.Equal(
+            HttpStatusCode.NotFound,
+            (await host.Client.GetAsync("/celery/api/capabilities")).StatusCode
+        );
+        Assert.Equal(
+            HttpStatusCode.NotFound,
+            (await host.Client.GetAsync("/celery/api/v2/capabilities")).StatusCode
+        );
+        Assert.Equal(
+            HttpStatusCode.NotFound,
+            (await host.Client.GetAsync("/celery/api/vbad/capabilities")).StatusCode
+        );
+    }
+
+    [Fact]
+    public async Task InvalidVersionedQueries_ReturnProblemDetails()
+    {
+        await using var host = await StartAsync(options => options.RequireAuthorization = false);
+        var response = await host.Client.GetAsync("/celery/api/v1/tasks/search?state=NotAState");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(400, body.RootElement.GetProperty("status").GetInt32());
+        Assert.True(body.RootElement.TryGetProperty("errors", out _));
+    }
+
+    [Fact]
+    public async Task ApiExplorer_SubstitutesTheVersionInDocumentedRoutes()
+    {
+        await using var host = await StartAsync(options => options.RequireAuthorization = false);
+        var versions = host.App.Services.GetRequiredService<IApiVersionDescriptionProvider>();
+        Assert.Contains(versions.ApiVersionDescriptions, version => version.GroupName == "v1");
+        var explorer =
+            host.App.Services.GetRequiredService<IApiDescriptionGroupCollectionProvider>();
+        var endpoints = explorer
+            .ApiDescriptionGroups.Items.SelectMany(group => group.Items)
+            .ToList();
+        Assert.Contains(
+            endpoints,
+            endpoint =>
+                endpoint.RelativePath == "celery/api/v1/capabilities" && endpoint.GroupName == "v1"
+        );
+        Assert.DoesNotContain(
+            endpoints,
+            endpoint =>
+                endpoint.RelativePath?.Contains("{version", StringComparison.Ordinal) == true
+        );
+    }
+
+    [Fact]
     public async Task StateChangingRequests_MustComeFromADashboardClient()
     {
         await using var host = await StartAsync(o =>
@@ -32,13 +91,13 @@ public sealed class DashboardEndpointSecurityTests
 
         // Without the dashboard header the request is refused, whichever page sent it
         var withoutHeader = await host.Client.PostAsync(
-            "/celery/api/tasks/t1/revoke",
+            "/celery/api/v1/tasks/t1/revoke",
             JsonContent()
         );
         Assert.Equal(HttpStatusCode.Forbidden, withoutHeader.StatusCode);
 
         // A cross-site origin is refused even with the header
-        var crossOrigin = new HttpRequestMessage(HttpMethod.Post, "/celery/api/tasks/t1/revoke")
+        var crossOrigin = new HttpRequestMessage(HttpMethod.Post, "/celery/api/v1/tasks/t1/revoke")
         {
             Content = JsonContent(),
         };
@@ -48,7 +107,7 @@ public sealed class DashboardEndpointSecurityTests
         Assert.Equal(HttpStatusCode.Forbidden, crossOriginResponse.StatusCode);
 
         // The dashboard's own request reaches the endpoint
-        var allowed = new HttpRequestMessage(HttpMethod.Post, "/celery/api/tasks/t1/revoke")
+        var allowed = new HttpRequestMessage(HttpMethod.Post, "/celery/api/v1/tasks/t1/revoke")
         {
             Content = JsonContent(),
         };
@@ -66,7 +125,7 @@ public sealed class DashboardEndpointSecurityTests
             o.AuthorizationCallback = _ => Task.FromResult(false);
         });
 
-        var request = new HttpRequestMessage(HttpMethod.Post, "/celery/api/tasks/t1/revoke")
+        var request = new HttpRequestMessage(HttpMethod.Post, "/celery/api/v1/tasks/t1/revoke")
         {
             // Malformed JSON is a 400 when the body is bound; authorization must win first
             Content = new StringContent("{ not json", Encoding.UTF8, "application/json"),
@@ -89,7 +148,7 @@ public sealed class DashboardEndpointSecurityTests
             options.RequireAuthorization = false;
             options.ReadOnly = true;
         });
-        var request = new HttpRequestMessage(HttpMethod.Post, $"/celery/api/{path}")
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/celery/api/v1/{path}")
         {
             Content = new StringContent(
                 """{"taskIds":["t1"],"terminate":true}""",
@@ -121,6 +180,7 @@ public sealed class DashboardEndpointSecurityTests
         });
 
         var app = builder.Build();
+        app.UseDotCeleryDashboard();
         app.MapDotCeleryDashboard("/celery");
         await app.StartAsync();
 
