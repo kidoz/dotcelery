@@ -13,6 +13,7 @@
     <PackageReference Include="DotCelery.Worker" Version="$(DotCeleryVersion)" />
     <PackageReference Include="DotCelery.Broker.InMemory" Version="$(DotCeleryVersion)" />
     <PackageReference Include="DotCelery.Backend.InMemory" Version="$(DotCeleryVersion)" />
+    <PackageReference Include="DotCelery.Dashboard" Version="$(DotCeleryVersion)" />
     <PackageReference
       Include="DotCelery.Analyzers"
       Version="$(DotCeleryVersion)"
