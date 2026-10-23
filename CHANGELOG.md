@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `samples/DotCelery.CanvasExample` sends a chain, a group, a chord with a callback, and a nested canvas end to end
 
 ### Fixed
+- RabbitMQ serializes channel operations; failed settlement retains delivery ownership for retry
+- Worker heartbeats and revocation subscriptions recover after backend outages; pending revocations expire with storage retention
+- Soft timeouts await execution after cancellation, preventing overlapping retries and observing late failures; task cancellation remains cooperative
+- Chain steps and linked callbacks retain tenant and partition identifiers; failed dead-letter writes preserve the original delivery
+- Poison signals are archived before removal, with bounded retries across restarts (`StorageStoreOptions.SignalMaxAttempts`, default 5) and failed-message retention (`SignalFailedRetention`, default 7 days) in the prefixed `signals.failed` collection
+- RabbitMQ, Redis, and SQS enforce receive size limits before deserialization; SQS verifies signatures first and stops tracking settled deliveries
+- Redis stream acknowledgement and deletion are atomic; MongoDB duplicate-key retries are bounded; compiled task invokers distinguish registrations by their input and output types
+- Circuit breaker and kill switch deadlines use the injected clock and recover on state checks; timers from previous trips cannot shorten a new recovery period
 - The Demo sample's long-running scenario no longer throws when standard input is redirected, so it can run non-interactively
 
 ## [1.0.0] - 2026-10-19
