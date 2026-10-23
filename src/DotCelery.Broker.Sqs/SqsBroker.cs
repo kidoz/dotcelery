@@ -47,6 +47,8 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
     private const int MaxVisibilitySeconds = 43_200;
 
     private readonly SqsBrokerOptions _options;
+    private readonly ConcurrentDictionary<string, ConsumeSession> _deliveries = new();
+    private readonly SemaphoreSlim _deliveryLock = new(1, 1);
     private readonly ILogger<SqsBroker> _logger;
     private readonly IDeadLetterStore? _deadLetterStore;
     private readonly IMessageSecurityValidator? _messageSecurityValidator;
@@ -200,7 +202,11 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
             {
                 if (message.DeliveryTag is string receiptHandle)
                 {
-                    session.Track(message.Queue, receiptHandle);
+                    if (_options.RenewVisibilityWhileProcessing)
+                    {
+                        session.Track(message.Queue, receiptHandle);
+                        _deliveries[receiptHandle] = session;
+                    }
                 }
 
                 yield return message;
@@ -211,6 +217,11 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
             await consumeCts.CancelAsync().ConfigureAwait(false);
             await WaitQuietlyAsync(receiving).ConfigureAwait(false);
             await WaitQuietlyAsync(renewing).ConfigureAwait(false);
+            foreach (var (_, receiptHandle) in session.Snapshot())
+            {
+                _deliveries.TryRemove(receiptHandle, out _);
+                session.Forget(receiptHandle);
+            }
 
             // Messages received but never handed over are made visible again at once, so they
             // are not hidden for the whole visibility timeout after a consumer stops
@@ -235,9 +246,18 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
         var (queueUrl, receiptHandle) = await DeliveryAsync(message, cancellationToken)
             .ConfigureAwait(false);
 
-        await _client
-            .DeleteMessageAsync(queueUrl, receiptHandle, cancellationToken)
-            .ConfigureAwait(false);
+        await _deliveryLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _client
+                .DeleteMessageAsync(queueUrl, receiptHandle, cancellationToken)
+                .ConfigureAwait(false);
+            ForgetDelivery(receiptHandle);
+        }
+        finally
+        {
+            _deliveryLock.Release();
+        }
     }
 
     /// <inheritdoc />
@@ -252,26 +272,36 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
         var (queueUrl, receiptHandle) = await DeliveryAsync(message, cancellationToken)
             .ConfigureAwait(false);
 
-        if (!requeue)
+        await _deliveryLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            // Discard; a dead letter queue is the queue's redrive policy
-            await _client
-                .DeleteMessageAsync(queueUrl, receiptHandle, cancellationToken)
-                .ConfigureAwait(false);
-            return;
-        }
+            if (!requeue)
+            {
+                // Discard; a dead letter queue is the queue's redrive policy
+                await _client
+                    .DeleteMessageAsync(queueUrl, receiptHandle, cancellationToken)
+                    .ConfigureAwait(false);
+                ForgetDelivery(receiptHandle);
+                return;
+            }
 
-        await _client
-            .ChangeMessageVisibilityAsync(
-                new ChangeMessageVisibilityRequest
-                {
-                    QueueUrl = queueUrl,
-                    ReceiptHandle = receiptHandle,
-                    VisibilityTimeout = VisibilityUntil(message.Message.Eta),
-                },
-                cancellationToken
-            )
-            .ConfigureAwait(false);
+            await _client
+                .ChangeMessageVisibilityAsync(
+                    new ChangeMessageVisibilityRequest
+                    {
+                        QueueUrl = queueUrl,
+                        ReceiptHandle = receiptHandle,
+                        VisibilityTimeout = VisibilityUntil(message.Message.Eta),
+                    },
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+            ForgetDelivery(receiptHandle);
+        }
+        finally
+        {
+            _deliveryLock.Release();
+        }
     }
 
     /// <inheritdoc />
@@ -456,8 +486,14 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
 
             foreach (var (queue, receiptHandle) in session.Snapshot())
             {
+                await _deliveryLock.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
+                    if (
+                        !_deliveries.TryGetValue(receiptHandle, out var owner)
+                        || !ReferenceEquals(owner, session)
+                    )
+                        continue;
                     var queueUrl = await GetQueueUrlAsync(queue, cancellationToken)
                         .ConfigureAwait(false);
 
@@ -478,11 +514,15 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
                     when (ex.ErrorCode is "MessageNotInflight" or "ReceiptHandleIsInvalid")
                 {
                     // The message was settled or its delivery expired; there is nothing to renew
-                    session.Forget(receiptHandle);
+                    ForgetDelivery(receiptHandle);
                 }
                 catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
                 {
                     _logger.LogDebug(ex, "Failed to renew the visibility of a message");
+                }
+                finally
+                {
+                    _deliveryLock.Release();
                 }
             }
         }
@@ -555,6 +595,7 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
                     ex,
                     "Failed to store an unreadable message in the dead letter queue"
                 );
+                return; // Leave it in SQS for redelivery after the visibility timeout.
             }
         }
 
@@ -571,7 +612,15 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
         }
     }
 
-    private static BrokerMessage? ParseMessage(Message sqsMessage, string queue)
+    private void ForgetDelivery(string receiptHandle)
+    {
+        if (_deliveries.TryRemove(receiptHandle, out var session))
+        {
+            session.Forget(receiptHandle);
+        }
+    }
+
+    private BrokerMessage? ParseMessage(Message sqsMessage, string queue)
     {
         if (string.IsNullOrEmpty(sqsMessage.Body))
         {
@@ -580,7 +629,26 @@ public sealed class SqsBroker : IMessageBroker, IBrokerCapabilities
 
         try
         {
+            if (
+                _options.MaxMessageSizeBytes > 0
+                && Encoding.UTF8.GetByteCount(sqsMessage.Body) > _options.MaxMessageSizeBytes
+            )
+            {
+                _logger.LogWarning(
+                    "Rejecting oversized SQS message {MessageId}",
+                    sqsMessage.MessageId
+                );
+                return null;
+            }
             var body = Encoding.UTF8.GetBytes(sqsMessage.Body);
+            if (!_messageSecurityValidator.IsSignatureValid(body, GetSignature(sqsMessage)))
+            {
+                _logger.LogWarning(
+                    "Rejecting SQS message {MessageId} with invalid signature",
+                    sqsMessage.MessageId
+                );
+                return null;
+            }
             var message = JsonSerializer.Deserialize(
                 body,
                 DotCeleryJsonContext.Default.TaskMessage

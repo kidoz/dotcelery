@@ -3,6 +3,7 @@ using DotCelery.Broker.Sqs;
 using DotCelery.Client;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
+using DotCelery.Core.Security;
 using DotCelery.Core.Serialization;
 using DotCelery.Core.Storage.Stores;
 using DotCelery.Tests.Conformance.Brokers;
@@ -248,6 +249,91 @@ public sealed class SqsBrokerIntegrationTests(LocalStackFixture fixture) : IAsyn
             worker.Dispose();
             await backend.DisposeAsync();
         }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnsafeDirectWrite_IsRejectedAndTheNextMessageIsDelivered(bool requireSigning)
+    {
+        var queue = $"guard-{Guid.NewGuid():N}";
+        using var validator = new MessageSecurityValidator(
+            Options.Create(
+                new MessageSecurityOptions
+                {
+                    EnableMessageSigning = true,
+                    SigningKey = "0123456789abcdef0123456789abcdef"u8.ToArray(),
+                }
+            ),
+            NullLogger<MessageSecurityValidator>.Instance
+        );
+        await using var receiver = new SqsBroker(
+            Options.Create(
+                new SqsBrokerOptions
+                {
+                    ServiceUrl = fixture.ServiceUrl,
+                    AccessKey = "test",
+                    SecretKey = "test",
+                    WaitTime = TimeSpan.FromSeconds(1),
+                    MaxMessageSizeBytes = 2048,
+                }
+            ),
+            NullLogger<SqsBroker>.Instance,
+            messageSecurityValidator: requireSigning ? validator : null
+        );
+        var invalid = SqsConformanceBroker.CreateMessage(queue);
+        await _broker.PublishAsync(
+            requireSigning ? invalid : invalid with { Args = new byte[4096] }
+        );
+        var valid = SqsConformanceBroker.CreateMessage(queue);
+        await receiver.PublishAsync(valid);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await foreach (var delivery in receiver.ConsumeAsync([queue], timeout.Token))
+        {
+            Assert.Equal(valid.Id, delivery.Message.Id);
+            await receiver.AckAsync(delivery, timeout.Token);
+            break;
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RequeuedDelivery_IsNotRenewedByItsPreviousConsumeSession(bool renewVisibility)
+    {
+        var queue = $"requeue-{Guid.NewGuid():N}";
+        await using var broker = new SqsBroker(
+            Options.Create(
+                new SqsBrokerOptions
+                {
+                    ServiceUrl = fixture.ServiceUrl,
+                    AccessKey = "test",
+                    SecretKey = "test",
+                    WaitTime = TimeSpan.FromSeconds(1),
+                    VisibilityTimeout = TimeSpan.FromSeconds(3),
+                    RenewVisibilityWhileProcessing = renewVisibility,
+                }
+            ),
+            NullLogger<SqsBroker>.Instance
+        );
+        await broker.PublishAsync(SqsConformanceBroker.CreateMessage(queue));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+        await using var consumer = broker.ConsumeAsync([queue], timeout.Token).GetAsyncEnumerator();
+        Assert.True(await consumer.MoveNextAsync());
+        var original = consumer.Current;
+        var eta = DateTimeOffset.UtcNow.AddSeconds(4);
+        var returned = new BrokerMessage
+        {
+            Message = original.Message with { Eta = eta },
+            DeliveryTag = original.DeliveryTag,
+            Queue = original.Queue,
+            ReceivedAt = original.ReceivedAt,
+        };
+        await broker.RejectAsync(returned, requeue: true, timeout.Token);
+        Assert.True(await consumer.MoveNextAsync());
+        Assert.Equal(original.Message.Id, consumer.Current.Message.Id);
+        Assert.True(DateTimeOffset.UtcNow >= eta);
+        await broker.AckAsync(consumer.Current, timeout.Token);
     }
 
     public sealed class ConformanceInput
