@@ -548,14 +548,17 @@ public sealed class CeleryWorkerService : BackgroundService
         else
         {
             // Success, Failure, Rejected, and Revoked outcomes are already stored
-            DotCeleryMetrics.RecordTaskCompleted(
-                message.Message.Task,
-                result.State == TaskState.Success,
-                result.Duration
-            );
-            _activity?.IncrementProcessedTasks();
+            if (!result.IsDuplicate)
+            {
+                DotCeleryMetrics.RecordTaskCompleted(
+                    message.Message.Task,
+                    result.State == TaskState.Success,
+                    result.Duration
+                );
+                _activity?.IncrementProcessedTasks();
+            }
 
-            if (result.State == TaskState.Success)
+            if (result.State == TaskState.Success && !result.FollowUpsPublished)
             {
                 if (
                     !await _followUps
@@ -572,6 +575,28 @@ public sealed class CeleryWorkerService : BackgroundService
                         .ConfigureAwait(false)
                 )
                 {
+                    return;
+                }
+                try
+                {
+                    await _executor
+                        .CompleteFollowUpsAsync(result, executionToken)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to checkpoint follow-ups for task {TaskId}",
+                        result.TaskId
+                    );
+                    await _settler
+                        .ReturnAfterFailureAsync(
+                            message,
+                            _options.InfrastructureFailureRequeueDelay,
+                            executionToken
+                        )
+                        .ConfigureAwait(false);
                     return;
                 }
             }

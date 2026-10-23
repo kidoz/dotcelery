@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace DotCelery.Core.Models;
 
 /// <summary>
@@ -14,6 +16,19 @@ public sealed record TaskResult
     /// Gets the final task state.
     /// </summary>
     public required TaskState State { get; init; }
+
+    /// <summary>
+    /// Gets whether this delivery reused a previously recorded outcome. This delivery-only
+    /// flag is never persisted as part of the task result.
+    /// </summary>
+    [JsonIgnore]
+    public bool IsDuplicate { get; init; }
+
+    /// <summary>
+    /// Gets whether the successful task's chain and linked callback have been published.
+    /// An unfinished continuation is resumed when the original delivery is redelivered.
+    /// </summary>
+    public bool FollowUpsPublished { get; init; }
 
     /// <summary>
     /// Gets the serialized result data (for Success state).

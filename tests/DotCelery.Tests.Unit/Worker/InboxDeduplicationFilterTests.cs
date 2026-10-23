@@ -46,6 +46,7 @@ public sealed class InboxDeduplicationFilterTests
         Assert.True(context.SkipExecution);
         Assert.NotNull(context.SkipResult);
         Assert.Equal(TaskState.Success, context.SkipResult.State);
+        Assert.True(context.SkipResult.IsDuplicate);
         Assert.Equal(true, context.SkipResult.Metadata!["deduplicated"]);
     }
 

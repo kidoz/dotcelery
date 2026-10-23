@@ -286,6 +286,40 @@ public class TaskExecutorTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task ExecuteAsync_Duplicate_PreservesOriginalResultAndCompletionTime()
+    {
+        var inbox = _serviceProvider.GetRequiredService<IInboxStore>();
+        _filterPipeline.AddGlobalFilter<InboxDeduplicationFilter>();
+        var executor = CreateExecutor(_registry, inboxStore: inbox);
+        var delivery = CreateBrokerMessage(
+            "duplicate",
+            TestTaskWithInput.TaskName,
+            new TestInput { Value = 42 }
+        );
+        var original = await executor.ExecuteAsync(
+            delivery,
+            "first-worker",
+            CancellationToken.None
+        );
+
+        var duplicate = await executor.ExecuteAsync(
+            delivery,
+            "second-worker",
+            CancellationToken.None
+        );
+        var stored = await _backend.GetResultAsync("duplicate");
+
+        Assert.True(duplicate.IsDuplicate);
+        Assert.Equal(original.Result, duplicate.Result);
+        Assert.Equal(original.CompletedAt, duplicate.CompletedAt);
+        Assert.NotNull(stored);
+        Assert.False(stored.IsDuplicate);
+        Assert.Equal(original.Result, stored.Result);
+        Assert.Equal("first-worker", stored.Worker);
+        Assert.Equal(original.CompletedAt, stored.CompletedAt);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_FailedTask_WithAnInboxStore_LeavesTheMessageUnprocessed()
     {
         var registry = new TaskRegistry();

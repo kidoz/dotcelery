@@ -306,6 +306,22 @@ public sealed class TaskExecutor
             // Check if a filter provided a complete TaskResult (e.g., security or deduplication)
             if (result is TaskResult filterProvidedResult)
             {
+                if (filterProvidedResult.IsDuplicate)
+                {
+                    var original = await _resultBackend
+                        .GetResultAsync(message.Id, cancellationToken)
+                        .ConfigureAwait(false);
+                    if (original is null)
+                    {
+                        if (message.Chain is not { Count: > 0 } && message.Link is null)
+                            return filterProvidedResult with { FollowUpsPublished = true };
+                        throw new InvalidOperationException(
+                            $"Task {message.Id} is marked processed but its continuation result is unavailable."
+                        );
+                    }
+                    return original with { IsDuplicate = true };
+                }
+
                 // Store the result if it's a terminal state
                 if (
                     filterProvidedResult.State
@@ -331,6 +347,7 @@ public sealed class TaskExecutor
             {
                 TaskId = message.Id,
                 State = TaskState.Success,
+                FollowUpsPublished = message.Chain is not { Count: > 0 } && message.Link is null,
                 Result = result is not null ? _serializer.Serialize(result) : null,
                 ContentType = _serializer.ContentType,
                 CompletedAt = _timeProvider.GetUtcNow(),
@@ -597,6 +614,21 @@ public sealed class TaskExecutor
             _revocationManager.UnregisterTask(message.Id);
         }
     }
+
+    // Checkpoint only after publication. A crash before this write can replay the same
+    // deterministic continuation ID; a completed duplicate never rewrites the outcome.
+    internal ValueTask CompleteFollowUpsAsync(
+        TaskResult result,
+        CancellationToken cancellationToken
+    ) =>
+        _resultBackend.StoreResultAsync(
+            result with
+            {
+                FollowUpsPublished = true,
+                IsDuplicate = false,
+            },
+            cancellationToken: cancellationToken
+        );
 
     // A message the worker will not run is recorded as rejected, so a client sees a final state
     // and the dead letter queue keeps the reason

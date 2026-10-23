@@ -28,6 +28,8 @@ public abstract class ResultBackendConformanceTests : StoreConformanceTests
         var result = Success("task") with
         {
             Retries = 2,
+            IsDuplicate = true,
+            FollowUpsPublished = true,
             Worker = "worker-1",
             Metadata = new Dictionary<string, object> { ["key1"] = "value1", ["key2"] = 42 },
             Exception = new TaskExceptionInfo
@@ -47,6 +49,8 @@ public abstract class ResultBackendConformanceTests : StoreConformanceTests
         Assert.Equal(result.CompletedAt, stored.CompletedAt);
         Assert.Equal(result.Duration, stored.Duration);
         Assert.Equal(2, stored.Retries);
+        Assert.False(stored.IsDuplicate);
+        Assert.True(stored.FollowUpsPublished);
         Assert.Equal("worker-1", stored.Worker);
         Assert.Equal("inner", stored.Exception?.InnerException?.Message);
         Assert.Equal("value1", stored.Metadata?["key1"].ToString());

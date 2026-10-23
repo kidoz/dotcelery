@@ -12,6 +12,7 @@ using DotCelery.Core.Models;
 using DotCelery.Core.Resilience;
 using DotCelery.Core.Security;
 using DotCelery.Core.Serialization;
+using DotCelery.Core.Signals;
 using DotCelery.Core.Storage.Stores;
 using DotCelery.Worker;
 using DotCelery.Worker.DeadLetter;
@@ -36,9 +37,11 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
     private readonly RecordingBroker _broker = new();
     private readonly FaultyResultBackend _backend = new();
     private readonly TaskGate _gate = new();
+    private readonly InboxStore _inbox = new InboxStore(new InMemoryStorageProvider());
     private readonly ServiceProvider _serviceProvider;
     private readonly DeadLetterStore _deadLetters;
     private readonly JsonMessageSerializer _serializer = new();
+    private readonly ITaskSignalDispatcher _signals = Substitute.For<ITaskSignalDispatcher>();
     private CeleryWorkerService? _worker;
 
     public CeleryWorkerServiceTests()
@@ -46,7 +49,10 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
         _deadLetters = new DeadLetterStore(new InMemoryStorageProvider(), _broker, _serializer);
 
         var services = new ServiceCollection();
+        services.AddLogging();
         services.AddSingleton(_gate);
+        services.AddSingleton<IInboxStore>(_inbox);
+        services.AddTransient<InboxDeduplicationFilter>();
         services.AddTransient<EchoTask>();
         services.AddTransient<BlockingTask>();
         services.AddTransient<RetryingTask>();
@@ -86,6 +92,94 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
         await worker.StopAsync(CancellationToken.None);
         Assert.False(_broker.HasEvent("ack:t1"));
         Assert.False(_broker.HasEvent("reject:t1"));
+    }
+
+    [Fact]
+    public async Task FollowUpCheckpointFailure_RequeuesTheDeliveryAndPreservesTheSuccessfulOutcome()
+    {
+        _backend.FailFollowUpCheckpoints = true;
+        var message = CreateMessage("checkpoint", EchoTask.TaskName) with
+        {
+            Chain =
+            [
+                new ChainStep
+                {
+                    TaskId = "next",
+                    Signature = new Signature { TaskName = EchoTask.TaskName },
+                },
+            ],
+        };
+        var worker = CreateWorker(inboxDeduplication: true);
+        _broker.Enqueue(message);
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForAsync(() => _broker.HasEvent("requeue:checkpoint"));
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(_broker.HasEvent("ack:checkpoint"));
+        Assert.True(await _inbox.IsProcessedAsync(message.Id));
+        var stored = await _backend.GetResultAsync(message.Id);
+        Assert.NotNull(stored);
+        Assert.Equal(TaskState.Success, stored.State);
+        Assert.False(stored.FollowUpsPublished);
+        Assert.Equal("next", Assert.Single(_broker.Published).Id);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DuplicateDelivery_ResumesOnlyAnUnfinishedContinuation(bool followUpsPublished)
+    {
+        var message = CreateMessage("duplicate", EchoTask.TaskName) with
+        {
+            Chain =
+            [
+                new ChainStep
+                {
+                    TaskId = "next",
+                    Signature = new Signature { TaskName = EchoTask.TaskName },
+                },
+            ],
+        };
+        var original = new TaskResult
+        {
+            TaskId = message.Id,
+            State = TaskState.Success,
+            Result = _serializer.Serialize(new TestInput { Value = 999 }),
+            CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            Duration = TimeSpan.FromSeconds(2),
+            Worker = "original-worker",
+            FollowUpsPublished = followUpsPublished,
+        };
+        await _backend.StoreResultAsync(original);
+        await _inbox.MarkProcessedAsync(message.Id);
+        var writesBefore = _backend.AttemptedStores.Count;
+        var worker = CreateWorker(inboxDeduplication: true);
+        _broker.Enqueue(message);
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForAsync(() => _broker.HasEvent("ack:duplicate"));
+        await worker.StopAsync(CancellationToken.None);
+
+        var stored = await _backend.GetResultAsync(message.Id);
+        Assert.NotNull(stored);
+        Assert.Equal(original.Result, stored.Result);
+        Assert.Equal(original.CompletedAt, stored.CompletedAt);
+        await _signals
+            .DidNotReceive()
+            .DispatchAsync(Arg.Any<TaskPreRunSignal>(), Arg.Any<CancellationToken>());
+        await _signals
+            .DidNotReceive()
+            .DispatchAsync(Arg.Any<TaskSuccessSignal>(), Arg.Any<CancellationToken>());
+        Assert.Equal(original.Worker, stored.Worker);
+        Assert.True(stored.FollowUpsPublished);
+        Assert.Equal(writesBefore + (followUpsPublished ? 0 : 1), _backend.AttemptedStores.Count);
+        if (followUpsPublished)
+            Assert.Empty(_broker.Published);
+        else
+        {
+            var published = Assert.Single(_broker.Published);
+            Assert.Equal("next", published.Id);
+            Assert.Equal(original.Result, published.Args);
+        }
     }
 
     [Theory]
@@ -566,7 +660,8 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
         ICircuitBreakerFactory? circuitBreakerFactory = null,
         WorkerActivity? activity = null,
         TimeProvider? timeProvider = null,
-        IDeadLetterHandler? deadLetterHandler = null
+        IDeadLetterHandler? deadLetterHandler = null,
+        bool inboxDeduplication = false
     )
     {
         var options = new WorkerOptions
@@ -587,6 +682,10 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
         registry.Register(typeof(RetryingTask), RetryingTask.TaskName);
         registry.Register(typeof(RejectingTask), RejectingTask.TaskName);
 
+        var filterOptions = new TaskFilterOptions();
+        if (inboxDeduplication)
+            filterOptions.GlobalFilterTypes.Add(typeof(InboxDeduplicationFilter));
+
         var executor = new TaskExecutor(
             registry,
             _serviceProvider,
@@ -595,11 +694,13 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
             new RevocationManager(workerOptions, NullLogger<RevocationManager>.Instance),
             new TaskFilterPipeline(
                 _serviceProvider,
-                Options.Create(new TaskFilterOptions()),
+                Options.Create(filterOptions),
                 NullLogger<TaskFilterPipeline>.Instance
             ),
             workerOptions,
-            NullLogger<TaskExecutor>.Instance
+            NullLogger<TaskExecutor>.Instance,
+            inboxStore: inboxDeduplication ? _inbox : null,
+            signalDispatcher: _signals
         );
 
         _worker = new CeleryWorkerService(
@@ -762,6 +863,8 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
 
         public bool FailResultStores { get; set; }
 
+        public bool FailFollowUpCheckpoints { get; set; }
+
         public ConcurrentQueue<TaskResult> AttemptedStores { get; } = new();
 
         public ValueTask StoreResultAsync(
@@ -772,7 +875,7 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
         {
             AttemptedStores.Enqueue(result);
 
-            return FailResultStores
+            return (FailResultStores || (FailFollowUpCheckpoints && result.FollowUpsPublished))
                 ? ValueTask.FromException(new InvalidOperationException("Backend unavailable"))
                 : _inner.StoreResultAsync(result, expiry, cancellationToken);
         }

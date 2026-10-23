@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 namespace DotCelery.Worker.Filters;
 
 /// <summary>
-/// Filter that provides exactly-once message processing using the inbox pattern.
+/// Filter that skips previously completed task bodies using the inbox pattern.
 /// Messages that have already been processed are skipped.
 /// </summary>
 /// <remarks>
@@ -77,12 +77,13 @@ public sealed class InboxDeduplicationFilter : ITaskFilter
                 messageId
             );
 
-            // Skip execution and set a success result
+            // This is a delivery disposition, not a new successful execution outcome.
             context.SkipExecution = true;
             context.SkipResult = new TaskResult
             {
                 TaskId = context.TaskId,
                 State = TaskState.Success,
+                IsDuplicate = true,
                 CompletedAt = DateTimeOffset.UtcNow,
                 Duration = TimeSpan.Zero,
                 Metadata = new Dictionary<string, object>

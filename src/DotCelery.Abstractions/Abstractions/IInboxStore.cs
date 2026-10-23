@@ -1,7 +1,7 @@
 namespace DotCelery.Core.Abstractions;
 
 /// <summary>
-/// Inbox store for message deduplication (exactly-once processing).
+/// Inbox store for deduplication of completed messages.
 /// Tracks processed message IDs to prevent duplicate handling.
 /// </summary>
 public interface IInboxStore : IAsyncDisposable

@@ -61,3 +61,7 @@ static DotCelery.Core.Resilience.RetryPolicy.Exponential(int maxRetries = 3, Sys
 static DotCelery.Core.Resilience.RetryPolicy.None() -> DotCelery.Core.Resilience.RetryPolicy!
 static DotCelery.Core.Resilience.RetryPolicy.operator !=(DotCelery.Core.Resilience.RetryPolicy? left, DotCelery.Core.Resilience.RetryPolicy? right) -> bool
 static DotCelery.Core.Resilience.RetryPolicy.operator ==(DotCelery.Core.Resilience.RetryPolicy? left, DotCelery.Core.Resilience.RetryPolicy? right) -> bool
+DotCelery.Core.Models.TaskResult.IsDuplicate.get -> bool
+DotCelery.Core.Models.TaskResult.IsDuplicate.init -> void
+DotCelery.Core.Models.TaskResult.FollowUpsPublished.get -> bool
+DotCelery.Core.Models.TaskResult.FollowUpsPublished.init -> void
