@@ -158,6 +158,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Redis: delayed messages stay stored until they are dispatched, outbox messages are claimed, dead letters expire one by one instead of together, saga updates no longer read mismatched property names, batch completion is atomic, and stores no longer open a new connection on every reconnect
 - MongoDB: a delayed message is no longer dispatched twice, outbox messages are claimed, inbox and revocation entries expire, batches and sagas are finished, and the client's `Pending` state no longer overwrites a stored result or ends a wait early
 
+### Notes
+- Requires .NET 10.0 and C# 14
+- The public surface of all 18 packages is frozen in `PublicAPI.Shipped.txt`; an API change that is not declared in an API file fails the build from here on
+- Upgrading from 0.1.0 is a re-registration rather than a drop-in change: stores run on the storage primitives with provider-specific options and migrations, task registration comes from the generated `RegisterTasks()` where an assembly defines its tasks, and the canvas primitives, message security, and dashboard providers have their 1.0 shapes
+- All 18 packages are published together at 1.0.0, and no package depends on the analyzers
+
 ## [0.1.0] - 2026-01-12
 
 ### Added
