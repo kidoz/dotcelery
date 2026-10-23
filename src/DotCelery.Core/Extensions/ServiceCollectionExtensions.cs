@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using DotCelery.Core.Abstractions;
+using DotCelery.Core.MultiTenancy;
 using DotCelery.Core.Serialization;
 using DotCelery.Core.Storage;
 using DotCelery.Core.Storage.Stores;
@@ -48,6 +49,29 @@ public static class ServiceCollectionExtensions
             ServiceDescriptor.Singleton<IHostedService, StoragePurgeService>()
         );
         return services;
+    }
+
+    /// <summary>
+    /// Adds tenant queue routing, which maps a task's tenant to its queue.
+    /// </summary>
+    /// <param name="builder">The DotCelery builder.</param>
+    /// <param name="configure">Optional configuration action for multi-tenancy options.</param>
+    /// <returns>The builder.</returns>
+    public static DotCeleryBuilder AddTenantRouting(
+        this DotCeleryBuilder builder,
+        Action<MultiTenancyOptions>? configure = null
+    )
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        if (configure is not null)
+        {
+            builder.Services.Configure(configure);
+        }
+
+        builder.Services.AddSingleton<ITenantRouter, TenantRouter>();
+        builder.Services.AddSingleton<ITenantContext>(TenantContext.Current);
+        return builder;
     }
 }
 

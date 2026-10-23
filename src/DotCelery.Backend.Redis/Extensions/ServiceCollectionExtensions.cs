@@ -127,21 +127,6 @@ public static class ServiceCollectionExtensions
     ) => services.AddRedisStorageStore<IRateLimiter, WindowRateLimiter>(configure);
 
     /// <summary>
-    /// Adds the Redis delayed message store, revocation store, and rate limiter.
-    /// </summary>
-    /// <param name="services">The service collection.</param>
-    /// <param name="configure">Optional configuration action.</param>
-    /// <returns>The service collection.</returns>
-    public static IServiceCollection AddRedisHighPriorityFeatures(
-        this IServiceCollection services,
-        Action<RedisStorageOptions>? configure = null
-    ) =>
-        services
-            .AddRedisDelayedMessageStore(configure)
-            .AddRedisRevocationStore()
-            .AddRedisRateLimiter();
-
-    /// <summary>
     /// Adds the Redis outbox store.
     /// </summary>
     /// <param name="services">The service collection.</param>

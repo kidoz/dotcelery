@@ -129,21 +129,6 @@ public static class ServiceCollectionExtensions
     ) => services.AddMongoStorageStore<IRateLimiter, WindowRateLimiter>(configure);
 
     /// <summary>
-    /// Adds the MongoDB delayed message store, revocation store, and rate limiter.
-    /// </summary>
-    /// <param name="services">The service collection.</param>
-    /// <param name="configure">Optional configuration action.</param>
-    /// <returns>The service collection.</returns>
-    public static IServiceCollection AddMongoHighPriorityFeatures(
-        this IServiceCollection services,
-        Action<MongoStorageOptions>? configure = null
-    ) =>
-        services
-            .AddMongoDelayedMessageStore(configure)
-            .AddMongoRevocationStore()
-            .AddMongoRateLimiter();
-
-    /// <summary>
     /// Adds the MongoDB outbox store.
     /// </summary>
     /// <param name="services">The service collection.</param>

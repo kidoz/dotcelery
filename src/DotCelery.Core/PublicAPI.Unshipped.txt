@@ -1,5 +1,2 @@
 #nullable enable
-DotCelery.Core.Storage.Stores.StorageStoreOptions.SignalMaxAttempts.get -> int
-DotCelery.Core.Storage.Stores.StorageStoreOptions.SignalMaxAttempts.set -> void
-DotCelery.Core.Storage.Stores.StorageStoreOptions.SignalFailedRetention.get -> System.TimeSpan
-DotCelery.Core.Storage.Stores.StorageStoreOptions.SignalFailedRetention.set -> void
+static DotCelery.Core.Extensions.ServiceCollectionExtensions.AddTenantRouting(this DotCelery.Core.Extensions.DotCeleryBuilder! builder, System.Action<DotCelery.Core.MultiTenancy.MultiTenancyOptions!>? configure = null) -> DotCelery.Core.Extensions.DotCeleryBuilder!

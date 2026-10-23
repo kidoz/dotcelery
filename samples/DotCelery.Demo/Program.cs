@@ -21,7 +21,9 @@ builder.Services.AddDotCelery(celery =>
     celery
         .UseInMemoryBroker()
         .UseInMemoryBackend()
-        .AddInMemoryHighPriorityFeatures()
+        .AddInMemoryDelayedMessageStore()
+        .AddInMemoryRevocationStore()
+        .AddInMemoryRateLimiter()
         .AddTask<EmailTask>()
         .AddTask<CalculationTask>()
         .AddTask<LongRunningTask>()
@@ -37,13 +39,9 @@ builder.Services.AddDotCelery(celery =>
 builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
 builder.Logging.AddFilter("DotCelery", LogLevel.Information);
 
-var host = builder.Build();
+using var host = builder.Build();
 
-// Start the host in the background
-var hostTask = host.StartAsync();
-
-// Give the worker time to start
-await Task.Delay(500);
+await host.StartAsync();
 
 var client = host.Services.GetRequiredService<ICeleryClient>();
 
@@ -84,6 +82,7 @@ while (running)
         case "5":
             await DemoParallelTasks(client);
             break;
+        case null:
         case "6":
             running = false;
             break;
@@ -195,7 +194,7 @@ static async Task DemoLongRunningTask(ICeleryClient client)
     Console.WriteLine($"Task ID: {asyncResult.TaskId}");
 
     // Wait for potential cancellation input
-    var cts = new CancellationTokenSource();
+    using var cts = new CancellationTokenSource();
     var checkInputTask = Task.Run(async () =>
     {
         var deadline = DateTimeOffset.UtcNow.AddSeconds(3);

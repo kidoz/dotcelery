@@ -102,20 +102,6 @@ public static class InMemoryBackendExtensions
     }
 
     /// <summary>
-    /// Adds all in-memory high-priority feature implementations.
-    /// This includes delayed message store, revocation store, and rate limiter.
-    /// </summary>
-    /// <param name="builder">The DotCelery builder.</param>
-    /// <returns>The builder.</returns>
-    public static DotCeleryBuilder AddInMemoryHighPriorityFeatures(this DotCeleryBuilder builder)
-    {
-        return builder
-            .AddInMemoryDelayedMessageStore()
-            .AddInMemoryRevocationStore()
-            .AddInMemoryRateLimiter();
-    }
-
-    /// <summary>
     /// Adds the in-memory outbox store for transactional outbox pattern.
     /// </summary>
     /// <param name="builder">The DotCelery builder.</param>
@@ -235,41 +221,5 @@ public static class InMemoryBackendExtensions
         builder.AddInMemoryStorage();
         builder.Services.AddSingleton<IWorkerRegistry, WorkerRegistry>();
         return builder;
-    }
-
-    /// <summary>
-    /// Adds the tenant router for multi-tenancy support.
-    /// </summary>
-    /// <param name="builder">The DotCelery builder.</param>
-    /// <param name="configure">Optional configuration action for multi-tenancy options.</param>
-    /// <returns>The builder.</returns>
-    public static DotCeleryBuilder AddMultiTenancy(
-        this DotCeleryBuilder builder,
-        Action<MultiTenancyOptions>? configure = null
-    )
-    {
-        if (configure is not null)
-        {
-            builder.Services.Configure(configure);
-        }
-
-        builder.Services.AddSingleton<ITenantRouter, TenantRouter>();
-        builder.Services.AddSingleton<ITenantContext>(TenantContext.Current);
-        return builder;
-    }
-
-    /// <summary>
-    /// Adds all in-memory Phase 8 advanced pattern implementations.
-    /// This includes partition locking, task execution tracking, queue metrics, and multi-tenancy.
-    /// </summary>
-    /// <param name="builder">The DotCelery builder.</param>
-    /// <returns>The builder.</returns>
-    public static DotCeleryBuilder AddInMemoryAdvancedPatterns(this DotCeleryBuilder builder)
-    {
-        return builder
-            .AddInMemoryPartitionLockStore()
-            .AddInMemoryTaskExecutionTracker()
-            .AddInMemoryQueueMetrics()
-            .AddMultiTenancy();
     }
 }

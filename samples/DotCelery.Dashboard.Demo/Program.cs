@@ -19,7 +19,9 @@ builder.Services.AddDotCelery(celery =>
         .UseInMemoryBroker()
         .UseInMemoryBackend()
         .AddInMemoryStorage() // task records for the dashboard's task list
-        .AddInMemoryHighPriorityFeatures() // delayed store, revocation, rate limiter
+        .AddInMemoryDelayedMessageStore()
+        .AddInMemoryRevocationStore()
+        .AddInMemoryRateLimiter()
         .AddInMemoryQueueMetrics() // queue statistics for the dashboard
         .AddInMemoryHistoricalDataStore() // powers the metrics panel and /metrics/historical
         .AddTask<EmailTask>()

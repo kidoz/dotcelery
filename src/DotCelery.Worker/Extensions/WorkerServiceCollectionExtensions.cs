@@ -463,31 +463,6 @@ public static class WorkerServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Adds all Phase 8 advanced pattern filters to the worker.
-    /// This includes partitioned execution, prevent-overlapping, tenant context, and queue metrics.
-    /// </summary>
-    /// <param name="builder">The DotCelery builder.</param>
-    /// <returns>The builder.</returns>
-    /// <remarks>
-    /// Requires the corresponding store implementations to be registered.
-    /// Call AddInMemoryAdvancedPatterns() on the backend builder to register in-memory stores.
-    /// </remarks>
-    [RequiresUnreferencedCode(
-        "The set includes prevent-overlapping execution, which keys by input through reflection."
-    )]
-    [RequiresDynamicCode(
-        "The set includes prevent-overlapping execution, which hashes input through reflection-based serialization."
-    )]
-    public static DotCeleryBuilder UseAdvancedPatternFilters(this DotCeleryBuilder builder)
-    {
-        return builder
-            .UsePartitionedExecution()
-            .UsePreventOverlapping()
-            .UseTenantContext()
-            .UseQueueMetrics();
-    }
-
-    /// <summary>
     /// Enables queued signal dispatch instead of inline signal handling.
     /// Signals will be enqueued to a signal queue and processed asynchronously by
     /// the SignalQueueProcessor background service.

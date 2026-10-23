@@ -10,11 +10,9 @@ DotCelery.Backend.InMemory.Storage.InMemoryStorageProvider.Name.get -> string!
 DotCelery.Backend.InMemory.Storage.InMemoryStorageProvider.Notifications.get -> DotCelery.Core.Storage.INotificationChannel?
 DotCelery.Backend.InMemory.Storage.InMemoryStorageProvider.PurgeExpiredAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<long>
 DotCelery.Backend.InMemory.Storage.InMemoryStorageProvider.Queues.get -> DotCelery.Core.Storage.IQueueStore!
-static DotCelery.Backend.InMemory.Extensions.InMemoryBackendExtensions.AddInMemoryAdvancedPatterns(this DotCelery.Core.Extensions.DotCeleryBuilder! builder) -> DotCelery.Core.Extensions.DotCeleryBuilder!
 static DotCelery.Backend.InMemory.Extensions.InMemoryBackendExtensions.AddInMemoryBatchStore(this DotCelery.Core.Extensions.DotCeleryBuilder! builder) -> DotCelery.Core.Extensions.DotCeleryBuilder!
 static DotCelery.Backend.InMemory.Extensions.InMemoryBackendExtensions.AddInMemoryDeadLetterStore(this DotCelery.Core.Extensions.DotCeleryBuilder! builder) -> DotCelery.Core.Extensions.DotCeleryBuilder!
 static DotCelery.Backend.InMemory.Extensions.InMemoryBackendExtensions.AddInMemoryDelayedMessageStore(this DotCelery.Core.Extensions.DotCeleryBuilder! builder) -> DotCelery.Core.Extensions.DotCeleryBuilder!
-static DotCelery.Backend.InMemory.Extensions.InMemoryBackendExtensions.AddInMemoryHighPriorityFeatures(this DotCelery.Core.Extensions.DotCeleryBuilder! builder) -> DotCelery.Core.Extensions.DotCeleryBuilder!
 static DotCelery.Backend.InMemory.Extensions.InMemoryBackendExtensions.AddInMemoryHistoricalDataStore(this DotCelery.Core.Extensions.DotCeleryBuilder! builder) -> DotCelery.Core.Extensions.DotCeleryBuilder!
 static DotCelery.Backend.InMemory.Extensions.InMemoryBackendExtensions.AddInMemoryInboxStore(this DotCelery.Core.Extensions.DotCeleryBuilder! builder) -> DotCelery.Core.Extensions.DotCeleryBuilder!
 static DotCelery.Backend.InMemory.Extensions.InMemoryBackendExtensions.AddInMemoryOutboxStore(this DotCelery.Core.Extensions.DotCeleryBuilder! builder) -> DotCelery.Core.Extensions.DotCeleryBuilder!
@@ -27,5 +25,4 @@ static DotCelery.Backend.InMemory.Extensions.InMemoryBackendExtensions.AddInMemo
 static DotCelery.Backend.InMemory.Extensions.InMemoryBackendExtensions.AddInMemoryStorage(this DotCelery.Core.Extensions.DotCeleryBuilder! builder) -> DotCelery.Core.Extensions.DotCeleryBuilder!
 static DotCelery.Backend.InMemory.Extensions.InMemoryBackendExtensions.AddInMemoryTaskExecutionTracker(this DotCelery.Core.Extensions.DotCeleryBuilder! builder) -> DotCelery.Core.Extensions.DotCeleryBuilder!
 static DotCelery.Backend.InMemory.Extensions.InMemoryBackendExtensions.AddInMemoryWorkerRegistry(this DotCelery.Core.Extensions.DotCeleryBuilder! builder) -> DotCelery.Core.Extensions.DotCeleryBuilder!
-static DotCelery.Backend.InMemory.Extensions.InMemoryBackendExtensions.AddMultiTenancy(this DotCelery.Core.Extensions.DotCeleryBuilder! builder, System.Action<DotCelery.Core.MultiTenancy.MultiTenancyOptions!>? configure = null) -> DotCelery.Core.Extensions.DotCeleryBuilder!
 static DotCelery.Backend.InMemory.Extensions.InMemoryBackendExtensions.UseInMemoryBackend(this DotCelery.Core.Extensions.DotCeleryBuilder! builder) -> DotCelery.Core.Extensions.DotCeleryBuilder!
