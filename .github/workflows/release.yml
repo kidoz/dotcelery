@@ -170,16 +170,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # A re-release can run after some versions are already on nuget.org, for example when
-          # a release is recreated or a publication stopped part-way. Skip those versions and
-          # publish the rest; the package verification above still checks the complete set.
+          # No --skip-duplicate: re-publishing an existing version must fail loudly rather
+          # than silently shipping nothing.
           # Push only *.nupkg: dotnet nuget push automatically uploads the adjacent *.snupkg
           # symbol package, so iterating *.snupkg separately re-pushes symbols and fails with
           # a 409 conflict while the first copy is still pending validation.
           for package in artifacts/packages/*.nupkg; do
             dotnet nuget push "${package}" \
               --api-key "${NUGET_API_KEY}" \
-              --skip-duplicate \
               --source https://api.nuget.org/v3/index.json
           done
         env:
