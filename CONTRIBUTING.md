@@ -236,8 +236,8 @@ When changing an AOT-compatible project:
   fallback.
 - Do not add `IsAotCompatible` to a project until it compiles cleanly with the AOT and trim
   analyzers.
-- Keep `AddTasksFromAssembly`, `UsePreventOverlapping`, `UseAdvancedPatternFilters`, and
-  `UseQueuedSignalDispatch` annotated; they require reflection or dynamic code.
+- Keep `AddTasksFromAssembly`, `UsePreventOverlapping`, and `UseQueuedSignalDispatch`
+  annotated; they require reflection or dynamic code.
 
 Verify an AOT change by publishing and running the smoke sample:
 

@@ -8,7 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `DotCelery.Abstractions` is a new package holding the interfaces, models, options, and JSON contracts; `DotCelery.Core` keeps the implementations and references it
+- `TaskMessageFactory` is the single construction path for task messages and follow-ups, so a chain step or linked callback keeps its root, parent, tenant, and partition
+- `AddTenantRouting()` registers tenant queue routing without a provider package, replacing `AddMultiTenancy()`
+- `MessageBrokerCapabilities.HoldsRequeuedMessagesUntilEta` and `RejectsStaleSettlements` state what a broker guarantees, and every bundled broker declares them
+- The worker warns at startup when signing, the task allowlist, or tenant validation is disabled, and refuses a multi-tenancy configuration that validates tenants without listing any
+- Registration-parity tests hold every provider to the same 14 store registrations and resolve every store interface in memory
 - `samples/DotCelery.CanvasExample` sends a chain, a group, a chord with a callback, and a nested canvas end to end
+
+### Changed
+- Schema-version and payload-size validation apply to every worker message without `UseMessageSecurity()`; message signing, the task allowlist, and tenant rejection stay opt-in
+- `CeleryWorkerService` delegates settlement, follow-up publishing, ETA waiting, retry scheduling, and circuit handling to internal collaborators; its public surface is unchanged
+- The in-memory, Redis, and SQS brokers refuse a settlement whose consumer no longer owns the delivery; the in-memory broker also honors cancellation and settles a requeue only after the returned copy is written
+- SQS tracks the ownership of every delivered message, not only the ones whose visibility it renews
+
+### Removed
+- The unused `RetryPolicy` and `ResilienceOptions`
+- The milestone-named registrations `AddInMemoryHighPriorityFeatures`, `AddRedisHighPriorityFeatures`, `AddMongoHighPriorityFeatures`, `AddInMemoryAdvancedPatterns`, `UseAdvancedPatternFilters`, and `AddMultiTenancy`; register the stores explicitly and use `AddTenantRouting()` for tenant routing
 
 ### Fixed
 - RabbitMQ serializes channel operations; failed settlement retains delivery ownership for retry
@@ -80,9 +96,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `JsonMessageSerializerOptions.Context` names the application's source-generated `JsonSerializerContext`, which serializes its task inputs and results; DotCelery's own model types keep coming from `DotCeleryJsonContext`, so the application registers only its own payload types. A payload type that neither context registers is an error rather than a reflection fallback, and the deserialization allowlist still decides whether it may be deserialized
 - The storage stores' records serialize through generated contexts — `StoreJsonContext` for the records no other context registers (task results and metric snapshots) and `DotCeleryJsonContext` for batches, sagas, and dead letters — so they round-trip under Native AOT without reflection. A record that holds arbitrary objects, such as a saga step result or task-result metadata, still falls back to reflection, which a Native AOT application does not provide
 - `samples/DotCelery.AotSmoke` publishes with `PublishAot` and runs a task through the generated registration end to end; `just aot-smoke` and CI publish it for the host platform and run it
-- `AddTasksFromAssembly`, `UsePreventOverlapping`, `UseAdvancedPatternFilters`, and `UseQueuedSignalDispatch` carry `RequiresUnreferencedCode`, and the latter three also `RequiresDynamicCode`, so an AOT or trimmed build warns when it uses a path that needs reflection
+- `AddTasksFromAssembly`, `UsePreventOverlapping`, and `UseQueuedSignalDispatch` carry `RequiresUnreferencedCode`, and the latter three also `RequiresDynamicCode`, so an AOT or trimmed build warns when it uses a path that needs reflection
 - The packaging and release workflows restore the packed packages from the local feed into a console app and run a task end to end, so a package with a missing dependency or without its analyzer assets fails before it is published; the release gate also runs the generated-task tests and the Native AOT smoke test, and the installation docs list every package, including `DotCelery.Analyzers`
-- Every shipped library tracks its public surface with `Microsoft.CodeAnalysis.PublicApiAnalyzers`: `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt` record every package's API, so an accidental addition, removal, or signature change fails the build until it is declared. `just api-format` declares an intentional change, and the initial baseline covers all 18 packages, including the members the JSON source generator adds to `DotCeleryJsonContext`
+- Every shipped library tracks its public surface with `Microsoft.CodeAnalysis.PublicApiAnalyzers`: `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt` record every package's API, so an accidental addition, removal, or signature change fails the build until it is declared. `just api-format` declares an intentional change, and the initial baseline covers all 19 packages, including the members the JSON source generator adds to `DotCeleryJsonContext`
 - The README has a production checklist covering durable providers and migrations, the shared worker registry and dashboard access, message security and retention, dead letters, observability, Beat election and state, cooperative time limits, AOT scope, and versioning
 - The release verifies that the packed package set matches `eng/packages.txt`, so a package that stops shipping, or one that unexpectedly ships, fails before anything is published
 
@@ -168,9 +184,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Notes
 - Requires .NET 10.0 and C# 14
-- The public surface of all 18 packages is frozen in `PublicAPI.Shipped.txt`; an API change that is not declared in an API file fails the build from here on
+- The public surface of all 19 packages is frozen in `PublicAPI.Shipped.txt`; an API change that is not declared in an API file fails the build from here on
 - Upgrading from 0.1.0 is a re-registration rather than a drop-in change: stores run on the storage primitives with provider-specific options and migrations, task registration comes from the generated `RegisterTasks()` where an assembly defines its tasks, and the canvas primitives, message security, and dashboard providers have their 1.0 shapes
-- All 18 packages are published together at 1.0.0, and no package depends on the analyzers
+- All 19 packages are published together at 1.0.0, and no package depends on the analyzers
 
 ## [0.1.0] - 2026-01-12
 

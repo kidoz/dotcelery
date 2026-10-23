@@ -56,7 +56,8 @@ with `AddTasksFromAssembly`, and the worker falls back to the compiled invoker.
 
 | Package | Purpose |
 |---------|---------|
-| `DotCelery.Core` | Abstractions, models, canvas, storage stores, JSON serialization |
+| `DotCelery.Abstractions` | Interfaces, models, options, and JSON contracts shared by every package |
+| `DotCelery.Core` | Storage stores, JSON serialization, and the core registration extensions |
 | `DotCelery.Client` | Sending tasks and canvas workflows |
 | `DotCelery.Worker` | Worker, execution, filters, sagas, batches, outbox/inbox |
 | `DotCelery.Analyzers` | Duplicate-name analysis and the source-generated registration and invokers |
@@ -96,17 +97,18 @@ dotnet run --project samples/DotCelery.RedisPostgresExample -- --result-backend=
 ```csharp
 using DotCelery.Core.Abstractions;
 
-public class SendEmailTask : ITask<EmailInput, EmailResult>
+public sealed class SendEmailTask : ITask<EmailInput, EmailResult>
 {
     public static string TaskName => "email.send";
 
-    public async Task<EmailResult> ExecuteAsync(
+    public Task<EmailResult> ExecuteAsync(
         EmailInput input,
         ITaskContext context,
         CancellationToken ct)
     {
         // Send email logic here
-        return new EmailResult(Success: true);
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(new EmailResult(Success: true));
     }
 }
 
@@ -132,15 +134,15 @@ builder.Services.AddDotCelery(celery =>
 ```
 
 For each task with a known input, the generator also emits a typed signature helper named after
-the task without its `Task` suffix (`EmailTask` → `Email`), so a canvas is written without
+the task without its `Task` suffix (`SendEmailTask` → `SendEmail`), so a canvas is written without
 spelling out the type arguments:
 
 ```csharp
 using static DotCelery.Generated.DotCeleryTasks;
 
-var workflow = new Chain(
-    Email(new EmailInput { To = "user@example.com", Subject = "Hello", Body = "..." }),
-    Archive(new ArchiveInput { /* ... */ }));
+var workflow = new Group(
+    SendEmail(new EmailInput("user1@example.com", "Hello", "...")),
+    SendEmail(new EmailInput("user2@example.com", "Hello", "...")));
 ```
 
 A library that ships tasks calls the generated method from its own public registration method,
@@ -360,7 +362,7 @@ var startedSaga = await sagaOrchestrator.StartAsync(saga);
 Report task progress in real-time during execution.
 
 ```csharp
-public class ProcessFileTask : ITask<FileInput, FileResult>
+public sealed class ProcessFileTask : ITask<FileInput, FileResult>
 {
     public static string TaskName => "file.process";
 
@@ -371,17 +373,22 @@ public class ProcessFileTask : ITask<FileInput, FileResult>
 
         for (int i = 0; i < lines.Length; i++)
         {
-            await ProcessLineAsync(lines[i], ct);
+            // Replace this simulated work with your asynchronous line processing.
+            await Task.Delay(TimeSpan.FromMilliseconds(10), ct);
 
             // Report progress
             await context.Progress.ReportAsync(
                 percentage: (i + 1) * 100.0 / lines.Length,
-                message: $"Processing line {i + 1} of {lines.Length}");
+                message: $"Processing line {i + 1} of {lines.Length}",
+                cancellationToken: ct);
         }
 
-        return new FileResult { LinesProcessed = lines.Length };
+        return new FileResult(lines.Length);
     }
 }
+
+public record FileInput(string Path);
+public record FileResult(int LinesProcessed);
 ```
 
 ## Batches
@@ -398,7 +405,7 @@ var batchId = await batchClient.CreateBatchAsync(batch =>
         new CampaignCompleteInput("email-campaign"));
 });
 
-var batchState = await batchClient.WaitForBatchAsync(batchId);
+var batchState = await batchClient.WaitForBatchAsync(batchId, timeout: TimeSpan.FromMinutes(1));
 ```
 
 Sending batches requires `AddBatchClient()`. Batch state tracking requires an `IBatchStore` registration and `AddBatchSupport()` on the worker. The worker that settles the last task of a batch runs the `OnComplete` callback once, however the batch finished, with the input given to it and the batch ID on the message; the batch record is created before its tasks are published, so a task that finishes immediately is still counted.
@@ -440,7 +447,7 @@ An entry first runs one interval, or at its next cron occurrence, after the sche
 [Route("high-priority")]
 [RateLimit("100/m")]
 [TimeLimit(SoftLimitSeconds = 300, HardLimitSeconds = 360)]
-public class ProcessOrderTask : ITask<OrderInput, OrderResult>
+public sealed class ProcessOrderTask : ITask<OrderInput, OrderResult>
 {
     public static string TaskName => "orders.process";
 
@@ -451,7 +458,8 @@ public class ProcessOrderTask : ITask<OrderInput, OrderResult>
     {
         try
         {
-            // Process order
+            // Replace with your asynchronous order processing.
+            await Task.Delay(TimeSpan.FromMilliseconds(10), ct);
             return new OrderResult(Success: true);
         }
         catch (TransientException ex)
@@ -466,7 +474,7 @@ public class ProcessOrderTask : ITask<OrderInput, OrderResult>
 ### Programmatic Retry
 
 ```csharp
-public async Task<OrderResult> ExecuteAsync(
+public Task<OrderResult> ExecuteAsync(
     OrderInput input,
     ITaskContext context,
     CancellationToken ct)
@@ -557,18 +565,47 @@ The client records sends, and the worker records tasks it receives, completes (w
 
 ## Dashboard
 
+The [dashboard demo](samples/DotCelery.Dashboard.Demo) runs an in-memory worker and generates
+sample traffic. Start it with `dotnet run --project samples/DotCelery.Dashboard.Demo`, then open
+<http://localhost:5080/celery/>.
+
+Live task totals, worker activity, and completed tasks:
+
+![DotCelery dashboard showing live task totals, an active worker, and successful tasks](assets/screenshots/dashboard-overview.jpg)
+
+<details>
+<summary>View the failed-task filter</summary>
+
+The demo deliberately generates occasional failures to demonstrate task-state filtering.
+
+![DotCelery dashboard filtered to simulated failed tasks](assets/screenshots/dashboard-failed-tasks.jpg)
+
+</details>
+
 Add the dashboard to a host that also runs a worker. With the default in-memory worker registry it
 shows the workers of its own process; a shared registry (see the note below) shows workers in other
 processes too:
 
 ```csharp
+using DotCelery.Backend.Postgres.Extensions;
+using DotCelery.Broker.RabbitMQ.Extensions;
+using DotCelery.Core.Extensions;
+using DotCelery.Dashboard.Extensions;
+using DotCelery.Worker.Extensions;
+
+var builder = WebApplication.CreateBuilder(args);
+
 builder.Services.AddDotCelery(celery =>
     celery
-        .AddPostgresStorage("Host=localhost;Database=celery") // any storage works
-        .AddPostgresQueueMetrics()
-        .AddPostgresHistoricalDataStore()
+        .UseRabbitMQ(options => options.ConnectionString = "amqp://localhost")
+        .UsePostgres(options =>
+            options.ConnectionString = "Host=localhost;Database=celery")
         .AddWorker()
         .UseQueueMetrics());
+
+// These stores share the PostgreSQL connection configured above.
+builder.Services.AddPostgresQueueMetrics();
+builder.Services.AddPostgresHistoricalDataStore();
 
 // Every worker and dashboard configured with this storage shares the registry, so the dashboard
 // sees workers in other processes; without one it sees the workers of its own process
@@ -584,6 +621,8 @@ var app = builder.Build();
 
 app.UseDotCeleryDashboard();               // the UI page
 app.MapDotCeleryDashboard("/celery");      // API controllers + SignalR hub
+
+await app.RunAsync();
 ```
 
 What the dashboard shows out of the box:
@@ -674,6 +713,8 @@ builder.Services.AddPostgresOutboxStore(options =>
 Retention, retries, and timeouts of the stores are set with `StorageStoreOptions`, whose `Prefix` keeps applications that share a database apart:
 
 ```csharp
+using DotCelery.Core.Storage.Stores;
+
 builder.Services.Configure<StorageStoreOptions>(options =>
 {
     options.Prefix = "billing";
@@ -735,11 +776,6 @@ The worker uses the same mechanism for task outcomes. With `UseInboxDeduplicatio
 A Native AOT application registers its tasks through the source generator, which supplies a typed invoker for each task so none is invoked through `Expression.Compile`, and registers its payload types with a source-generated `JsonSerializerContext`:
 
 ```csharp
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
-[JsonSerializable(typeof(MyInput))]
-[JsonSerializable(typeof(MyOutput))]
-internal sealed partial class MyJsonContext : JsonSerializerContext;
-
 builder.Services.Configure<JsonMessageSerializerOptions>(options =>
     options.Context = MyJsonContext.Default);
 
@@ -749,9 +785,14 @@ builder.Services.AddDotCelery(celery => celery
     .RegisterTasks() // Extension in the generated DotCelery.Generated namespace
     .AddClient()
     .AddWorker());
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(MyInput))]
+[JsonSerializable(typeof(MyOutput))]
+internal sealed partial class MyJsonContext : JsonSerializerContext;
 ```
 
-DotCelery's own model types keep coming from the built-in `DotCeleryJsonContext`, so the application's context only registers its inputs and results. A payload type that neither context registers is an error at runtime, not a reflection fallback. The reflective scan (`AddTasksFromAssembly`) is annotated `[RequiresUnreferencedCode]`, and `UsePreventOverlapping` (keying by input), `UseAdvancedPatternFilters`, and `UseQueuedSignalDispatch` carry `[RequiresUnreferencedCode]` and `[RequiresDynamicCode]`, so an AOT or trimmed build warns when it uses a path that needs reflection.
+DotCelery's own model types keep coming from the built-in `DotCeleryJsonContext`, so the application's context only registers its inputs and results. A payload type that neither context registers is an error at runtime, not a reflection fallback. The reflective scan (`AddTasksFromAssembly`) is annotated `[RequiresUnreferencedCode]`, and `UsePreventOverlapping` (keying by input) and `UseQueuedSignalDispatch` carry `[RequiresUnreferencedCode]` and `[RequiresDynamicCode]`, so an AOT or trimmed build warns when it uses a path that needs reflection.
 
 `samples/DotCelery.AotSmoke` is a complete example; `just aot-smoke` publishes it for the host platform and runs it, as does CI.
 
@@ -761,13 +802,13 @@ DotCelery's own model types keep coming from the built-in `DotCeleryJsonContext`
 - **Schema migrations.** PostgreSQL and SQL Server register their migrations with a generic host and apply them at startup under a database lock. A deployment that applies schema changes itself runs `SqlMigrator.GenerateScript()` once and applies the output through its migration process before rolling out.
 - **Shared worker data.** Workers register themselves with `IWorkerRegistry`. A dashboard running in another process needs a registry on shared storage (`AddRedisWorkerRegistry`, `AddPostgresWorkerRegistry`, `AddSqlServerWorkerRegistry`, or `AddMongoWorkerRegistry`), not the in-process default.
 - **Dashboard access.** The dashboard denies requests until `AuthorizationCallback` is wired and `RequireAuthorization` is enabled (the default), and state-changing requests must carry the dashboard request header and come from an allowed origin. Serve it over HTTPS.
-- **Message security.** Enable `MessageSecurityOptions.EnableMessageSigning` with a `SigningKey`, keep `RejectUnsignedMessages` on, set `MaxMessageAge` to the longest acceptable redelivery delay, bound `MaxPayloadSizeBytes`, and enable the task allowlist (`EnforceTaskAllowlist` and `AllowedTaskNames`). `JsonMessageSerializerOptions.EnforceDeserializationTypeAllowlist` additionally restricts payload types.
+- **Message security.** Schema-version and payload-size validation run for every message by default, and the worker warns at startup when signing, the task allowlist, or tenant validation is off. Enable `MessageSecurityOptions.EnableMessageSigning` with a `SigningKey`, keep `RejectUnsignedMessages` on, set `MaxMessageAge` to the longest acceptable redelivery delay, and enable the task allowlist (`EnforceTaskAllowlist` and `AllowedTaskNames`). Register tenant routing with `AddTenantRouting()` and the validation filter with `UseTenantContext()`. `JsonMessageSerializerOptions.EnforceDeserializationTypeAllowlist` additionally restricts payload types.
 - **Retention.** Size `StorageStoreOptions.ResultExpiry`, `InboxRetention`, `RevocationRetention`, and `WorkerRetention` to the replay window and dashboard history you need, and keep `AddStoragePurge()` registered so expired entries are deleted every `PurgeInterval`.
 - **Dead letters.** Monitor the dead-letter store and configure broker and worker dead-lettering for the deployment; a rejected or exhausted message is not retried silently.
 - **Observability.** Register health checks with `AddDotCelery()` on the `IHealthChecksBuilder`, and export metrics and traces with `AddDotCeleryInstrumentation()` on the meter and tracer providers.
 - **Scheduling.** Run one Beat scheduler per schedule: with shared storage the schedulers elect one leader per `SchedulerName`. Enable `PersistState` so last-run times survive a restart, and decide `RunMissedOnStartup`.
 - **Time limits.** Hard time limits are cooperative: a task that ignores its cancellation token keeps its worker slot, so bound such work inside the task.
-- **Native AOT.** Only Core, Worker, Client, the in-memory broker and backend, and the generated registration and JSON contexts are verified for AOT and trimming; the dashboard and the driver-based providers are not.
+- **Native AOT.** Only Abstractions, Core, Worker, Client, the in-memory broker and backend, and the generated registration and JSON contexts are verified for AOT and trimming; the dashboard and the driver-based providers are not.
 - **Versions.** DotCelery targets .NET 10 and follows semantic versioning for its public API, which the packages track in `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt`.
 
 ## Project Structure
@@ -775,7 +816,8 @@ DotCelery's own model types keep coming from the built-in `DotCeleryJsonContext`
 ```
 dotcelery/
 ├── src/
-│   ├── DotCelery.Core/              # Core abstractions, models, canvas primitives
+│   ├── DotCelery.Abstractions/      # Interfaces, models, options, and JSON contracts
+│   ├── DotCelery.Core/              # Storage stores, serialization, and core registration
 │   ├── DotCelery.Client/            # Task sending client, batch client
 │   ├── DotCelery.Worker/            # Worker, sagas, resilience, progress
 │   ├── DotCelery.Beat/              # Beat scheduler for periodic tasks
