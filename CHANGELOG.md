@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.0] - 2026-10-23
+## [1.1.0] - 2026-10-23
 
 ### Added
 - `DotCelery.Abstractions` is a new package holding the interfaces, models, options, and JSON contracts; `DotCelery.Core` keeps the implementations and references it
@@ -18,6 +18,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Registration-parity tests hold every provider to the same 14 store registrations and resolve every store interface in memory
 - `samples/DotCelery.CanvasExample` sends a chain, a group, a chord with a callback, and a nested canvas end to end
 - `RetryPolicy` returns redesigned: constant or exponential backoff with jitter and retryable/non-retryable exception lists, set per task with `[Retry]` or worker-wide with `ResilienceOptions.DefaultRetryPolicy`; a requested retry without an explicit countdown uses the computed backoff, and `UseResilience()` with `AutoRetryOnFailure` turns a retryable failure into a retry instead of a failure
+
+### Changed
+- Dashboard REST endpoints require an explicit `/api/v1/` URL and advertise supported versions through ASP.NET API Versioning; unversioned routes are no longer accepted
+- Dashboard refreshes fetch only data for the active view, cache task filter lists for one minute, render independent responses immediately, and show polling suspension while dialogs are open
+- The dashboard uses React, TypeScript, Tailwind CSS, and Vite while retaining embedded assets, configurable URL prefixes, polling, filters, and capability-aware task operations; building from source now requires Node.js 24.3 or later
+- Schema-version and payload-size validation apply to every worker message without `UseMessageSecurity()`; message signing, the task allowlist, and tenant rejection stay opt-in
+- `CeleryWorkerService` delegates settlement, follow-up publishing, ETA waiting, retry scheduling, and circuit handling to internal collaborators; its public surface is unchanged
+- The in-memory, Redis, and SQS brokers refuse a settlement whose consumer no longer owns the delivery; the in-memory broker also honors cancellation and settles a requeue only after the returned copy is written
+- SQS tracks the ownership of every delivered message, not only the ones whose visibility it renews
+
+### Removed
+- The unused `RetryPolicy` and `ResilienceOptions`
+- The milestone-named registrations `AddInMemoryHighPriorityFeatures`, `AddRedisHighPriorityFeatures`, `AddMongoHighPriorityFeatures`, `AddInMemoryAdvancedPatterns`, `UseAdvancedPatternFilters`, and `AddMultiTenancy`; register the stores explicitly and use `AddTenantRouting()` for tenant routing
+
+### Fixed
+- Dashboard mutation completions preserve newer navigation and dialogs, task selection waits for results matching the active filters, and terminal task details stop showing cancellation as pending
+- The worker clamps the publisher-supplied `MaxRetries` to `ResilienceOptions.MaxRetriesLimit` (default 100), so a message can no longer request an unbounded number of retries
+- RabbitMQ serializes channel operations; failed settlement retains delivery ownership for retry
+- Worker heartbeats and revocation subscriptions recover after backend outages; pending revocations expire with storage retention
+- Soft timeouts await execution after cancellation, preventing overlapping retries and observing late failures; task cancellation remains cooperative
+- Chain steps and linked callbacks retain tenant and partition identifiers; failed dead-letter writes preserve the original delivery
+- Poison signals are archived before removal, with bounded retries across restarts (`StorageStoreOptions.SignalMaxAttempts`, default 5) and failed-message retention (`SignalFailedRetention`, default 7 days) in the prefixed `signals.failed` collection
+- RabbitMQ, Redis, and SQS enforce receive size limits before deserialization; SQS verifies signatures first and stops tracking settled deliveries
+- Redis stream acknowledgement and deletion are atomic; MongoDB duplicate-key retries are bounded; compiled task invokers distinguish registrations by their input and output types
+- Circuit breaker and kill switch deadlines use the injected clock and recover on state checks; timers from previous trips cannot shorten a new recovery period
+- The Demo sample's long-running scenario no longer throws when standard input is redirected, so it can run non-interactively
+
+## [1.0.0] - 2026-10-19
+
+### Added
 - `WorkerOptions.InfrastructureFailureRequeueDelay` sets how long the worker waits before returning a message to the broker after an infrastructure failure
 - `DotCelery.Storage.Sql`: tables, columns, indexes, and sequences defined in code; migrations as schema operations; and `SqlMigrator`, which applies versioned migrations when the host starts, under a database lock, and records them with checksums of their operations in a `dotcelery_migrations` table. SQL text lives only in each database's dialect
 - `SqlMigrator.GenerateScript()` produces a re-runnable SQL script for databases where schema changes are applied by hand
@@ -81,13 +111,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The release verifies that the packed package set matches `eng/packages.txt`, so a package that stops shipping, or one that unexpectedly ships, fails before anything is published
 
 ### Changed
-- Dashboard REST endpoints require an explicit `/api/v1/` URL and advertise supported versions through ASP.NET API Versioning; unversioned routes are no longer accepted
-- Dashboard refreshes fetch only data for the active view, cache task filter lists for one minute, render independent responses immediately, and show polling suspension while dialogs are open
-- The dashboard uses React, TypeScript, Tailwind CSS, and Vite while retaining embedded assets, configurable URL prefixes, polling, filters, and capability-aware task operations; building from source now requires Node.js 24.3 or later
-- Schema-version and payload-size validation apply to every worker message without `UseMessageSecurity()`; message signing, the task allowlist, and tenant rejection stay opt-in
-- `CeleryWorkerService` delegates settlement, follow-up publishing, ETA waiting, retry scheduling, and circuit handling to internal collaborators; its public surface is unchanged
-- The in-memory, Redis, and SQS brokers refuse a settlement whose consumer no longer owns the delivery; the in-memory broker also honors cancellation and settles a requeue only after the returned copy is written
-- SQS tracks the ownership of every delivered message, not only the ones whose visibility it renews
 - PostgreSQL stores no longer create their tables on first use; run migrations first (automatic with a generic host)
 - PostgreSQL stores share one data source (connection pool) per connection string; `IPostgresDataSourceProvider` is a required constructor parameter
 - Graceful shutdown stops taking messages first, returns prefetched messages to the broker, and closes the broker consumer only after every in-flight message is settled
@@ -121,8 +144,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Group` rejects a chord member in both constructors and in `And()` with an `ArgumentException`, so a canvas that cannot run fails where it is built instead of when it is sent; the client keeps its defensive rejection for any other primitive
 
 ### Removed
-- The unused `RetryPolicy` and `ResilienceOptions`
-- The milestone-named registrations `AddInMemoryHighPriorityFeatures`, `AddRedisHighPriorityFeatures`, `AddMongoHighPriorityFeatures`, `AddInMemoryAdvancedPatterns`, `UseAdvancedPatternFilters`, and `AddMultiTenancy`; register the stores explicitly and use `AddTenantRouting()` for tenant routing
 - `AutoCreateTables` from every PostgreSQL store's options
 - The unused `DotCelery.Core.Migrations` framework and the Redis and MongoDB migration stores
 - The `DotCelery.Build.SqlValidator` tool, which did not validate any SQL in this repository
@@ -133,17 +154,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SecurityValidationFilter`, whose validation `UseMessageSecurity()` now performs in the worker before the message reaches the executor
 
 ### Fixed
-- Dashboard mutation completions preserve newer navigation and dialogs, task selection waits for results matching the active filters, and terminal task details stop showing cancellation as pending
-- The worker clamps the publisher-supplied `MaxRetries` to `ResilienceOptions.MaxRetriesLimit` (default 100), so a message can no longer request an unbounded number of retries
-- RabbitMQ serializes channel operations; failed settlement retains delivery ownership for retry
-- Worker heartbeats and revocation subscriptions recover after backend outages; pending revocations expire with storage retention
-- Soft timeouts await execution after cancellation, preventing overlapping retries and observing late failures; task cancellation remains cooperative
-- Chain steps and linked callbacks retain tenant and partition identifiers; failed dead-letter writes preserve the original delivery
-- Poison signals are archived before removal, with bounded retries across restarts (`StorageStoreOptions.SignalMaxAttempts`, default 5) and failed-message retention (`SignalFailedRetention`, default 7 days) in the prefixed `signals.failed` collection
-- RabbitMQ, Redis, and SQS enforce receive size limits before deserialization; SQS verifies signatures first and stops tracking settled deliveries
-- Redis stream acknowledgement and deletion are atomic; MongoDB duplicate-key retries are bounded; compiled task invokers distinguish registrations by their input and output types
-- Circuit breaker and kill switch deadlines use the injected clock and recover on state checks; timers from previous trips cannot shorten a new recovery period
-- The Demo sample's long-running scenario no longer throws when standard input is redirected, so it can run non-interactively
 - The inbox keeps a processed message ID for at least `MessageSecurityOptions.MaxMessageAge` when one is configured, so a replay inside the signing window is refused by the inbox even when `StorageStoreOptions.InboxRetention` is shorter
 - A historical metrics snapshot is keyed by its queue and task name, so the snapshots a collector records for several queues at one instant are all kept; before, they shared a key and only the last queue of each interval was counted
 - The worker no longer drops a message when the result backend, revocation store, rate limiter, or retry publish fails; it returns the message to the broker
