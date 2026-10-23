@@ -436,6 +436,24 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
         Assert.Null(await _backend.GetResultAsync("t1"));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SignedDeliveryWithoutOriginalBody_IsDeadLetteredWithoutRunning(bool empty)
+    {
+        using var validator = CreateValidator(
+            new MessageSecurityOptions { EnableMessageSigning = true, SigningKey = SigningKey }
+        );
+        var worker = CreateWorker(securityValidator: validator);
+        var message = CreateMessage("missing-body", EchoTask.TaskName);
+        _broker.Enqueue(message, empty ? [] : null, validator.Sign(_serializer.Serialize(message)));
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForAsync(() => _broker.HasEvent("ack:missing-body"));
+        await worker.StopAsync(CancellationToken.None);
+        Assert.Equal(DeadLetterReason.Rejected, Assert.Single(await ReadDeadLettersAsync()).Reason);
+        Assert.Null(await _backend.GetResultAsync("missing-body"));
+    }
+
     [Fact]
     public async Task SignedMessage_Runs()
     {

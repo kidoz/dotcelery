@@ -659,6 +659,12 @@ public sealed class CeleryWorkerService : BackgroundService
             return result;
         }
 
+        if (!string.IsNullOrEmpty(message.Signature) && message.RawBody is not { Length: > 0 })
+            return MessageValidationResult.Failure(
+                MessageValidationError.InvalidSignature,
+                "Signed deliveries require their original serialized body."
+            );
+
         if (
             message.RawBody is { Length: > 0 } rawBody
             && !_securityValidator.IsSignatureValid(result, rawBody, message.Signature)
