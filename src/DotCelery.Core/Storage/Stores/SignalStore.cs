@@ -19,6 +19,8 @@ public sealed class SignalStore : ISignalStore
 {
     private readonly string _queue;
     private readonly IQueueStore _queues;
+    private readonly IDocumentStore _documents;
+    private readonly string _failedCollection;
     private readonly StorageStoreOptions _options;
     private readonly TimeProvider _timeProvider;
     private readonly HeldClaims _claims = new();
@@ -37,7 +39,10 @@ public sealed class SignalStore : ISignalStore
     {
         ArgumentNullException.ThrowIfNull(storage);
         _queues = storage.Queues;
+        _documents = storage.Documents;
         _options = options?.Value ?? new StorageStoreOptions();
+        ArgumentOutOfRangeException.ThrowIfLessThan(_options.SignalMaxAttempts, 1);
+        _failedCollection = _options.Name("signals.failed");
         _queue = _options.Name("signals");
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
@@ -79,10 +84,24 @@ public sealed class SignalStore : ISignalStore
         foreach (var item in items)
         {
             _claims.Add(item);
-            yield return JsonSerializer.Deserialize(
-                item.Payload.Span,
-                DotCeleryJsonContext.Default.SignalMessage
-            )!;
+            SignalMessage? signal;
+            try
+            {
+                signal = JsonSerializer.Deserialize(
+                    item.Payload.Span,
+                    DotCeleryJsonContext.Default.SignalMessage
+                );
+            }
+            catch (JsonException)
+            {
+                signal = null;
+            }
+            if (signal is null)
+            {
+                await RejectAsync(item.Id, requeue: false, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+            yield return signal;
         }
     }
 
@@ -111,7 +130,7 @@ public sealed class SignalStore : ISignalStore
     {
         if (_claims.TryTake(messageId, out var item))
         {
-            if (requeue)
+            if (requeue && item.DeliveryCount < _options.SignalMaxAttempts)
             {
                 await _queues
                     .AbandonAsync(item, cancellationToken: cancellationToken)
@@ -119,6 +138,28 @@ public sealed class SignalStore : ISignalStore
             }
             else
             {
+                try
+                {
+                    await _documents
+                        .UpsertAsync(
+                            _failedCollection,
+                            item.Id,
+                            item.Payload,
+                            new DocumentWriteOptions
+                            {
+                                TimeToLive = _options.SignalFailedRetention,
+                                SortKey = _timeProvider.GetUtcNow(),
+                            },
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Keep the claim so a caller can retry archiving this delivery.
+                    _claims.Add(item);
+                    throw;
+                }
                 await _queues.CompleteAsync(item, cancellationToken).ConfigureAwait(false);
             }
         }

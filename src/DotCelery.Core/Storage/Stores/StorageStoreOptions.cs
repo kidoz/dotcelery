@@ -38,6 +38,18 @@ public sealed class StorageStoreOptions
     public TimeSpan OutboxFailedRetention { get; set; } = TimeSpan.FromDays(7);
 
     /// <summary>
+    /// Gets or sets the maximum deliveries of a rejected signal before it is archived.
+    /// Default is 5.
+    /// </summary>
+    public int SignalMaxAttempts { get; set; } = 5;
+
+    /// <summary>
+    /// Gets or sets how long rejected signals are retained in the signals.failed collection.
+    /// Default is 7 days.
+    /// </summary>
+    public TimeSpan SignalFailedRetention { get; set; } = TimeSpan.FromDays(7);
+
+    /// <summary>
     /// Gets or sets how long the inbox remembers a processed message. Default is 7 days.
     /// </summary>
     public TimeSpan InboxRetention { get; set; } = TimeSpan.FromDays(7);

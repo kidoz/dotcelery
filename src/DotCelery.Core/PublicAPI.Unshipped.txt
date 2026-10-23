@@ -1,1 +1,5 @@
 #nullable enable
+DotCelery.Core.Storage.Stores.StorageStoreOptions.SignalMaxAttempts.get -> int
+DotCelery.Core.Storage.Stores.StorageStoreOptions.SignalMaxAttempts.set -> void
+DotCelery.Core.Storage.Stores.StorageStoreOptions.SignalFailedRetention.get -> System.TimeSpan
+DotCelery.Core.Storage.Stores.StorageStoreOptions.SignalFailedRetention.set -> void

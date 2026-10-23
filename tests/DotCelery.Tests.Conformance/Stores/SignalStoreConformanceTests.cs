@@ -89,6 +89,59 @@ public abstract class SignalStoreConformanceTests : StoreConformanceTests
         Assert.Equal(0, await store.GetPendingCountAsync());
     }
 
+    [Fact]
+    public async Task RejectedSignal_IsArchivedBeforeRemovalAndExpiresAfterRetention()
+    {
+        var store = CreateStore();
+        await store.EnqueueAsync(CreateSignal("poison"));
+        await DequeueAsync(store);
+        await store.RejectAsync("poison", requeue: false);
+        Assert.Equal(0, await store.GetPendingCountAsync());
+        var failed = await Provider.Documents.GetAsync(
+            $"{StoreOptions.Prefix}.signals.failed",
+            "poison"
+        );
+        Assert.NotNull(failed);
+        Time.Advance(StoreOptions.SignalFailedRetention);
+        Assert.Null(
+            await Provider.Documents.GetAsync($"{StoreOptions.Prefix}.signals.failed", "poison")
+        );
+    }
+
+    [Fact]
+    public async Task RepeatedFailures_AreBoundedAcrossProcessorRestarts()
+    {
+        StoreOptions.SignalMaxAttempts = 3;
+        await CreateStore().EnqueueAsync(CreateSignal("poison"));
+        for (var attempt = 0; attempt < StoreOptions.SignalMaxAttempts; attempt++)
+        {
+            var store = CreateStore();
+            Assert.Single(await DequeueAsync(store));
+            await store.RejectAsync("poison", requeue: true);
+        }
+        Assert.Empty(await DequeueAsync(CreateStore()));
+        Assert.NotNull(
+            await Provider.Documents.GetAsync($"{StoreOptions.Prefix}.signals.failed", "poison")
+        );
+    }
+
+    [Fact]
+    public async Task InvalidSignalEnvelope_IsArchivedWithoutBlockingTheNextSignal()
+    {
+        await Provider.Queues.EnqueueAsync(
+            $"{StoreOptions.Prefix}.signals",
+            "a",
+            "invalid json"u8.ToArray(),
+            Time.GetUtcNow()
+        );
+        var store = CreateStore();
+        await store.EnqueueAsync(CreateSignal("b"));
+        Assert.Equal("b", Assert.Single(await DequeueAsync(store)).Id);
+        Assert.NotNull(
+            await Provider.Documents.GetAsync($"{StoreOptions.Prefix}.signals.failed", "a")
+        );
+    }
+
     private SignalMessage CreateSignal(string id) =>
         new()
         {

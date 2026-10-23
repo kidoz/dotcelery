@@ -147,9 +147,27 @@ public sealed class SignalQueueProcessor : BackgroundService
         CancellationToken cancellationToken
     )
     {
+        ITaskSignal signal;
         try
         {
-            var signal = message.Deserialize(_jsonOptions);
+            signal = message.Deserialize(_jsonOptions);
+        }
+        catch (Exception ex)
+            when (ex
+                    is JsonException
+                        or InvalidOperationException
+                        or NotSupportedException
+                        or TypeLoadException
+            )
+        {
+            _logger.LogError(ex, "Rejecting unreadable signal message {MessageId}", message.Id);
+            await _signalQueue
+                .RejectAsync(message.Id, requeue: false, cancellationToken)
+                .ConfigureAwait(false);
+            return;
+        }
+        try
+        {
             await DispatchToHandlersAsync(signal, cancellationToken).ConfigureAwait(false);
 
             await _signalQueue
@@ -161,6 +179,10 @@ public sealed class SignalQueueProcessor : BackgroundService
                 signal.GetType().Name,
                 signal.TaskId
             );
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
