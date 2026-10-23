@@ -393,7 +393,8 @@ public sealed class CeleryWorkerService : BackgroundService
         }
         catch (UnknownTaskException ex)
         {
-            // Redelivering a message that no worker can handle would loop forever
+            // Redelivering a message that no worker can handle would loop forever, so it is kept
+            // as a dead letter and settled instead
             _killSwitch?.RecordFailure(ex);
             _logger.LogError(
                 ex,
@@ -401,6 +402,24 @@ public sealed class CeleryWorkerService : BackgroundService
                 message.Message.Id,
                 message.Message.Task
             );
+            await DeadLetterAsync(message.Message, DeadLetterReason.UnknownTask)
+                .ConfigureAwait(false);
+            await RejectAsync(message).ConfigureAwait(false);
+            return;
+        }
+        catch (JsonException ex)
+        {
+            // A payload that cannot be read will never become readable, so returning it to the
+            // broker would loop forever; it is kept as a dead letter and settled instead
+            _killSwitch?.RecordFailure(ex);
+            _logger.LogError(
+                ex,
+                "Rejecting message {TaskId} for task {TaskName}: its payload cannot be read",
+                message.Message.Id,
+                message.Message.Task
+            );
+            await DeadLetterAsync(message.Message, DeadLetterReason.Rejected)
+                .ConfigureAwait(false);
             await RejectAsync(message).ConfigureAwait(false);
             return;
         }

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Exceptions;
 using DotCelery.Core.Filters;
@@ -180,7 +181,24 @@ public sealed class TaskExecutor
             object? input = null;
             if (registration.InputType is not null)
             {
-                input = _serializer.Deserialize(message.Args, registration.InputType);
+                try
+                {
+                    input = _serializer.Deserialize(message.Args, registration.InputType);
+                }
+                catch (JsonException ex)
+                {
+                    // A payload that cannot be read will never become readable, so it is a
+                    // rejected message rather than a task failure that is retried
+                    _logger.LogError(ex, "Task {TaskId} payload cannot be read", message.Id);
+                    return await RecordRejectedAsync(
+                            message,
+                            ex,
+                            startTime,
+                            workerName,
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false);
+                }
             }
 
             // Create execution context
@@ -434,50 +452,14 @@ public sealed class TaskExecutor
         {
             _logger.LogWarning("Task {TaskId} was rejected: {Message}", message.Id, ex.Message);
 
-            var taskResult = new TaskResult
-            {
-                TaskId = message.Id,
-                State = TaskState.Rejected,
-                Exception = TaskExceptionInfo.FromException(ex),
-                CompletedAt = _timeProvider.GetUtcNow(),
-                Duration = _timeProvider.GetUtcNow() - startTime,
-                Retries = message.Retries,
-                Worker = workerName,
-            };
-
-            await RecordOutcomeAsync(taskResult, cancellationToken).ConfigureAwait(false);
-
-            // Dispatch rejected signals
-            await _signalDispatcher
-                .DispatchAsync(
-                    new TaskRejectedSignal
-                    {
-                        TaskId = message.Id,
-                        TaskName = message.Task,
-                        Timestamp = _timeProvider.GetUtcNow(),
-                        Reason = ex.Message,
-                        Worker = workerName,
-                    },
+            return await RecordRejectedAsync(
+                    message,
+                    ex,
+                    startTime,
+                    workerName,
                     cancellationToken
                 )
                 .ConfigureAwait(false);
-
-            await _signalDispatcher
-                .DispatchAsync(
-                    new TaskPostRunSignal
-                    {
-                        TaskId = message.Id,
-                        TaskName = message.Task,
-                        Timestamp = _timeProvider.GetUtcNow(),
-                        State = TaskState.Rejected,
-                        Duration = taskResult.Duration,
-                        Worker = workerName,
-                    },
-                    cancellationToken
-                )
-                .ConfigureAwait(false);
-
-            return taskResult;
         }
         catch (Exception ex) when (!taskCompleted)
         {
@@ -534,6 +516,61 @@ public sealed class TaskExecutor
         {
             _revocationManager.UnregisterTask(message.Id);
         }
+    }
+
+    // A message the worker will not run is recorded as rejected, so a client sees a final state
+    // and the dead letter queue keeps the reason
+    private async Task<TaskResult> RecordRejectedAsync(
+        TaskMessage message,
+        Exception exception,
+        DateTimeOffset startTime,
+        string? workerName,
+        CancellationToken cancellationToken
+    )
+    {
+        var taskResult = new TaskResult
+        {
+            TaskId = message.Id,
+            State = TaskState.Rejected,
+            Exception = TaskExceptionInfo.FromException(exception),
+            CompletedAt = _timeProvider.GetUtcNow(),
+            Duration = _timeProvider.GetUtcNow() - startTime,
+            Retries = message.Retries,
+            Worker = workerName,
+        };
+
+        await RecordOutcomeAsync(taskResult, cancellationToken).ConfigureAwait(false);
+
+        await _signalDispatcher
+            .DispatchAsync(
+                new TaskRejectedSignal
+                {
+                    TaskId = message.Id,
+                    TaskName = message.Task,
+                    Timestamp = _timeProvider.GetUtcNow(),
+                    Reason = exception.Message,
+                    Worker = workerName,
+                },
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+        await _signalDispatcher
+            .DispatchAsync(
+                new TaskPostRunSignal
+                {
+                    TaskId = message.Id,
+                    TaskName = message.Task,
+                    Timestamp = _timeProvider.GetUtcNow(),
+                    State = TaskState.Rejected,
+                    Duration = taskResult.Duration,
+                    Worker = workerName,
+                },
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+        return taskResult;
     }
 
     // The recorder stores the outcome and marks a successful message as processed in one
