@@ -20,6 +20,10 @@ consult the [changelog](../CHANGELOG.md) when using a released package.
 2. [Explore the dashboard](tutorials/dashboard-tour.md) and inspect task history.
 3. [Use Redis and PostgreSQL](how-to/use-redis-postgres.md) with the existing sample.
 
+Moving an existing application? Start with
+[Migrate background work to DotCelery](how-to/migrate-to-dotcelery.md) and the
+[compatibility reference](reference/migration-compatibility.md).
+
 ## Find a topic
 
 | Topic                                 | Documentation                                                   |

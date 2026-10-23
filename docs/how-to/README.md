@@ -6,6 +6,8 @@ These guides assume you know how to register and send a task. Choose the outcome
 you need.
 
 - [Use Redis and PostgreSQL](use-redis-postgres.md).
+- [Migrate background work to DotCelery](migrate-to-dotcelery.md): Hangfire,
+  Quartz.NET, Coravel/hosted services, and eligible MassTransit/NServiceBus work.
 - [Host and authorize the dashboard](host-dashboard.md).
 - [Develop the dashboard with hot reload](develop-dashboard.md).
 - [Run project checks](run-checks.md).

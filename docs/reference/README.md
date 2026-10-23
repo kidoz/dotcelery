@@ -5,6 +5,8 @@
 Use these pages to look up the current package boundaries, contracts, and defaults.
 
 - [Packages](packages.md): runtime packages and provider choices.
+- [Migration compatibility](migration-compatibility.md): counterparts and boundaries
+  for Hangfire, Quartz.NET, Coravel, hosted services, MassTransit, and NServiceBus.
 - [Task contracts](task-contracts.md): task interfaces, states, and registration.
 - [Dashboard options](dashboard-options.md): configuration defaults and effects.
 - [Dashboard REST API v1](dashboard-api.md): endpoints, search parameters,
