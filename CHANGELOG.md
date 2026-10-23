@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RetryPolicy` returns redesigned: constant or exponential backoff with jitter and retryable/non-retryable exception lists, set per task with `[Retry]` or worker-wide with `ResilienceOptions.DefaultRetryPolicy`; a requested retry without an explicit countdown uses the computed backoff, and `UseResilience()` with `AutoRetryOnFailure` turns a retryable failure into a retry instead of a failure
 
 ### Changed
+- Dashboard REST endpoints require an explicit `/api/v1/` URL and advertise supported versions through ASP.NET API Versioning; unversioned routes are no longer accepted
+- Dashboard refreshes fetch only data for the active view, cache task filter lists for one minute, render independent responses immediately, and show polling suspension while dialogs are open
+- The dashboard uses React, TypeScript, Tailwind CSS, and Vite while retaining embedded assets, configurable URL prefixes, polling, filters, and capability-aware task operations; building from source now requires Node.js 24.3 or later
 - Schema-version and payload-size validation apply to every worker message without `UseMessageSecurity()`; message signing, the task allowlist, and tenant rejection stay opt-in
 - `CeleryWorkerService` delegates settlement, follow-up publishing, ETA waiting, retry scheduling, and circuit handling to internal collaborators; its public surface is unchanged
 - The in-memory, Redis, and SQS brokers refuse a settlement whose consumer no longer owns the delivery; the in-memory broker also honors cancellation and settles a requeue only after the returned copy is written
@@ -28,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The milestone-named registrations `AddInMemoryHighPriorityFeatures`, `AddRedisHighPriorityFeatures`, `AddMongoHighPriorityFeatures`, `AddInMemoryAdvancedPatterns`, `UseAdvancedPatternFilters`, and `AddMultiTenancy`; register the stores explicitly and use `AddTenantRouting()` for tenant routing
 
 ### Fixed
+- Dashboard mutation completions preserve newer navigation and dialogs, task selection waits for results matching the active filters, and terminal task details stop showing cancellation as pending
 - The worker clamps the publisher-supplied `MaxRetries` to `ResilienceOptions.MaxRetriesLimit` (default 100), so a message can no longer request an unbounded number of retries
 - RabbitMQ serializes channel operations; failed settlement retains delivery ownership for retry
 - Worker heartbeats and revocation subscriptions recover after backend outages; pending revocations expire with storage retention

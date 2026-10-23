@@ -627,9 +627,16 @@ requested until the worker reports the outcome. To browse the demo in read-only 
 dotnet run --project samples/DotCelery.Dashboard.Demo -- --Dashboard:ReadOnly=true
 ```
 
-The UI assets and logo are embedded in `DotCelery.Dashboard`; serving the dashboard needs no
-external scripts, CDN, or Node.js runtime. Dashboard presentation tests run with
-`node --test eng/dashboard-ui.test.cjs` (Node.js 22+), or `just test-dashboard-ui`.
+The React/TypeScript UI, compiled Tailwind CSS, and logo are embedded in `DotCelery.Dashboard`;
+serving the dashboard needs no external scripts, CDN, or Node.js runtime. Building from source
+requires Node.js 24.3 or later. Run `npm ci` and `npm run check` for frontend linting,
+formatting, type checking, and presentation tests; `npm run test:browser` runs the Chromium
+regression suite. See [frontend development](CONTRIBUTING.md#dashboard-frontend-checks) for hot reload.
+
+REST clients must use an explicit API version, such as `/celery/api/v1/overview`
+or `/celery/api/v1/tasks/search`. Unversioned URLs and unsupported versions return
+404. Responses advertise supported versions; version-aware API Explorer metadata
+is available for host OpenAPI integration. See the [API version policy](CONTRIBUTING.md#dashboard-rest-api-versions).
 
 Add the dashboard to a host that also runs a worker. With the default in-memory worker registry it
 shows the workers of its own process; a shared registry (see the note below) shows workers in other
