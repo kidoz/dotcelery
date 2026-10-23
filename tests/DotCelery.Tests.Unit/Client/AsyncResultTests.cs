@@ -95,6 +95,22 @@ public class AsyncResultTests : IAsyncDisposable
     }
 
     [Theory]
+    [InlineData(TaskState.Pending)]
+    [InlineData(TaskState.Started)]
+    [InlineData(TaskState.Requeued)]
+    [InlineData(TaskState.Revoked)]
+    public async Task StateOnlyUpdate_IsVisibleThroughAsyncResult(TaskState state)
+    {
+        await _backend.UpdateStateAsync("state-only", state);
+        var result = new AsyncResult("state-only", _client);
+
+        Assert.Equal(state, await result.GetStateAsync());
+        Assert.Equal(state == TaskState.Revoked, await result.IsCompleteAsync());
+        if (state == TaskState.Revoked)
+            Assert.Equal(state, (await result.WaitAsync(TimeSpan.FromSeconds(1))).State);
+    }
+
+    [Theory]
     [InlineData(TaskState.Success, true)]
     [InlineData(TaskState.Failure, true)]
     [InlineData(TaskState.Revoked, true)]

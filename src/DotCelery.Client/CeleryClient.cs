@@ -199,6 +199,19 @@ public sealed class CeleryClient : ICeleryClient
             return false;
         }
 
+        if (_revocationStore is null)
+        {
+            throw new InvalidOperationException(
+                "Scheduled cancellation requires an IRevocationStore to prevent an already claimed message from executing."
+            );
+        }
+
+        // A dispatcher may already hold a copy. Revoke before removing the queue entry so
+        // failure to record revocation never reports a successful cancellation.
+        await _revocationStore
+            .RevokeAsync(taskId, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
         var removed = await _delayedMessageStore
             .RemoveAsync(taskId, cancellationToken)
             .ConfigureAwait(false);
@@ -222,6 +235,12 @@ public sealed class CeleryClient : ICeleryClient
 
         return removed;
     }
+
+    /// <inheritdoc />
+    public ValueTask<TaskState?> GetStateAsync(
+        string taskId,
+        CancellationToken cancellationToken = default
+    ) => _backend.GetStateAsync(taskId, cancellationToken);
 
     // ========== Task Sending ==========
 

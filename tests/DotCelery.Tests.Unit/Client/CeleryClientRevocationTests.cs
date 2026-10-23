@@ -3,11 +3,19 @@ namespace DotCelery.Tests.Unit.Client;
 using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Broker.InMemory;
 using DotCelery.Client;
+using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
 using DotCelery.Core.Serialization;
 using DotCelery.Core.Storage.Stores;
+using DotCelery.Worker;
+using DotCelery.Worker.Execution;
+using DotCelery.Worker.Filters;
+using DotCelery.Worker.Registry;
+using DotCelery.Worker.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 
 public class CeleryClientRevocationTests : IAsyncDisposable
 {
@@ -16,6 +24,7 @@ public class CeleryClientRevocationTests : IAsyncDisposable
     private readonly RevocationStore _revocationStore = new(new InMemoryStorageProvider());
     private readonly JsonMessageSerializer _serializer = new();
     private readonly CeleryClient _client;
+    private readonly DelayedMessageStore _delayed = new(new InMemoryStorageProvider());
 
     public CeleryClientRevocationTests()
     {
@@ -26,8 +35,134 @@ public class CeleryClientRevocationTests : IAsyncDisposable
             _serializer,
             options,
             NullLogger<CeleryClient>.Instance,
+            _revocationStore,
+            delayedMessageStore: _delayed
+        );
+    }
+
+    [Fact]
+    public async Task CancelScheduledAsync_ClaimedMessage_IsRevokedBeforeItsCopyCanExecute()
+    {
+        var message = new TaskMessage
+        {
+            Id = "claimed",
+            Task = CancelledTask.TaskName,
+            Args = [],
+            ContentType = "application/json",
+            Timestamp = DateTimeOffset.UtcNow,
+        };
+        await _delayed.AddAsync(message, DateTimeOffset.UtcNow.AddMinutes(-1));
+        await using var due = _delayed
+            .GetDueMessagesAsync(DateTimeOffset.UtcNow)
+            .GetAsyncEnumerator();
+        Assert.True(await due.MoveNextAsync());
+        var heldCopy = due.Current;
+
+        Assert.True(await _client.CancelScheduledAsync(message.Id));
+        Assert.True(await _revocationStore.IsRevokedAsync(message.Id));
+        var result = new AsyncResult(message.Id, _client);
+        Assert.True(await result.IsCompleteAsync());
+        Assert.Equal(TaskState.Revoked, (await result.WaitAsync(TimeSpan.FromSeconds(1))).State);
+
+        await using var services = new ServiceCollection()
+            .AddTransient<CancelledTask>()
+            .BuildServiceProvider();
+        var registry = new TaskRegistry();
+        registry.Register(typeof(CancelledTask), CancelledTask.TaskName);
+        var options = Options.Create(new WorkerOptions());
+        using var revocations = new RevocationManager(
+            options,
+            NullLogger<RevocationManager>.Instance,
             _revocationStore
         );
+        var executor = new TaskExecutor(
+            registry,
+            services,
+            _serializer,
+            _backend,
+            revocations,
+            new TaskFilterPipeline(
+                services,
+                Options.Create(new TaskFilterOptions()),
+                NullLogger<TaskFilterPipeline>.Instance
+            ),
+            options,
+            NullLogger<TaskExecutor>.Instance
+        );
+        var outcome = await executor.ExecuteAsync(
+            new BrokerMessage
+            {
+                Message = heldCopy,
+                DeliveryTag = "copy",
+                Queue = "celery",
+                ReceivedAt = DateTimeOffset.UtcNow,
+            },
+            "worker",
+            CancellationToken.None
+        );
+        Assert.Equal(TaskState.Revoked, outcome.State);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancelScheduledAsync_WithoutDurableRevocation_DoesNotRemoveTheTask(
+        bool failingStore
+    )
+    {
+        await _delayed.AddAsync(
+            new TaskMessage
+            {
+                Id = "pending",
+                Task = CancelledTask.TaskName,
+                Args = [],
+                ContentType = "application/json",
+                Timestamp = DateTimeOffset.UtcNow,
+            },
+            DateTimeOffset.UtcNow.AddHours(1)
+        );
+        IRevocationStore? revocations = null;
+        if (failingStore)
+        {
+            revocations = Substitute.For<IRevocationStore>();
+#pragma warning disable CA2012 // NSubstitute consumes the configured ValueTask.
+            revocations
+                .RevokeAsync(
+                    Arg.Any<string>(),
+                    Arg.Any<RevokeOptions?>(),
+                    Arg.Any<CancellationToken>()
+                )
+                .Returns(_ =>
+                    ValueTask.FromException(new InvalidOperationException("Revocation unavailable"))
+                );
+#pragma warning restore CA2012
+        }
+        var client = new CeleryClient(
+            _broker,
+            _backend,
+            _serializer,
+            Options.Create(new CeleryClientOptions()),
+            NullLogger<CeleryClient>.Instance,
+            revocations,
+            delayedMessageStore: _delayed
+        );
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            client.CancelScheduledAsync("pending").AsTask()
+        );
+
+        Assert.Equal(1, await _delayed.GetPendingCountAsync());
+        Assert.Null(await _backend.GetStateAsync("pending"));
+    }
+
+    private sealed class CancelledTask : ITask
+    {
+        public static string TaskName => "tests.cancelled";
+
+        public Task ExecuteAsync(
+            ITaskContext context,
+            CancellationToken cancellationToken = default
+        ) => throw new InvalidOperationException($"{GetType().Name} must never run.");
     }
 
     [Fact]

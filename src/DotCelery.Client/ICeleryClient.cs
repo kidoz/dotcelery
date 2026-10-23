@@ -59,12 +59,25 @@ public interface ICeleryClient
     /// <returns>True if the task was found and cancelled; false if not found or already executed.</returns>
     /// <remarks>
     /// This only cancels tasks that were scheduled with ETA or Countdown and haven't started yet.
+    /// A revocation store is required to protect against concurrent dispatch. A revocation
+    /// is recorded even if concurrent dispatch has already removed the delayed entry.
     /// For tasks that are already running, use <see cref="RevokeAsync(string, RevokeOptions?, CancellationToken)"/> instead.
     /// </remarks>
     ValueTask<bool> CancelScheduledAsync(
         string taskId,
         CancellationToken cancellationToken = default
     );
+
+    /// <summary>
+    /// Gets the current state, including a task that has not stored a result yet.
+    /// </summary>
+    /// <param name="taskId">The task invocation ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The state, or null if the task is unknown.</returns>
+    async ValueTask<TaskState?> GetStateAsync(
+        string taskId,
+        CancellationToken cancellationToken = default
+    ) => (await GetResultAsync(taskId, cancellationToken).ConfigureAwait(false))?.State;
 
     // ========== Task Sending ==========
 

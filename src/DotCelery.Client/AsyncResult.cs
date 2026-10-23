@@ -37,8 +37,7 @@ public class AsyncResult
     /// <returns>The task state, or null if not found.</returns>
     public async ValueTask<TaskState?> GetStateAsync(CancellationToken cancellationToken = default)
     {
-        var result = await _client.GetResultAsync(TaskId, cancellationToken).ConfigureAwait(false);
-        return result?.State;
+        return await _client.GetStateAsync(TaskId, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

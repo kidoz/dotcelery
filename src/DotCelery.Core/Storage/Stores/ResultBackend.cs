@@ -20,6 +20,7 @@ namespace DotCelery.Core.Storage.Stores;
 /// the state. The <c>metadata</c> of <see cref="UpdateStateAsync"/> is not stored.
 /// </para>
 /// <para>
+/// Terminal state updates also create a result, so cancellation completes result waits.
 /// <see cref="WaitForResultAsync"/> returns once a result with a final state is stored. Waiters
 /// are woken by the provider's notifications when it has them, and otherwise check every
 /// <see cref="StorageStoreOptions.ResultPollInterval"/>.
@@ -91,7 +92,23 @@ public sealed class ResultBackend : IResultBackend, IStorageBackedStore
             )
             .ConfigureAwait(false);
 
-        if (_signals.TryRemove(result.TaskId, out var signal))
+        await NotifyAsync(result.TaskId, cancellationToken).ConfigureAwait(false);
+    }
+
+    private TaskResult? StateResult(string taskId, TaskState state) =>
+        IsFinal(state)
+            ? new TaskResult
+            {
+                TaskId = taskId,
+                State = state,
+                CompletedAt = _timeProvider.GetUtcNow(),
+                Duration = TimeSpan.Zero,
+            }
+            : null;
+
+    private async ValueTask NotifyAsync(string taskId, CancellationToken cancellationToken)
+    {
+        if (_signals.TryRemove(taskId, out var signal))
         {
             signal.TrySetResult();
         }
@@ -99,7 +116,7 @@ public sealed class ResultBackend : IResultBackend, IStorageBackedStore
         if (_notifications is not null)
         {
             await _notifications
-                .PublishAsync(_collection, result.TaskId, cancellationToken)
+                .PublishAsync(_collection, taskId, cancellationToken)
                 .ConfigureAwait(false);
         }
     }
@@ -192,7 +209,7 @@ public sealed class ResultBackend : IResultBackend, IStorageBackedStore
                 .TryInsertAsync(
                     _collection,
                     taskId,
-                    new TaskRecord(state, null),
+                    new TaskRecord(state, StateResult(taskId, state)),
                     RecordTypeInfo,
                     WriteOptions(null),
                     cancellationToken
@@ -200,6 +217,8 @@ public sealed class ResultBackend : IResultBackend, IStorageBackedStore
                 .ConfigureAwait(false);
             if (inserted is not null)
             {
+                if (IsFinal(state))
+                    await NotifyAsync(taskId, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -214,6 +233,7 @@ public sealed class ResultBackend : IResultBackend, IStorageBackedStore
                             : current.Value with
                             {
                                 State = state,
+                                Result = StateResult(taskId, state) ?? current.Value.Result,
                             },
                     _ => WriteOptions(null),
                     cancellationToken
@@ -223,6 +243,8 @@ public sealed class ResultBackend : IResultBackend, IStorageBackedStore
             // Otherwise the task expired or was removed in between, so insert it again
             if (updated is not null)
             {
+                if (IsFinal(state))
+                    await NotifyAsync(taskId, cancellationToken).ConfigureAwait(false);
                 return;
             }
         }

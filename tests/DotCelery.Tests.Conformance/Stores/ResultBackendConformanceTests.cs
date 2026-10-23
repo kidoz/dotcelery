@@ -100,6 +100,23 @@ public abstract class ResultBackendConformanceTests : StoreConformanceTests
         Assert.Null(await backend.GetResultAsync("task"));
     }
 
+    [Theory]
+    [InlineData(TaskState.Revoked)]
+    [InlineData(TaskState.Rejected)]
+    public async Task UpdateStateAsync_TerminalState_CompletesAnExistingWait(TaskState state)
+    {
+        var backend = CreateBackend();
+        await backend.UpdateStateAsync("task", TaskState.Pending);
+        var wait = backend.WaitForResultAsync("task", Timeout);
+
+        await backend.UpdateStateAsync("task", state);
+
+        var result = await wait.WaitAsync(Timeout);
+        Assert.Equal(state, result.State);
+        Assert.Equal("task", result.TaskId);
+        Assert.Equal(Start, result.CompletedAt);
+    }
+
     [Fact]
     public async Task UpdateStateAsync_Pending_DoesNotMoveATaskBack()
     {
