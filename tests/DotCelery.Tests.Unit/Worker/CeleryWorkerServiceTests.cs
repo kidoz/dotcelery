@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Core.Abstractions;
+using DotCelery.Core.Canvas;
 using DotCelery.Core.DeadLetter;
 using DotCelery.Core.Exceptions;
 using DotCelery.Core.Models;
@@ -23,6 +24,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
+using NSubstitute;
 
 /// <summary>
 /// Tests for how the worker settles broker messages after failures and during shutdown.
@@ -50,6 +52,64 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
         services.AddTransient<RetryingTask>();
         services.AddTransient<RejectingTask>();
         _serviceProvider = services.BuildServiceProvider();
+    }
+
+    [Theory]
+    [InlineData("expired")]
+    [InlineData("unknown")]
+    [InlineData("rejected")]
+    public async Task DeadLetterFailure_RequeuesWithoutAcknowledgingOrDiscarding(string kind)
+    {
+        var handler = Substitute.For<IDeadLetterHandler>();
+#pragma warning disable CA2012 // NSubstitute consumes the configured ValueTask.
+        handler
+            .HandleAsync(
+                Arg.Any<TaskMessage>(),
+                Arg.Any<DeadLetterReason>(),
+                Arg.Any<Exception?>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>()
+            )
+            .Returns(_ => ValueTask.FromException(new IOException("DLQ unavailable")));
+#pragma warning restore CA2012
+        var worker = CreateWorker(deadLetterHandler: handler);
+        var message = CreateMessage(
+            "t1",
+            kind == "unknown" ? "missing.task" : RejectingTask.TaskName
+        );
+        if (kind == "expired")
+            message = message with { Expires = DateTimeOffset.UtcNow.AddMinutes(-1) };
+        _broker.Enqueue(message);
+        _broker.Enqueue(CreateMessage("t2", EchoTask.TaskName));
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForAsync(() => _broker.HasEvent("requeue:t1") && _broker.HasEvent("ack:t2"));
+        await worker.StopAsync(CancellationToken.None);
+        Assert.False(_broker.HasEvent("ack:t1"));
+        Assert.False(_broker.HasEvent("reject:t1"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task FollowUp_PreservesTenantAndPartition(bool chain)
+    {
+        var followUp = new Signature { TaskName = EchoTask.TaskName };
+        var original = CreateMessage("t1", EchoTask.TaskName) with
+        {
+            TenantId = "tenant-a",
+            PartitionKey = "account-42",
+            Chain = chain ? [new ChainStep { TaskId = "step-2", Signature = followUp }] : null,
+            Link = chain ? null : followUp,
+        };
+        var worker = CreateWorker();
+        _broker.Enqueue(original);
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForAsync(() => _broker.HasEvent("ack:t1"));
+        await worker.StopAsync(CancellationToken.None);
+        var published = Assert.Single(_broker.Published);
+        Assert.Equal("tenant-a", published.TenantId);
+        Assert.Equal("account-42", published.PartitionKey);
+        Assert.True(_broker.IndexOf($"publish:{published.Id}") < _broker.IndexOf("ack:t1"));
     }
 
     [Fact]
@@ -505,7 +565,8 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
         IMessageSecurityValidator? securityValidator = null,
         ICircuitBreakerFactory? circuitBreakerFactory = null,
         WorkerActivity? activity = null,
-        TimeProvider? timeProvider = null
+        TimeProvider? timeProvider = null,
+        IDeadLetterHandler? deadLetterHandler = null
     )
     {
         var options = new WorkerOptions
@@ -549,7 +610,7 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
             shutdownHandler: new GracefulShutdownHandler(
                 NullLogger<GracefulShutdownHandler>.Instance
             ),
-            deadLetterHandler: CreateDeadLetterHandler(),
+            deadLetterHandler: deadLetterHandler ?? CreateDeadLetterHandler(),
             securityValidator: securityValidator,
             circuitBreakerFactory: circuitBreakerFactory,
             activity: activity,
@@ -588,6 +649,7 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
         private readonly ConcurrentDictionary<string, BrokerMessage> _unsettled = new();
         private readonly ConcurrentQueue<string> _events = new();
 
+        public ConcurrentQueue<TaskMessage> Published { get; } = new();
         public bool FailPublish { get; set; }
 
         public string? FailAckFor { get; set; }
@@ -627,6 +689,7 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
                 return ValueTask.FromException(new InvalidOperationException("Broker unavailable"));
             }
 
+            Published.Enqueue(message);
             _events.Enqueue($"publish:{message.Id}");
             return ValueTask.CompletedTask;
         }

@@ -238,8 +238,13 @@ public sealed class CeleryWorkerService : BackgroundService
                         rejection.ErrorMessage
                     );
 
-                    await DeadLetterAsync(message.Message, DeadLetterReason.Rejected)
-                        .ConfigureAwait(false);
+                    if (
+                        !await DeadLetterAsync(message, DeadLetterReason.Rejected)
+                            .ConfigureAwait(false)
+                    )
+                    {
+                        return;
+                    }
                     await AckAsync(message).ConfigureAwait(false);
                     return;
                 }
@@ -251,8 +256,10 @@ public sealed class CeleryWorkerService : BackgroundService
             if (message.Message.Expires.HasValue && message.Message.Expires.Value < now)
             {
                 _logger.LogWarning("Task {TaskId} has expired, skipping", message.Message.Id);
-                await DeadLetterAsync(message.Message, DeadLetterReason.Expired)
-                    .ConfigureAwait(false);
+                if (!await DeadLetterAsync(message, DeadLetterReason.Expired).ConfigureAwait(false))
+                {
+                    return;
+                }
                 await AckAsync(message).ConfigureAwait(false);
                 return;
             }
@@ -402,8 +409,10 @@ public sealed class CeleryWorkerService : BackgroundService
                 message.Message.Id,
                 message.Message.Task
             );
-            await DeadLetterAsync(message.Message, DeadLetterReason.UnknownTask)
-                .ConfigureAwait(false);
+            if (!await DeadLetterAsync(message, DeadLetterReason.UnknownTask).ConfigureAwait(false))
+            {
+                return;
+            }
             await RejectAsync(message).ConfigureAwait(false);
             return;
         }
@@ -418,8 +427,10 @@ public sealed class CeleryWorkerService : BackgroundService
                 message.Message.Id,
                 message.Message.Task
             );
-            await DeadLetterAsync(message.Message, DeadLetterReason.Rejected)
-                .ConfigureAwait(false);
+            if (!await DeadLetterAsync(message, DeadLetterReason.Rejected).ConfigureAwait(false))
+            {
+                return;
+            }
             await RejectAsync(message).ConfigureAwait(false);
             return;
         }
@@ -531,8 +542,12 @@ public sealed class CeleryWorkerService : BackgroundService
             {
                 // A rejected message is handled, not processed; the dead letter queue keeps a
                 // record of it instead of dropping it silently
-                await DeadLetterAsync(message.Message, DeadLetterReason.Rejected)
-                    .ConfigureAwait(false);
+                if (
+                    !await DeadLetterAsync(message, DeadLetterReason.Rejected).ConfigureAwait(false)
+                )
+                {
+                    return;
+                }
             }
 
             await AckAsync(message).ConfigureAwait(false);
@@ -544,14 +559,14 @@ public sealed class CeleryWorkerService : BackgroundService
         }
     }
 
-    // A dead letter handler that fails must not stop the message from being settled, so it is
-    // logged and the message is still acknowledged
-    private async Task DeadLetterAsync(TaskMessage message, DeadLetterReason reason)
+    // Settle only after the configured dead-letter destination has accepted the message.
+    private async Task<bool> DeadLetterAsync(BrokerMessage delivery, DeadLetterReason reason)
     {
         if (_deadLetterHandler is null)
         {
-            return;
+            return true;
         }
+        var message = delivery.Message;
 
         try
         {
@@ -563,6 +578,7 @@ public sealed class CeleryWorkerService : BackgroundService
                     cancellationToken: CancellationToken.None
                 )
                 .ConfigureAwait(false);
+            return true;
         }
         catch (Exception ex)
         {
@@ -571,6 +587,8 @@ public sealed class CeleryWorkerService : BackgroundService
                 "Failed to store task {TaskId} in the dead letter queue",
                 message.Id
             );
+            await ReturnToBrokerAsync(delivery).ConfigureAwait(false);
+            return false;
         }
     }
 
@@ -698,6 +716,8 @@ public sealed class CeleryWorkerService : BackgroundService
                         LinkError = followUp.LinkError,
                         RootId = message.Message.RootId ?? message.Message.Id,
                         ParentId = message.Message.Id,
+                        TenantId = message.Message.TenantId,
+                        PartitionKey = message.Message.PartitionKey,
                         Queue = followUp.Queue,
                         Priority = followUp.Priority,
                         MaxRetries = followUp.MaxRetries,
@@ -925,7 +945,10 @@ public sealed class CeleryWorkerService : BackgroundService
         )
         {
             _logger.LogWarning("Task {TaskId} has expired, skipping", message.Message.Id);
-            await DeadLetterAsync(message.Message, DeadLetterReason.Expired).ConfigureAwait(false);
+            if (!await DeadLetterAsync(message, DeadLetterReason.Expired).ConfigureAwait(false))
+            {
+                return false;
+            }
             await AckAsync(message).ConfigureAwait(false);
             return false;
         }
