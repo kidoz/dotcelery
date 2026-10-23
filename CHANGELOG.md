@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The worker warns at startup when signing, the task allowlist, or tenant validation is disabled, and refuses a multi-tenancy configuration that validates tenants without listing any
 - Registration-parity tests hold every provider to the same 14 store registrations and resolve every store interface in memory
 - `samples/DotCelery.CanvasExample` sends a chain, a group, a chord with a callback, and a nested canvas end to end
+- `RetryPolicy` returns redesigned: constant or exponential backoff with jitter and retryable/non-retryable exception lists, set per task with `[Retry]` or worker-wide with `ResilienceOptions.DefaultRetryPolicy`; a requested retry without an explicit countdown uses the computed backoff, and `UseResilience()` with `AutoRetryOnFailure` turns a retryable failure into a retry instead of a failure
 
 ### Changed
 - Schema-version and payload-size validation apply to every worker message without `UseMessageSecurity()`; message signing, the task allowlist, and tenant rejection stay opt-in
@@ -27,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The milestone-named registrations `AddInMemoryHighPriorityFeatures`, `AddRedisHighPriorityFeatures`, `AddMongoHighPriorityFeatures`, `AddInMemoryAdvancedPatterns`, `UseAdvancedPatternFilters`, and `AddMultiTenancy`; register the stores explicitly and use `AddTenantRouting()` for tenant routing
 
 ### Fixed
+- The worker clamps the publisher-supplied `MaxRetries` to `ResilienceOptions.MaxRetriesLimit` (default 100), so a message can no longer request an unbounded number of retries
 - RabbitMQ serializes channel operations; failed settlement retains delivery ownership for retry
 - Worker heartbeats and revocation subscriptions recover after backend outages; pending revocations expire with storage retention
 - Soft timeouts await execution after cancellation, preventing overlapping retries and observing late failures; task cancellation remains cooperative

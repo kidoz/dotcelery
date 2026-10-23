@@ -488,6 +488,32 @@ public Task<OrderResult> ExecuteAsync(
 }
 ```
 
+### Retry Policies
+
+A retry policy computes the backoff before a retry and decides which exceptions are worth
+retrying. Set one per task with `[Retry]`, or worker-wide with `UseResilience()`; a task's
+attribute wins over the worker default. A requested retry without an explicit countdown uses
+the computed backoff, and `AutoRetryOnFailure` turns a retryable failure into a retry instead
+of a failure while retries remain. `MaxRetriesLimit` (default 100) clamps the
+publisher-supplied `MaxRetries` on every message.
+
+```csharp
+[Retry(MaxRetries = 5, Strategy = BackoffStrategy.Exponential, InitialDelaySeconds = 2,
+    DontRetryFor = new[] { typeof(ArgumentException) })]
+public sealed class ProcessOrderTask : ITask<OrderInput, OrderResult> { ... }
+
+builder.Services.AddDotCelery(celery =>
+{
+    celery
+        .AddWorker()
+        .UseResilience(options =>
+        {
+            options.DefaultRetryPolicy = RetryPolicy.Exponential(maxRetries: 3);
+            options.AutoRetryOnFailure = true;
+        });
+});
+```
+
 ## Resilience
 
 ### Circuit Breaker
@@ -569,18 +595,41 @@ The [dashboard demo](samples/DotCelery.Dashboard.Demo) runs an in-memory worker 
 sample traffic. Start it with `dotnet run --project samples/DotCelery.Dashboard.Demo`, then open
 <http://localhost:5080/celery/>.
 
-Live task totals, worker activity, and completed tasks:
+The overview brings together live queue and worker gauges, completion trends, and recent activity.
+The dashboard uses the same DotCelery logo and green/purple brand colors as this README:
 
-![DotCelery dashboard showing live task totals, an active worker, and successful tasks](assets/screenshots/dashboard-overview.jpg)
+![DotCelery dashboard overview with live gauges, completion trends, and recent tasks](assets/screenshots/dashboard-overview.jpg)
 
 <details>
-<summary>View the failed-task filter</summary>
+<summary>Explore task filtering and details</summary>
 
-The demo deliberately generates occasional failures to demonstrate task-state filtering.
+Task history combines state, task name, queue, worker, time, and text filters before pagination.
+The demo deliberately generates occasional failures to demonstrate investigation. Task details
+show timings, retries, and the error information permitted by the host configuration.
 
 ![DotCelery dashboard filtered to simulated failed tasks](assets/screenshots/dashboard-failed-tasks.jpg)
 
+![DotCelery task details with execution timings and error information](assets/screenshots/dashboard-task-details.jpg)
+
 </details>
+
+The **Overview**, **Tasks**, **Queues**, and **Workers** views share refresh controls and a visible
+last-update timestamp. Pause updates to inspect a snapshot; selecting tasks also holds the list
+steady while you review an action. Filters and task links can be bookmarked. Request failures
+keep the previous data visible and mark it as potentially stale.
+
+Retry and cancellation controls follow the host's permissions and configured stores. Before a
+bulk action, the UI previews eligible task IDs and reports partial failures. A retry requires a
+retained dead-letter entry; a failed task record alone is insufficient. Cancellation is shown as
+requested until the worker reports the outcome. To browse the demo in read-only mode, run:
+
+```bash
+dotnet run --project samples/DotCelery.Dashboard.Demo -- --Dashboard:ReadOnly=true
+```
+
+The UI assets and logo are embedded in `DotCelery.Dashboard`; serving the dashboard needs no
+external scripts, CDN, or Node.js runtime. Dashboard presentation tests run with
+`node --test eng/dashboard-ui.test.cjs` (Node.js 22+), or `just test-dashboard-ui`.
 
 Add the dashboard to a host that also runs a worker. With the default in-memory worker registry it
 shows the workers of its own process; a shared registry (see the note below) shows workers in other
@@ -647,8 +696,10 @@ What the dashboard shows out of the box:
   (`DashboardMetricsCollector` records per-queue and per-task snapshots every
   `DashboardOptions.MetricsSnapshotInterval`, so the per-task breakdown outlives the task
   records), and otherwise computed live from the task records.
-- **Live updates** — task state changes and worker status are pushed over SignalR. The
-  `DashboardNotificationService` is the extension point for your own events.
+- **Live updates** — the bundled page polls at `DashboardOptions.RefreshIntervalSeconds`,
+  pauses while inspecting task details or confirming actions, and supports manual refresh.
+  SignalR also exposes task and worker events for custom clients through
+  `DashboardNotificationService`.
 
 The default `IWorkerRegistry` is in-memory, so it sees only workers in the same process. To
 monitor workers in other processes — and to count their consumers in the queue panel — register
