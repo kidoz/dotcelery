@@ -164,19 +164,13 @@ public sealed class TaskExecutor
 
         _logger.LogDebug("Executing task {TaskName} with ID {TaskId}", message.Task, message.Id);
 
-        // Update state to Started
-        await _resultBackend
-            .UpdateStateAsync(message.Id, TaskState.Started, cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
-
         // Register task for revocation and get linked token
         using var taskCts = _revocationManager.RegisterTask(message.Id, cancellationToken);
         var taskToken = taskCts.Token;
 
-        // Set once the task body and its filters have finished. Failures after that point
-        // (storing the result, dispatching signals) are infrastructure failures, not task
-        // failures, and propagate to the worker instead of being recorded as a failed task.
-        var taskCompleted = false;
+        // Only exceptions from the task body and its completion filters are task failures.
+        // Startup, short-circuiting and outcome persistence failures must be redelivered.
+        var taskBodyRunning = false;
 
         try
         {
@@ -223,22 +217,6 @@ public sealed class TaskExecutor
             // Get filters for this task
             var filters = _filterPipeline.GetFilters(registration, scope);
 
-            // Dispatch TaskPreRun signal
-            await _signalDispatcher
-                .DispatchAsync(
-                    new TaskPreRunSignal
-                    {
-                        TaskId = message.Id,
-                        TaskName = message.Task,
-                        Timestamp = _timeProvider.GetUtcNow(),
-                        Input = input,
-                        RetryCount = message.Retries,
-                        Worker = workerName,
-                    },
-                    cancellationToken
-                )
-                .ConfigureAwait(false);
-
             // Execute task with filters
             var (result, duration, requeueRequested, requeueDelay) = await ExecuteWithFiltersAsync(
                     task,
@@ -247,11 +225,40 @@ public sealed class TaskExecutor
                     registration,
                     filters,
                     brokerMessage,
+                    async () =>
+                    {
+                        // Update state to Started
+                        await _resultBackend
+                            .UpdateStateAsync(
+                                message.Id,
+                                TaskState.Started,
+                                cancellationToken: cancellationToken
+                            )
+                            .ConfigureAwait(false);
+
+                        // Dispatch TaskPreRun signal
+                        await _signalDispatcher
+                            .DispatchAsync(
+                                new TaskPreRunSignal
+                                {
+                                    TaskId = message.Id,
+                                    TaskName = message.Task,
+                                    Timestamp = _timeProvider.GetUtcNow(),
+                                    Input = input,
+                                    RetryCount = message.Retries,
+                                    Worker = workerName,
+                                },
+                                cancellationToken
+                            )
+                            .ConfigureAwait(false);
+
+                        taskBodyRunning = true;
+                    },
                     taskToken
                 )
                 .ConfigureAwait(false);
 
-            taskCompleted = true;
+            taskBodyRunning = false;
 
             // Check if requeue was requested by a filter
             if (requeueRequested)
@@ -375,7 +382,7 @@ public sealed class TaskExecutor
             return taskResult;
         }
         catch (OperationCanceledException)
-            when (!taskCompleted
+            when (taskBodyRunning
                 && taskToken.IsCancellationRequested
                 && !cancellationToken.IsCancellationRequested
             )
@@ -468,7 +475,7 @@ public sealed class TaskExecutor
             return await RecordRejectedAsync(message, ex, startTime, workerName, cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (Exception ex) when (!taskCompleted)
+        catch (Exception ex) when (taskBodyRunning)
         {
             // Automatic retry: a retryable failure with retries remaining becomes a retry
             // with the policy's backoff instead of a failure; exhaustion falls through
@@ -802,6 +809,7 @@ public sealed class TaskExecutor
         TaskRegistration registration,
         IReadOnlyList<ResolvedFilter> filters,
         BrokerMessage brokerMessage,
+        Func<Task> onStarting,
         CancellationToken cancellationToken
     )
     {
@@ -823,112 +831,125 @@ public sealed class TaskExecutor
             RetryCount = context.RetryCount,
         };
 
-        // Execute OnExecuting filters
-        var shouldContinue = await _filterPipeline
-            .ExecuteOnExecutingAsync(filters, executingContext, cancellationToken)
-            .ConfigureAwait(false);
-
-        if (!shouldContinue)
+        try
         {
-            // Filter requested to skip execution
-            stopwatch.Stop();
+            // Execute OnExecuting filters
+            var shouldContinue = await _filterPipeline
+                .ExecuteOnExecutingAsync(filters, executingContext, cancellationToken)
+                .ConfigureAwait(false);
 
-            // If a full TaskResult was provided, return it via the SkipResult property
-            // This is used by security and deduplication filters to set specific states
-            if (executingContext.SkipResult is not null)
+            if (!shouldContinue)
             {
+                // Filter requested to skip execution
+                stopwatch.Stop();
+
+                // If a full TaskResult was provided, return it via the SkipResult property
+                // This is used by security and deduplication filters to set specific states
+                if (executingContext.SkipResult is not null)
+                {
+                    return (
+                        executingContext.SkipResult,
+                        stopwatch.Elapsed,
+                        executingContext.RequeueMessage,
+                        executingContext.RequeueDelay
+                    );
+                }
+
                 return (
-                    executingContext.SkipResult,
+                    executingContext.Result,
                     stopwatch.Elapsed,
                     executingContext.RequeueMessage,
                     executingContext.RequeueDelay
                 );
             }
 
-            return (
-                executingContext.Result,
-                stopwatch.Elapsed,
-                executingContext.RequeueMessage,
-                executingContext.RequeueDelay
-            );
-        }
+            await onStarting().ConfigureAwait(false);
 
-        // The tenant context is set here rather than in a filter: a value written to an
-        // AsyncLocal inside an awaited async method (the filter pipeline) does not flow back to
-        // its caller, so a filter that sets it is never seen by the task.
-        using var tenantScope = SetTenantContext(context.Message);
+            // The tenant context is set here rather than in a filter: a value written to an
+            // AsyncLocal inside an awaited async method (the filter pipeline) does not flow back to
+            // its caller, so a filter that sets it is never seen by the task.
+            using var tenantScope = SetTenantContext(context.Message);
 
-        // Execute the task with time limit enforcement
-        try
-        {
-            result = await ExecuteWithTimeLimitsAsync(
-                    context.TaskId,
-                    registration.TimeLimitPolicy,
-                    task,
-                    input,
-                    context,
-                    registration,
-                    cancellationToken
-                )
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            exception = ex;
+            // Execute the task with time limit enforcement
+            try
+            {
+                result = await ExecuteWithTimeLimitsAsync(
+                        context.TaskId,
+                        registration.TimeLimitPolicy,
+                        task,
+                        input,
+                        context,
+                        registration,
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                exception = ex;
 
-            // Execute exception filters
-            var exceptionContext = new TaskExceptionContext
+                // Execute exception filters
+                var exceptionContext = new TaskExceptionContext
+                {
+                    TaskId = context.TaskId,
+                    TaskName = context.TaskName,
+                    Input = input,
+                    TaskType = registration.TaskType,
+                    TaskContext = context,
+                    ServiceProvider = context.ScopedServiceProvider,
+                    Exception = ex,
+                    Properties = executingContext.Properties,
+                };
+
+                var handled = await _filterPipeline
+                    .ExecuteOnExceptionAsync(filters, exceptionContext, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (handled || exceptionContext.ExceptionHandled)
+                {
+                    exception = null;
+                    result = exceptionContext.Result;
+                }
+            }
+
+            stopwatch.Stop();
+
+            // Execute OnExecuted filters
+            var executedContext = new TaskExecutedContext
             {
                 TaskId = context.TaskId,
                 TaskName = context.TaskName,
+                Message = context.Message,
                 Input = input,
                 TaskType = registration.TaskType,
                 TaskContext = context,
                 ServiceProvider = context.ScopedServiceProvider,
-                Exception = ex,
+                Duration = stopwatch.Elapsed,
+                Result = result,
+                Exception = exception,
                 Properties = executingContext.Properties,
             };
 
-            var handled = await _filterPipeline
-                .ExecuteOnExceptionAsync(filters, exceptionContext, cancellationToken)
+            await _filterPipeline
+                .ExecuteOnExecutedAsync(filters, executedContext, cancellationToken)
                 .ConfigureAwait(false);
 
-            if (handled || exceptionContext.ExceptionHandled)
+            // Use potentially modified values from executed context
+            if (executedContext.Exception is not null)
             {
-                exception = null;
-                result = exceptionContext.Result;
+                throw executedContext.Exception;
+            }
+
+            return (executedContext.Result, stopwatch.Elapsed, false, null);
+        }
+        finally
+        {
+            for (var i = filters.Count - 1; i >= 0; i--)
+            {
+                if (filters[i].TaskFilter is IExecutionResourceFilter resourceFilter)
+                    await resourceFilter.ReleaseAsync(executingContext).ConfigureAwait(false);
             }
         }
-
-        stopwatch.Stop();
-
-        // Execute OnExecuted filters
-        var executedContext = new TaskExecutedContext
-        {
-            TaskId = context.TaskId,
-            TaskName = context.TaskName,
-            Message = context.Message,
-            Input = input,
-            TaskType = registration.TaskType,
-            TaskContext = context,
-            ServiceProvider = context.ScopedServiceProvider,
-            Duration = stopwatch.Elapsed,
-            Result = result,
-            Exception = exception,
-            Properties = executingContext.Properties,
-        };
-
-        await _filterPipeline
-            .ExecuteOnExecutedAsync(filters, executedContext, cancellationToken)
-            .ConfigureAwait(false);
-
-        // Use potentially modified values from executed context
-        if (executedContext.Exception is not null)
-        {
-            throw executedContext.Exception;
-        }
-
-        return (executedContext.Result, stopwatch.Elapsed, false, null);
     }
 
     // Makes the tenant of the message ambient for the task and its remaining filters, and

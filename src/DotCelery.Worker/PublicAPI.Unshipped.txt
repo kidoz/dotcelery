@@ -20,3 +20,5 @@ DotCelery.Worker.Resilience.ResilienceOptions.MaxRetriesLimit.set -> void
 DotCelery.Worker.Resilience.ResilienceOptions.ResilienceOptions() -> void
 DotCelery.Worker.Resilience.ResilienceOptions.Validate() -> void
 static DotCelery.Worker.Extensions.WorkerServiceCollectionExtensions.UseResilience(this DotCelery.Core.Extensions.DotCeleryBuilder! builder, System.Action<DotCelery.Worker.Resilience.ResilienceOptions!>? configure = null) -> DotCelery.Core.Extensions.DotCeleryBuilder!
+DotCelery.Worker.Filters.PreventOverlappingFilter.PreventOverlappingFilter(DotCelery.Core.Execution.ITaskExecutionTracker! tracker, Microsoft.Extensions.Logging.ILogger<DotCelery.Worker.Filters.PreventOverlappingFilter!>! logger, System.TimeProvider! timeProvider) -> void
+DotCelery.Worker.Filters.PreventOverlappingFilter.DisposeAsync() -> System.Threading.Tasks.ValueTask

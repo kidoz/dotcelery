@@ -2,6 +2,9 @@ namespace DotCelery.Tests.Unit.Worker;
 
 using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Core.Abstractions;
+using DotCelery.Core.Attributes;
+using DotCelery.Core.Execution;
+using DotCelery.Core.Filters;
 using DotCelery.Core.Models;
 using DotCelery.Core.Serialization;
 using DotCelery.Core.Storage.Stores;
@@ -30,11 +33,16 @@ public class TaskExecutorTests : IAsyncDisposable
         _backend = new ResultBackend(_storage);
 
         var services = new ServiceCollection();
+        services.AddLogging();
         services.AddTransient<TestTaskWithInput>();
         services.AddTransient<InvokedTask>();
         services.AddTransient<TestTaskNoInput>();
         services.AddTransient<TestTaskReturnsNull>();
         services.AddTransient<ThrowingTask>();
+        services.AddSingleton<IInboxStore>(new InboxStore(_storage));
+        services.AddTransient<InboxDeduplicationFilter>();
+        services.AddSingleton<ITaskExecutionTracker>(new TaskExecutionTracker(_storage));
+        services.AddTransient<TrackedTask>();
 
         _serviceProvider = services.BuildServiceProvider();
 
@@ -145,7 +153,12 @@ public class TaskExecutorTests : IAsyncDisposable
     public async Task ExecuteAsync_TaskThrowsException_ReturnsFailure()
     {
         var services = new ServiceCollection();
+        services.AddLogging();
         services.AddTransient<ThrowingTask>();
+        services.AddSingleton<IInboxStore>(new InboxStore(_storage));
+        services.AddTransient<InboxDeduplicationFilter>();
+        services.AddSingleton<ITaskExecutionTracker>(new TaskExecutionTracker(_storage));
+        services.AddTransient<TrackedTask>();
         using var sp = services.BuildServiceProvider();
 
         var registry = new TaskRegistry();
@@ -198,6 +211,78 @@ public class TaskExecutorTests : IAsyncDisposable
 
         Assert.Equal(TaskState.Success, result.State);
         Assert.True(await inbox.IsProcessedAsync("marked-task"));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_OverlappingDelivery_RequeuesWithoutStoringSuccessOrMarkingInbox()
+    {
+        _registry.Register(typeof(TrackedTask), TrackedTask.TaskName);
+        var tracker = _serviceProvider.GetRequiredService<ITaskExecutionTracker>();
+        Assert.True(await tracker.TryStartAsync(TrackedTask.TaskName, "running"));
+        _filterPipeline.AddGlobalFilter<PreventOverlappingFilter>();
+        var inbox = _serviceProvider.GetRequiredService<IInboxStore>();
+        var executor = CreateExecutor(_registry, inbox);
+
+        var result = await executor.ExecuteAsync(
+            CreateBrokerMessage("overlap", TrackedTask.TaskName, null),
+            "worker",
+            CancellationToken.None
+        );
+
+        Assert.Equal(TaskState.Requeued, result.State);
+        Assert.Null(await _backend.GetResultAsync("overlap"));
+        Assert.Equal(TaskState.Requeued, await _backend.GetStateAsync("overlap"));
+        Assert.False(await inbox.IsProcessedAsync("overlap"));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LaterFilterShortCircuits_ReleasesTheExecutionLease()
+    {
+        _registry.Register(typeof(TrackedTask), TrackedTask.TaskName);
+        _filterPipeline.AddGlobalFilter<PreventOverlappingFilter>();
+        _filterPipeline.AddGlobalFilter<RequeueFilter>();
+
+        var result = await _executor.ExecuteAsync(
+            CreateBrokerMessage("skipped", TrackedTask.TaskName, null),
+            "worker",
+            CancellationToken.None
+        );
+
+        Assert.Equal(TaskState.Requeued, result.State);
+        var tracker = _serviceProvider.GetRequiredService<ITaskExecutionTracker>();
+        Assert.False(await tracker.IsExecutingAsync(TrackedTask.TaskName));
+    }
+
+    public sealed class RequeueFilter : ITaskFilter
+    {
+        public ValueTask OnExecutingAsync(
+            TaskExecutingContext context,
+            CancellationToken cancellationToken
+        )
+        {
+            context.SkipExecution = true;
+            context.RequeueMessage = true;
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask OnExecutedAsync(
+            TaskExecutedContext context,
+            CancellationToken cancellationToken
+        ) => ValueTask.CompletedTask;
+    }
+
+    [PreventOverlapping]
+    private sealed class TrackedTask : ITask
+    {
+        public static string TaskName => "tests.tracked";
+
+        public Task ExecuteAsync(
+            ITaskContext context,
+            CancellationToken cancellationToken = default
+        ) =>
+            throw new InvalidOperationException(
+                $"{GetType().Name} must not run while overlapping."
+            );
     }
 
     [Fact]

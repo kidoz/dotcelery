@@ -1,5 +1,6 @@
 using DotCelery.Backend.InMemory.Storage;
 using DotCelery.Core.Attributes;
+using DotCelery.Core.Execution;
 using DotCelery.Core.Filters;
 using DotCelery.Core.Models;
 using DotCelery.Core.Storage.Stores;
@@ -7,6 +8,8 @@ using DotCelery.Worker.Execution;
 using DotCelery.Worker.Filters;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
+using NSubstitute;
 
 namespace DotCelery.Tests.Unit.Worker;
 
@@ -40,6 +43,8 @@ public sealed class PreventOverlappingFilterTests : IAsyncDisposable
         var second = CreateExecutingContext("t2", typeof(OverlappingTask));
         await _filter.OnExecutingAsync(second, CancellationToken.None);
         Assert.True(second.SkipExecution);
+        Assert.True(second.RequeueMessage);
+        Assert.NotNull(second.RequeueDelay);
 
         // The first execution finishes and stops tracking
         await _filter.OnExecutedAsync(
@@ -50,6 +55,110 @@ public sealed class PreventOverlappingFilterTests : IAsyncDisposable
         var third = CreateExecutingContext("t3", typeof(OverlappingTask));
         await _filter.OnExecutingAsync(third, CancellationToken.None);
         Assert.False(third.SkipExecution);
+    }
+
+    [Fact]
+    public async Task ExecutionLease_IsRenewedUntilTheFilterScopeIsDisposed()
+    {
+        var time = new FakeTimeProvider();
+        var tracker = Substitute.For<ITaskExecutionTracker>();
+#pragma warning disable CA2012 // NSubstitute consumes the configured ValueTask.
+        tracker
+            .TryStartAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string?>(),
+                Arg.Any<TimeSpan?>(),
+                Arg.Any<CancellationToken>()
+            )
+            .Returns(true);
+        var renewed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        tracker
+            .ExtendAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string?>(),
+                Arg.Any<TimeSpan?>(),
+                Arg.Any<CancellationToken>()
+            )
+            .Returns(_ =>
+            {
+                renewed.TrySetResult();
+                return ValueTask.FromResult(true);
+            });
+#pragma warning restore CA2012
+        var filter = new PreventOverlappingFilter(
+            tracker,
+            NullLogger<PreventOverlappingFilter>.Instance,
+            time
+        );
+        await filter.OnExecutingAsync(
+            CreateExecutingContext("renewed", typeof(OverlappingTask)),
+            CancellationToken.None
+        );
+        time.Advance(TimeSpan.FromMinutes(20));
+        await renewed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await filter.DisposeAsync();
+        tracker.ClearReceivedCalls();
+
+        time.Advance(TimeSpan.FromHours(2));
+
+        await tracker
+            .DidNotReceive()
+            .ExtendAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string?>(),
+                Arg.Any<TimeSpan?>(),
+                Arg.Any<CancellationToken>()
+            );
+    }
+
+    [Fact]
+    public async Task LostExecutionLease_DoesNotReportSuccessfulCompletion()
+    {
+        var time = new FakeTimeProvider();
+        var tracker = Substitute.For<ITaskExecutionTracker>();
+        var lost = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+#pragma warning disable CA2012 // NSubstitute consumes the configured ValueTask.
+        tracker
+            .TryStartAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string?>(),
+                Arg.Any<TimeSpan?>(),
+                Arg.Any<CancellationToken>()
+            )
+            .Returns(true);
+        tracker
+            .ExtendAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string?>(),
+                Arg.Any<TimeSpan?>(),
+                Arg.Any<CancellationToken>()
+            )
+            .Returns(_ =>
+            {
+                lost.TrySetResult();
+                return ValueTask.FromResult(false);
+            });
+#pragma warning restore CA2012
+        await using var filter = new PreventOverlappingFilter(
+            tracker,
+            NullLogger<PreventOverlappingFilter>.Instance,
+            time
+        );
+        var executing = CreateExecutingContext("lost", typeof(OverlappingTask));
+        await filter.OnExecutingAsync(executing, CancellationToken.None);
+        time.Advance(TimeSpan.FromMinutes(20));
+        await lost.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var executed = CreateExecutedContext("lost", typeof(OverlappingTask), executing.Properties);
+
+        await filter.OnExecutedAsync(executed, CancellationToken.None);
+
+        Assert.IsType<InvalidOperationException>(executed.Exception);
+        Assert.False(executed.Succeeded);
     }
 
     [Fact]
@@ -64,6 +173,7 @@ public sealed class PreventOverlappingFilterTests : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        await _filter.DisposeAsync();
         await _services.DisposeAsync();
         await _backend.DisposeAsync();
     }
