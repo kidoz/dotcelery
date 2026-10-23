@@ -1,5 +1,8 @@
+using System.Text.Json;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Models;
+using DotCelery.Core.MultiTenancy;
+using DotCelery.Core.Serialization;
 using DotCelery.Core.Storage;
 using DotCelery.Core.Storage.Stores;
 using Microsoft.Extensions.Hosting;
@@ -39,6 +42,8 @@ public sealed class BeatSchedulerService : BackgroundService
     private readonly string _schedulerId;
     private readonly string _leaderKey;
     private readonly string? _statePath;
+    private readonly IDocumentStore? _sharedState;
+    private readonly string _stateCollection;
     private bool _isLeader;
     private bool _missedRunsDone;
 
@@ -77,7 +82,20 @@ public sealed class BeatSchedulerService : BackgroundService
         _options = options.Value;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
-        _locks = storage is null ? null : new PartitionLockStore(storage, storeOptions);
+        _locks = storage is null
+            ? null
+            : new PartitionLockStore(
+                storage,
+                Options.Create(
+                    new StorageStoreOptions
+                    {
+                        Prefix = storeOptions?.Value.Prefix ?? new StorageStoreOptions().Prefix,
+                    }
+                )
+            );
+        _sharedState = storage?.Documents;
+        _stateCollection =
+            (storeOptions?.Value ?? new StorageStoreOptions()).Prefix + ".beat-cursors";
 
         // Identifies this scheduler for the leader lease; two schedulers in one process must not
         // renew each other's lease
@@ -100,6 +118,12 @@ public sealed class BeatSchedulerService : BackgroundService
                 "The Beat scheduler has no storage provider, so every scheduler runs the "
                     + "schedule; register a storage provider to elect a single scheduler"
             );
+        }
+
+        if (_sharedState is not null)
+        {
+            await ExecuteSharedAsync(stoppingToken).ConfigureAwait(false);
+            return;
         }
 
         var now = _timeProvider.GetUtcNow();
@@ -144,6 +168,186 @@ public sealed class BeatSchedulerService : BackgroundService
         }
 
         _logger.LogInformation("Beat scheduler stopped");
+    }
+
+    private async Task ExecuteSharedAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    if (await IsLeaderAsync(stoppingToken).ConfigureAwait(false))
+                    {
+                        using var tick = CancellationTokenSource.CreateLinkedTokenSource(
+                            stoppingToken
+                        );
+                        var renewal = RenewLeadershipAsync(tick);
+                        try
+                        {
+                            foreach (var entry in _schedule)
+                                await PublishSharedEntryAsync(entry, tick.Token)
+                                    .ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) when (tick.IsCancellationRequested) { }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(
+                                ex,
+                                "Shared Beat tick failed; pending occurrences remain recoverable"
+                            );
+                        }
+                        finally
+                        {
+                            await tick.CancelAsync().ConfigureAwait(false);
+                            try
+                            {
+                                await renewal.ConfigureAwait(false);
+                            }
+                            catch (OperationCanceledException) when (tick.IsCancellationRequested)
+                            { }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(
+                                    ex,
+                                    "Beat lost its renewal; the next leader resumes shared pending occurrences"
+                                );
+                            }
+                        }
+                    }
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Shared Beat could not acquire leadership; retrying on the next check"
+                    );
+                }
+                await DelayAsync(_options.CheckInterval, stoppingToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+        finally
+        {
+            await ReleaseLeadershipAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async Task RenewLeadershipAsync(CancellationTokenSource tick)
+    {
+        var duration = _options.CheckInterval * 3;
+        if (duration < MinLeaderLease)
+            duration = MinLeaderLease;
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(duration / 3, _timeProvider, tick.Token).ConfigureAwait(false);
+                if (!await IsLeaderAsync(tick.Token).ConfigureAwait(false))
+                {
+                    await tick.CancelAsync().ConfigureAwait(false);
+                    return;
+                }
+            }
+        }
+        catch (Exception) when (!tick.IsCancellationRequested)
+        {
+            await tick.CancelAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private async Task PublishSharedEntryAsync(
+        ScheduleEntry entry,
+        CancellationToken cancellationToken
+    )
+    {
+        if (!entry.Enabled)
+            return;
+        var documents =
+            _sharedState ?? throw new InvalidOperationException("Shared storage is unavailable.");
+        var key = $"{_options.SchedulerName.Length}:{_options.SchedulerName}:{entry.Name}";
+        var now = _timeProvider.GetUtcNow();
+        var info = SharedBeatJsonContext.Default.BeatEntryState;
+        var current = await documents
+            .GetAsync(_stateCollection, key, info, cancellationToken)
+            .ConfigureAwait(false);
+        if (current is null)
+        {
+            var anchor = new BeatEntryState(entry.LastRunTime ?? now, null);
+            if (!_options.RunMissedOnStartup && entry.GetNextRunTime(anchor.LastRunTime) < now)
+                anchor = anchor with { LastRunTime = now };
+            await documents
+                .TryInsertAsync(
+                    _stateCollection,
+                    key,
+                    anchor,
+                    info,
+                    cancellationToken: cancellationToken
+                )
+                .ConfigureAwait(false);
+            current = await documents
+                .GetAsync(_stateCollection, key, info, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        if (current is null)
+            return;
+        entry.LastRunTime = current.Value.LastRunTime;
+        var pending = current.Value.PendingPayload is { Length: > 0 } payload
+            ? JsonSerializer.Deserialize(payload, DotCeleryJsonContext.Default.TaskMessage)
+            : null;
+        var version = current.Version;
+        if (pending is null)
+        {
+            if (entry.GetNextRunTime(current.Value.LastRunTime) is not { } due || due > now)
+                return;
+            pending = CreateEntryMessage(entry, now);
+            var claimed = current.Value with
+            {
+                PendingPayload = JsonSerializer.SerializeToUtf8Bytes(
+                    pending,
+                    DotCeleryJsonContext.Default.TaskMessage
+                ),
+            };
+            var replaced = await documents
+                .TryReplaceAsync(
+                    _stateCollection,
+                    key,
+                    claimed,
+                    version,
+                    info,
+                    cancellationToken: cancellationToken
+                )
+                .ConfigureAwait(false);
+            if (replaced is null)
+                return;
+            version = replaced.Value;
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!await IsLeaderAsync(cancellationToken).ConfigureAwait(false))
+            return;
+        using var tenant = TenantContext.SetTenant(pending.TenantId);
+        await _broker.PublishAsync(pending, cancellationToken).ConfigureAwait(false);
+        var completed = new BeatEntryState(now, null);
+        if (
+            await documents
+                .TryReplaceAsync(
+                    _stateCollection,
+                    key,
+                    completed,
+                    version,
+                    info,
+                    cancellationToken: cancellationToken
+                )
+                .ConfigureAwait(false)
+            is not null
+        )
+            entry.LastRunTime = now;
     }
 
     // Entries without a remembered run start one interval or cron occurrence from now, and
@@ -328,11 +532,7 @@ public sealed class BeatSchedulerService : BackgroundService
     private Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) =>
         Task.Delay(delay, _timeProvider, cancellationToken);
 
-    private async Task ExecuteEntryAsync(
-        ScheduleEntry entry,
-        DateTimeOffset now,
-        CancellationToken cancellationToken
-    )
+    private TaskMessage CreateEntryMessage(ScheduleEntry entry, DateTimeOffset now)
     {
         var taskId = Guid.NewGuid().ToString("N");
         var signature = entry.Task;
@@ -358,16 +558,20 @@ public sealed class BeatSchedulerService : BackgroundService
                 : signature.Expires,
             maxRetries: signature.MaxRetries,
             priority: entry.Options?.Priority ?? signature.Priority,
+            tenantId: signature.Headers.GetTenantId(),
             headers: signature.Headers
         );
 
-        await _broker.PublishAsync(message, cancellationToken).ConfigureAwait(false);
+        return message;
+    }
 
-        _logger.LogDebug(
-            "Scheduled task {TaskName} (ID: {TaskId}) from entry {EntryName}",
-            signature.TaskName,
-            taskId,
-            entry.Name
-        );
+    private async Task ExecuteEntryAsync(
+        ScheduleEntry entry,
+        DateTimeOffset now,
+        CancellationToken cancellationToken
+    )
+    {
+        var message = CreateEntryMessage(entry, now);
+        await _broker.PublishAsync(message, cancellationToken).ConfigureAwait(false);
     }
 }

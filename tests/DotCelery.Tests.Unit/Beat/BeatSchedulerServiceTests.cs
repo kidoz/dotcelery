@@ -5,8 +5,10 @@ using DotCelery.Beat;
 using DotCelery.Broker.InMemory;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Canvas;
+using DotCelery.Core.Models;
 using DotCelery.Core.Serialization;
 using DotCelery.Core.Storage;
+using DotCelery.Core.Storage.Stores;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -411,6 +413,148 @@ public class BeatSchedulerServiceTests : IAsyncDisposable
         await AdvanceUntilAsync(time, () => broker.GetQueueLength("celery") >= 1);
 
         Assert.True(File.Exists(statePath));
+    }
+
+    [Fact]
+    public async Task SharedCursor_FailoverDoesNotRepeatTheStandbysStaleOccurrence()
+    {
+        var storage = new InMemoryStorageProvider(_time);
+        var firstSchedule = CreateIntervalSchedule(EntryName);
+        var first = await StartAsync(
+            CreateService(firstSchedule, LeaderOptions(), storage: storage)
+        );
+        await AdvanceUntilAsync(
+            _time,
+            () => firstSchedule.First().LastRunTime is not null,
+            TimeSpan.FromSeconds(1)
+        );
+        await using var otherBroker = new InMemoryBroker();
+        var stale = CreateIntervalSchedule(EntryName);
+        await using var second = await StartAsync(
+            CreateService(stale, LeaderOptions(), storage, otherBroker)
+        );
+        await AdvanceUntilAsync(_time, () => QueueLength() >= 1, TimeSpan.FromSeconds(1));
+        await first.DisposeAsync();
+        await AdvanceAsync(_time, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(1));
+        Assert.Equal(0, otherBroker.GetQueueLength("celery"));
+    }
+
+    [Fact]
+    public async Task SharedPendingOccurrence_AnAmbiguousPublishReusesItsIdAfterFailover()
+    {
+        var storage = new InMemoryStorageProvider(_time);
+        await using var ambiguous = new ControlledBroker { FailAfterAccept = true };
+        var first = await StartAsync(
+            CreateService(CreateIntervalSchedule(EntryName), LeaderOptions(), storage, ambiguous)
+        );
+        await AdvanceUntilAsync(
+            _time,
+            () => ambiguous.Accepted is not null,
+            TimeSpan.FromSeconds(1)
+        );
+        var accepted = ambiguous.Accepted!;
+        await first.DisposeAsync();
+        await using var recoveredBroker = new ControlledBroker();
+        await using var recovered = await StartAsync(
+            CreateService(
+                CreateIntervalSchedule(EntryName),
+                LeaderOptions(),
+                storage,
+                recoveredBroker
+            )
+        );
+        await AdvanceUntilAsync(
+            _time,
+            () => recoveredBroker.Accepted is not null,
+            TimeSpan.FromSeconds(1)
+        );
+        Assert.Equal(accepted.Id, recoveredBroker.Accepted!.Id);
+        Assert.Equal(accepted.Timestamp, recoveredBroker.Accepted.Timestamp);
+        Assert.Equal(accepted.Args, recoveredBroker.Accepted.Args);
+    }
+
+    [Fact]
+    public async Task LeaderLease_IsRenewedDuringABlockedPublish()
+    {
+        var storage = new InMemoryStorageProvider(_time);
+        await using var blocked = new ControlledBroker { BlockPublish = true };
+        var first = await StartAsync(
+            CreateService(CreateIntervalSchedule(EntryName), LeaderOptions(), storage, blocked)
+        );
+        await AdvanceUntilAsync(
+            _time,
+            () => blocked.Entered.Task.IsCompleted,
+            TimeSpan.FromSeconds(1)
+        );
+        await using var standbyBroker = new ControlledBroker();
+        await using var standby = await StartAsync(
+            CreateService(
+                CreateIntervalSchedule(EntryName),
+                LeaderOptions(),
+                storage,
+                standbyBroker
+            )
+        );
+        await AdvanceAsync(_time, TimeSpan.FromMinutes(2), TimeSpan.FromSeconds(1));
+        Assert.Null(standbyBroker.Accepted);
+        blocked.Release.TrySetResult();
+        await blocked.Published.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await first.DisposeAsync();
+    }
+
+    private sealed class ControlledBroker : IMessageBroker
+    {
+        public bool FailAfterAccept { get; init; }
+        public bool BlockPublish { get; init; }
+        public TaskMessage? Accepted { get; private set; }
+        public TaskCompletionSource Entered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Published { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async ValueTask PublishAsync(
+            TaskMessage message,
+            CancellationToken cancellationToken = default
+        )
+        {
+            Entered.TrySetResult();
+            if (BlockPublish)
+                await Release.Task.WaitAsync(cancellationToken);
+            Accepted = message;
+            Published.TrySetResult();
+            if (FailAfterAccept)
+                throw new IOException(
+                    "The broker accepted the message before its connection closed."
+                );
+        }
+
+        public async IAsyncEnumerable<BrokerMessage> ConsumeAsync(
+            IReadOnlyList<string> queues,
+            [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default
+        )
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            yield break;
+        }
+
+        public ValueTask AckAsync(
+            BrokerMessage message,
+            CancellationToken cancellationToken = default
+        ) => ValueTask.CompletedTask;
+
+        public ValueTask RejectAsync(
+            BrokerMessage message,
+            bool requeue = false,
+            CancellationToken cancellationToken = default
+        ) => ValueTask.CompletedTask;
+
+        public ValueTask<bool> IsHealthyAsync(CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(true);
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private BeatSchedulerService CreateService(
