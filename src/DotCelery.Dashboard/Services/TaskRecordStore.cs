@@ -70,72 +70,119 @@ public sealed class TaskRecordStore
     /// </summary>
     /// <param name="summary">The record to store.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public async ValueTask RecordAsync(
-        TaskSummary summary,
-        CancellationToken cancellationToken = default
-    )
+    public ValueTask RecordAsync(TaskSummary summary, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(summary);
+        return UpdateAsync(summary.TaskId, _ => summary, cancellationToken);
+    }
 
+    // Lifecycle signals can arrive concurrently, even from different hosts. Re-evaluate each
+    // merge against the current document after a version conflict rather than losing fields or
+    // replacing a terminal outcome with a late publish notification.
+    internal async ValueTask UpdateAsync(
+        string taskId,
+        Func<TaskSummary?, TaskSummary> update,
+        CancellationToken cancellationToken
+    )
+    {
         if (_documents is null)
+            return;
+        while (true)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            var existing = await _documents
+                .GetAsync(_collection, taskId, cancellationToken)
+                .ConfigureAwait(false);
+            var summary = update(existing is null ? null : Deserialize(existing.Value.Span));
+            var updatedAt =
+                summary.CompletedAt ?? summary.StartedAt ?? summary.SentAt ?? DateTimeOffset.UtcNow;
+            var value = JsonSerializer.SerializeToUtf8Bytes(
+                summary,
+                DotCeleryJsonContext.Default.TaskSummary
+            );
+            var options = new DocumentWriteOptions
+            {
+                TimeToLive = _options.TaskRecordRetention,
+                IndexKey = StateIndexKey(summary.State),
+                SortKey = updatedAt,
+            };
+            var version = existing is null
+                ? await _documents
+                    .TryInsertAsync(_collection, taskId, value, options, cancellationToken)
+                    .ConfigureAwait(false)
+                : await _documents
+                    .TryReplaceAsync(
+                        _collection,
+                        taskId,
+                        value,
+                        existing.Version,
+                        options,
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            if (version is null)
+                continue;
+
+            await WriteIndexAsync(
+                    _names,
+                    taskId,
+                    value,
+                    options with
+                    {
+                        IndexKey = NameIndexKey(summary.TaskName),
+                    },
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+            await WriteIndexAsync(
+                    _nameMarkers,
+                    summary.TaskName,
+                    Array.Empty<byte>(),
+                    options with
+                    {
+                        IndexKey = null,
+                    },
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
             return;
         }
+    }
 
-        var updatedAt =
-            summary.CompletedAt ?? summary.StartedAt ?? summary.SentAt ?? DateTimeOffset.UtcNow;
-        var value = JsonSerializer.SerializeToUtf8Bytes(
-            summary,
-            DotCeleryJsonContext.Default.TaskSummary
-        );
-
-        await _documents
-            .UpsertAsync(
-                _collection,
-                summary.TaskId,
-                value,
-                new DocumentWriteOptions
-                {
-                    TimeToLive = _options.TaskRecordRetention,
-                    IndexKey = StateIndexKey(summary.State),
-                    SortKey = updatedAt,
-                },
-                cancellationToken
-            )
-            .ConfigureAwait(false);
-
-        // The name index holds the same record under the same id, so a name listing reads only
-        // the records of that name and a state change replaces the entry instead of adding one
-        await _documents
-            .UpsertAsync(
-                _names,
-                summary.TaskId,
-                value,
-                new DocumentWriteOptions
-                {
-                    TimeToLive = _options.TaskRecordRetention,
-                    IndexKey = NameIndexKey(summary.TaskName),
-                    SortKey = updatedAt,
-                },
-                cancellationToken
-            )
-            .ConfigureAwait(false);
-
-        // The marker keeps the name in the dashboard's list while any of its records is retained;
-        // its value is unused
-        await _documents
-            .UpsertAsync(
-                _nameMarkers,
-                summary.TaskName,
-                Array.Empty<byte>(),
-                new DocumentWriteOptions
-                {
-                    TimeToLive = _options.TaskRecordRetention,
-                    SortKey = updatedAt,
-                },
-                cancellationToken
-            )
-            .ConfigureAwait(false);
+    // A slower writer must not move an index back to an older update time.
+    private async ValueTask WriteIndexAsync(
+        string collection,
+        string id,
+        ReadOnlyMemory<byte> value,
+        DocumentWriteOptions options,
+        CancellationToken cancellationToken
+    )
+    {
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var existing = await _documents!
+                .GetAsync(collection, id, cancellationToken)
+                .ConfigureAwait(false);
+            if (existing?.SortKey > options.SortKey)
+                return;
+            var version = existing is null
+                ? await _documents
+                    .TryInsertAsync(collection, id, value, options, cancellationToken)
+                    .ConfigureAwait(false)
+                : await _documents
+                    .TryReplaceAsync(
+                        collection,
+                        id,
+                        value,
+                        existing.Version,
+                        options,
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            if (version is not null)
+                return;
+        }
     }
 
     /// <summary>
@@ -366,7 +413,14 @@ public sealed class TaskRecordStore
                 .ConfigureAwait(false)
         )
         {
-            yield return Deserialize(document.Value.Span);
+            // The name index may be maintained by a different concurrent writer. Always
+            // return the primary record so its state and metadata agree with detail queries.
+            var summary =
+                collection == _names
+                    ? await GetAsync(document.Id, cancellationToken).ConfigureAwait(false)
+                    : Deserialize(document.Value.Span);
+            if (summary is not null)
+                yield return summary;
         }
     }
 

@@ -237,21 +237,11 @@ public sealed class DashboardTaskSignalHandler
         }
     }
 
-    private async ValueTask UpdateAsync(
+    private ValueTask UpdateAsync(
         string taskId,
         Func<TaskSummary?, TaskSummary> update,
         CancellationToken cancellationToken
-    )
-    {
-        if (!_records.IsAvailable)
-        {
-            return;
-        }
-
-        var existing = await _records.GetAsync(taskId, cancellationToken).ConfigureAwait(false);
-
-        await _records.RecordAsync(update(existing), cancellationToken).ConfigureAwait(false);
-    }
+    ) => _records.UpdateAsync(taskId, update, cancellationToken);
 
     // The updates of one task arrive as separate signals, so each one keeps what the previous
     // ones stored and replaces only the fields it carries

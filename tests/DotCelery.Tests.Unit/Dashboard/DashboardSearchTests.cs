@@ -218,9 +218,9 @@ public sealed class DashboardSearchTests
         IDeadLetterStore? deadLetters = null
     ) =>
         new(
+            _records,
             _provider,
             Options.Create(new DashboardOptions { ReadOnly = readOnly }),
-            _records,
             deadLetterStore: deadLetters
         );
 

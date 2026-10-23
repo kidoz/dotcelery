@@ -15,9 +15,9 @@ public partial class DashboardApiController
     /// <summary>Creates the dashboard API with its indexed task history.</summary>
     [ActivatorUtilitiesConstructor]
     public DashboardApiController(
+        TaskRecordStore taskRecords,
         IDashboardDataProvider dataProvider,
         IOptions<DashboardOptions> options,
-        TaskRecordStore taskRecords,
         IRevocationStore? revocationStore = null,
         IDelayedMessageStore? delayedMessageStore = null,
         IHistoricalDataStore? historicalDataStore = null,

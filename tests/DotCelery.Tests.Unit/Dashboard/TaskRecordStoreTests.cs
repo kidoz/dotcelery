@@ -24,6 +24,53 @@ public sealed class TaskRecordStoreTests
     }
 
     [Fact]
+    public async Task ConcurrentUpdates_RebaseTheirMergeInsteadOfLosingMetadata()
+    {
+        await _store.RecordAsync(CreateSummary("t1", "tests.alpha", TaskState.Pending));
+        using var barrier = new Barrier(2);
+        var firstCalls = 0;
+        var secondCalls = 0;
+        var first = Task.Run(async () =>
+            await _store.UpdateAsync(
+                "t1",
+                existing =>
+                {
+                    if (Interlocked.Increment(ref firstCalls) == 1)
+                        Assert.True(barrier.SignalAndWait(TimeSpan.FromSeconds(5)));
+                    return existing! with { Queue = "billing" };
+                },
+                CancellationToken.None
+            )
+        );
+        var second = Task.Run(async () =>
+            await _store.UpdateAsync(
+                "t1",
+                existing =>
+                {
+                    if (Interlocked.Increment(ref secondCalls) == 1)
+                        Assert.True(barrier.SignalAndWait(TimeSpan.FromSeconds(5)));
+                    return existing! with
+                    {
+                        State = "Success",
+                        CompletedAt = DateTimeOffset.UtcNow,
+                    };
+                },
+                CancellationToken.None
+            )
+        );
+        await Task.WhenAll(first, second);
+        var task = await _store.GetAsync("t1");
+        Assert.NotNull(task);
+        Assert.Equal("Success", task.State);
+        Assert.Equal("billing", task.Queue);
+        var indexed = Assert.Single(
+            await _store.QueryByNameAsync("tests.alpha", 10, 0).ToListAsync()
+        );
+        Assert.Equal(task, indexed);
+        Assert.True(firstCalls + secondCalls >= 3);
+    }
+
+    [Fact]
     public async Task ARunningTask_IsRecordedAndCanBeReadBack()
     {
         var summary = CreateSummary("t1", "tests.alpha", TaskState.Started);
