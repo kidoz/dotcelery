@@ -246,14 +246,8 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
                 _logger.LogDebug(ex, "Error in claim renewal task during cleanup");
             }
 
-            // Deliveries this session left unsettled are no longer in flight: they stay pending
-            // in the group and the next consumer reclaims them once their claim expires, so
-            // stopping a consumption never pins a message forever
-            foreach (var tag in session.Tags)
-            {
-                _deliveries.TryRemove(tag, out _);
-            }
-
+            // Messages read from the stream but never handed to the caller can be returned right
+            // away; returning them needs their delivery ownership still tracked
             var undelivered = new List<BrokerMessage>();
             while (messageChannel.Reader.TryRead(out var message))
             {
@@ -261,6 +255,14 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
             }
 
             await ReturnUndeliveredAsync(undelivered).ConfigureAwait(false);
+
+            // Deliveries this session left unsettled are no longer in flight: they stay pending
+            // in the group and the next consumer reclaims them once their claim expires, so
+            // stopping a consumption never pins a message forever
+            foreach (var tag in session.Tags)
+            {
+                _deliveries.TryRemove(tag, out _);
+            }
         }
     }
 
