@@ -6,6 +6,7 @@ using DotCelery.Worker.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 
 namespace DotCelery.Tests.Unit.Signals;
 
@@ -73,6 +74,105 @@ public sealed class SignalQueueProcessorTests
         finally
         {
             await processor.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task FailedEnqueue_PropagatesBeforeTheCallerCheckpointsCompletion()
+    {
+        var store = Substitute.For<ISignalStore>();
+#pragma warning disable CA2012 // NSubstitute consumes the configured ValueTask.
+        store
+            .EnqueueAsync(Arg.Any<SignalMessage>(), Arg.Any<CancellationToken>())
+            .Returns(_ => ValueTask.FromException(new IOException("queue unavailable")));
+#pragma warning restore CA2012
+        var dispatcher = new QueuedTaskSignalDispatcher(
+            store,
+            NullLogger<QueuedTaskSignalDispatcher>.Instance
+        );
+        await Assert.ThrowsAsync<IOException>(() =>
+            dispatcher
+                .DispatchAsync(
+                    new TaskSuccessSignal
+                    {
+                        TaskId = "task",
+                        TaskName = "test",
+                        Timestamp = DateTimeOffset.UtcNow,
+                        Duration = TimeSpan.Zero,
+                    }
+                )
+                .AsTask()
+        );
+    }
+
+    [Fact]
+    public async Task CriticalHandlerFailure_RetriesTheSameDurableSignal()
+    {
+        await using var store = new SignalStore(new InMemoryStorageProvider());
+        var publisher = new QueuedTaskSignalDispatcher(
+            store,
+            NullLogger<QueuedTaskSignalDispatcher>.Instance
+        );
+        await publisher.DispatchAsync(
+            new TaskSuccessSignal
+            {
+                TaskId = "task",
+                TaskName = "test",
+                Timestamp = DateTimeOffset.UtcNow,
+                Duration = TimeSpan.Zero,
+                Result = "retained-result",
+            }
+        );
+        var handler = new RecoveringHandler();
+        await using var services = new ServiceCollection()
+            .AddSingleton<ITaskSignalHandler<TaskSuccessSignal>>(handler)
+            .BuildServiceProvider();
+        using var processor = new SignalQueueProcessor(
+            store,
+            services,
+            Options.Create(
+                new SignalQueueProcessorOptions
+                {
+                    PollInterval = TimeSpan.FromMilliseconds(10),
+                    ParallelProcessing = false,
+                }
+            ),
+            NullLogger<SignalQueueProcessor>.Instance
+        );
+        await processor.StartAsync(CancellationToken.None);
+        try
+        {
+            await handler.Handled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            while (await store.GetPendingCountAsync(timeout.Token) > 0)
+                await Task.Delay(10, timeout.Token);
+            Assert.Equal(2, handler.Calls);
+        }
+        finally
+        {
+            await processor.StopAsync(CancellationToken.None);
+        }
+    }
+
+    private sealed class RecoveringHandler
+        : ITaskSignalHandler<TaskSuccessSignal>,
+            ICriticalTaskSignalHandler
+    {
+        public int Calls { get; private set; }
+        public TaskCompletionSource Handled { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask HandleAsync(
+            TaskSuccessSignal signal,
+            CancellationToken cancellationToken = default
+        )
+        {
+            Assert.Equal("task", signal.TaskId);
+            Assert.Equal("retained-result", signal.Result?.ToString());
+            if (++Calls == 1)
+                throw new IOException("workflow publish unavailable");
+            Handled.TrySetResult();
+            return ValueTask.CompletedTask;
         }
     }
 

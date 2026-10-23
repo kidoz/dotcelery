@@ -149,6 +149,7 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
             Duration = TimeSpan.FromSeconds(2),
             Worker = "original-worker",
             FollowUpsPublished = followUpsPublished,
+            SignalsPublished = true,
         };
         await _backend.StoreResultAsync(original);
         await _inbox.MarkProcessedAsync(message.Id);

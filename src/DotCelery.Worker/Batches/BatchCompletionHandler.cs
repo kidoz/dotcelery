@@ -11,7 +11,8 @@ namespace DotCelery.Worker.Batches;
 /// when the last task settles.
 /// </summary>
 public sealed class BatchCompletionHandler
-    : ITaskSignalHandler<TaskSuccessSignal>,
+    : ICriticalTaskSignalHandler,
+        ITaskSignalHandler<TaskSuccessSignal>,
         ITaskSignalHandler<TaskFailureSignal>,
         ITaskSignalHandler<TaskRevokedSignal>,
         ITaskSignalHandler<TaskRejectedSignal>
@@ -64,6 +65,9 @@ public sealed class BatchCompletionHandler
             .MarkTaskCompletedAsync(batchId, signal.TaskId, cancellationToken)
             .ConfigureAwait(false);
 
+        updatedBatch ??= await _batchStore
+            .GetAsync(batchId, cancellationToken)
+            .ConfigureAwait(false);
         if (updatedBatch is not null)
         {
             _logger.LogDebug(
@@ -129,6 +133,9 @@ public sealed class BatchCompletionHandler
             .MarkTaskFailedAsync(batchId, taskId, cancellationToken)
             .ConfigureAwait(false);
 
+        updatedBatch ??= await _batchStore
+            .GetAsync(batchId, cancellationToken)
+            .ConfigureAwait(false);
         if (updatedBatch is not null)
         {
             _logger.LogDebug(
@@ -154,7 +161,7 @@ public sealed class BatchCompletionHandler
 
     // The callback is claimed in the store first, so it runs once even when the last tasks of a
     // batch settle at the same time in different workers
-    private async Task DispatchCallbackAsync(Batch batch, CancellationToken cancellationToken)
+    internal async Task DispatchCallbackAsync(Batch batch, CancellationToken cancellationToken)
     {
         var claimed = await _batchStore
             .TryClaimCallbackAsync(batch.Id, cancellationToken)
@@ -162,6 +169,13 @@ public sealed class BatchCompletionHandler
 
         if (claimed?.Callback is not { } callback)
         {
+            var current = await _batchStore
+                .GetAsync(batch.Id, cancellationToken)
+                .ConfigureAwait(false);
+            if (current is { IsFinished: true, Callback: not null, CallbackPublished: false })
+                throw new InvalidOperationException(
+                    "The batch callback is awaiting recovery of its publication claim."
+                );
             return;
         }
 
@@ -170,7 +184,8 @@ public sealed class BatchCompletionHandler
             await _broker
                 .PublishAsync(
                     TaskMessageFactory.ForTask(
-                        callback.TaskId ?? Guid.NewGuid().ToString("N"),
+                        callback.TaskId
+                            ?? TaskMessageFactory.ContinuationId(batch.Id, "callback", "batch"),
                         callback.TaskName,
                         callback.Args ?? [],
                         callback.ContentType ?? _serializer.ContentType,
@@ -183,6 +198,10 @@ public sealed class BatchCompletionHandler
                     ),
                     cancellationToken
                 )
+                .ConfigureAwait(false);
+
+            await _batchStore
+                .CompleteCallbackAsync(claimed, cancellationToken)
                 .ConfigureAwait(false);
 
             _logger.LogInformation(

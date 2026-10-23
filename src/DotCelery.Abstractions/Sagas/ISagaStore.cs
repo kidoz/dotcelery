@@ -86,6 +86,35 @@ public interface ISagaStore : IAsyncDisposable
     /// <returns>The updated saga or null if not found.</returns>
     ValueTask<Saga?> AdvanceStepAsync(string sagaId, CancellationToken cancellationToken = default);
 
+    /// <summary>Claims publication of a pending or interrupted step using a stable task ID.</summary>
+    /// <param name="sagaId">The saga ID.</param>
+    /// <param name="stepId">The current step ID.</param>
+    /// <param name="taskId">The stable execution task ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="compensation">Whether to publish compensation rather than execution.</param>
+    /// <returns>The claimed saga, or null if unavailable.</returns>
+    ValueTask<Saga?> TryClaimStepDispatchAsync(
+        string sagaId,
+        string stepId,
+        string taskId,
+        bool compensation = false,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>Checkpoints publication without changing a step's completion state.</summary>
+    /// <param name="sagaId">The saga ID.</param>
+    /// <param name="stepId">The step ID.</param>
+    /// <param name="taskId">The execution task ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="compensation">Whether the publication was compensation.</param>
+    ValueTask CompleteStepDispatchAsync(
+        string sagaId,
+        string stepId,
+        string taskId,
+        bool compensation = false,
+        CancellationToken cancellationToken = default
+    );
+
     /// <summary>
     /// Deletes a saga.
     /// </summary>

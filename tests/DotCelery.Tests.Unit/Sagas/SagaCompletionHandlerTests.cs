@@ -57,6 +57,26 @@ public sealed class SagaCompletionHandlerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task DuplicateExecutionCompletion_DoesNotAdvanceTheNextUnfinishedStep()
+    {
+        var saga = await SetupSagaWithExecutingStep();
+        var success = new TaskSuccessSignal
+        {
+            TaskId = "task-0",
+            TaskName = "task.execute.0",
+            Timestamp = DateTimeOffset.UtcNow,
+            Duration = TimeSpan.Zero,
+        };
+        await _handler.HandleAsync(success, CancellationToken.None);
+        var published = _broker.GetQueueLength("celery");
+        await _handler.HandleAsync(success, CancellationToken.None);
+        var stored = await _sagaStore.GetAsync(saga.Id);
+        Assert.Equal(1, stored!.CurrentStepIndex);
+        Assert.Equal(SagaStepState.Executing, stored.Steps[1].State);
+        Assert.Equal(published, _broker.GetQueueLength("celery"));
+    }
+
+    [Fact]
     public async Task HandleAsync_TaskSuccessSignal_UpdatesStepState()
     {
         // Arrange
@@ -332,10 +352,10 @@ public sealed class SagaCompletionHandlerTests : IAsyncDisposable
         );
 
         // Mark as compensating with compensation task ID
-        await _sagaStore.MarkStepCompensatedAsync(
+        await _sagaStore.UpdateStepStateAsync(
             saga.Id,
             saga.Steps[0].Id,
-            success: false,
+            SagaStepState.Compensating,
             compensateTaskId: "compensate-task-0"
         );
 

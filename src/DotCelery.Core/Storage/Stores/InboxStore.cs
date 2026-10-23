@@ -1,5 +1,9 @@
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using DotCelery.Core.Abstractions;
+using DotCelery.Core.Models;
 using DotCelery.Core.Security;
+using DotCelery.Core.Serialization;
 using Microsoft.Extensions.Options;
 
 namespace DotCelery.Core.Storage.Stores;
@@ -20,8 +24,10 @@ namespace DotCelery.Core.Storage.Stores;
 /// transaction refuse the record rather than store it outside the transaction.
 /// </para>
 /// </remarks>
-public sealed class InboxStore : IInboxStore, IStorageBackedStore
+public sealed class InboxStore : IInboxOutcomeStore, IStorageBackedStore
 {
+    private static readonly JsonTypeInfo<TaskResult> OutcomeTypeInfo =
+        StoreJson.TypeInfo<TaskResult>();
     private readonly string _collection;
 
     private readonly IStorageProvider _storage;
@@ -89,6 +95,47 @@ public sealed class InboxStore : IInboxStore, IStorageBackedStore
         var transactional = StorageTransactions.Resolve(_storage, transaction);
         await transactional
             .WriteInAsync(transaction, ct => UpsertAsync(messageId, options, ct), cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<TaskResult?> GetOutcomeAsync(
+        string taskId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var document = await _documents
+            .GetAsync(_collection, taskId, cancellationToken)
+            .ConfigureAwait(false);
+        return document is null || document.Value.Length == 0
+            ? null
+            : JsonSerializer.Deserialize(document.Value.Span, OutcomeTypeInfo);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask StoreOutcomeAsync(
+        TaskResult result,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (result.State != TaskState.Success)
+            throw new ArgumentException(
+                "Only successful outcomes belong in the inbox.",
+                nameof(result)
+            );
+        await _documents
+            .UpsertAsync(
+                _collection,
+                result.TaskId,
+                JsonSerializer.SerializeToUtf8Bytes(result, OutcomeTypeInfo),
+                new DocumentWriteOptions
+                {
+                    TimeToLive = _retention,
+                    SortKey = _timeProvider.GetUtcNow(),
+                },
+                cancellationToken
+            )
             .ConfigureAwait(false);
     }
 

@@ -21,6 +21,7 @@ public sealed class SagaStore : ISagaStore
     private readonly TimeProvider _timeProvider;
     private readonly string _sagas;
     private readonly string _tasks;
+    private readonly TimeSpan _claimTimeout;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SagaStore"/> class.
@@ -38,6 +39,7 @@ public sealed class SagaStore : ISagaStore
         _documents = TenantStorageScope.For(storage, options).Documents;
         _timeProvider = timeProvider ?? TimeProvider.System;
         var storeOptions = options?.Value ?? new StorageStoreOptions();
+        _claimTimeout = storeOptions.ClaimTimeout;
         _sagas = storeOptions.Name("sagas");
         _tasks = storeOptions.Name("saga-tasks");
     }
@@ -106,6 +108,22 @@ public sealed class SagaStore : ISagaStore
                 sagaId,
                 saga =>
                 {
+                    var existing = saga.Steps.FirstOrDefault(step => step.Id == stepId);
+                    if (
+                        existing?.State
+                            is SagaStepState.Compensating
+                                or SagaStepState.Compensated
+                                or SagaStepState.CompensationFailed
+                        || (
+                            existing?.State == SagaStepState.Completed
+                            && state != SagaStepState.Compensating
+                        )
+                        || (
+                            existing?.State == SagaStepState.Failed
+                            && state != SagaStepState.Pending
+                        )
+                    )
+                        return saga;
                     var now = _timeProvider.GetUtcNow();
                     var steps = UpdateStep(
                         saga,
@@ -114,7 +132,20 @@ public sealed class SagaStore : ISagaStore
                             step with
                             {
                                 State = state,
-                                ExecuteTaskId = taskId ?? step.ExecuteTaskId,
+                                ExecuteTaskId =
+                                    state == SagaStepState.Pending
+                                        ? null
+                                        : taskId ?? step.ExecuteTaskId,
+                                ExecutionAttempt =
+                                    state == SagaStepState.Pending
+                                        ? step.ExecutionAttempt + 1
+                                        : step.ExecutionAttempt,
+                                ExecutionDispatched =
+                                    state == SagaStepState.Pending
+                                        ? false
+                                        : step.ExecutionDispatched,
+                                DispatchClaimUntil =
+                                    state == SagaStepState.Pending ? null : step.DispatchClaimUntil,
                                 CompensateTaskId = compensateTaskId ?? step.CompensateTaskId,
                                 Result = result ?? step.Result,
                                 Error = errorMessage ?? step.Error,
@@ -161,6 +192,12 @@ public sealed class SagaStore : ISagaStore
                 sagaId,
                 saga =>
                 {
+                    if (
+                        saga.Steps.FirstOrDefault(step => step.Id == stepId)?.State
+                        is SagaStepState.Compensated
+                            or SagaStepState.CompensationFailed
+                    )
+                        return saga;
                     var compensated = saga with
                     {
                         Steps = UpdateStep(
@@ -217,19 +254,139 @@ public sealed class SagaStore : ISagaStore
         UpdateAsync(
             sagaId,
             saga =>
-                saga.CurrentStepIndex + 1 >= saga.TotalSteps
+                saga.State != SagaState.Executing
+                || saga.CurrentStep?.State != SagaStepState.Completed
+                    ? saga
+                : saga.CurrentStepIndex + 1 >= saga.TotalSteps
                     ? saga with
                     {
                         CurrentStepIndex = saga.CurrentStepIndex + 1,
                         State = SagaState.Completed,
                         CompletedAt = _timeProvider.GetUtcNow(),
                     }
-                    : saga with
-                    {
-                        CurrentStepIndex = saga.CurrentStepIndex + 1,
-                    },
+                : saga with { CurrentStepIndex = saga.CurrentStepIndex + 1 },
             cancellationToken
         );
+
+    /// <inheritdoc />
+    public async ValueTask<Saga?> TryClaimStepDispatchAsync(
+        string sagaId,
+        string stepId,
+        string taskId,
+        bool compensation = false,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await IndexTaskAsync(sagaId, taskId, cancellationToken).ConfigureAwait(false);
+        while (true)
+        {
+            var current = await _documents
+                .GetAsync(_sagas, sagaId, SagaTypeInfo, cancellationToken)
+                .ConfigureAwait(false);
+            var step = current?.Value.Steps.FirstOrDefault(value => value.Id == stepId);
+            if (current is null || step is null)
+                return null;
+            if (compensation)
+            {
+                if (
+                    current.Value.State != SagaState.Compensating
+                    || !step.RequiresCompensation
+                    || step.State is not (SagaStepState.Completed or SagaStepState.Compensating)
+                    || step.CompensationDispatched
+                    || step.CompensationClaimUntil > _timeProvider.GetUtcNow()
+                )
+                    return null;
+            }
+            else if (
+                current.Value.State != SagaState.Executing
+                || current.Value.CurrentStep?.Id != stepId
+                || step.State is not (SagaStepState.Pending or SagaStepState.Executing)
+                || step.ExecutionDispatched
+                || step.DispatchClaimUntil > _timeProvider.GetUtcNow()
+            )
+                return null;
+            var existingId = compensation ? step.CompensateTaskId : step.ExecuteTaskId;
+            if (existingId is not null && existingId != taskId)
+                throw new InvalidOperationException(
+                    "A step's task ID cannot change during publication recovery."
+                );
+            var claimed = current.Value with
+            {
+                Steps = UpdateStep(
+                    current.Value,
+                    stepId,
+                    value =>
+                        compensation
+                            ? value with
+                            {
+                                State = SagaStepState.Compensating,
+                                CompensateTaskId = taskId,
+                                CompensationClaimUntil = _timeProvider.GetUtcNow() + _claimTimeout,
+                            }
+                            : value with
+                            {
+                                State = SagaStepState.Executing,
+                                ExecuteTaskId = taskId,
+                                StartedAt = value.StartedAt ?? _timeProvider.GetUtcNow(),
+                                DispatchClaimUntil = _timeProvider.GetUtcNow() + _claimTimeout,
+                            }
+                ),
+            };
+            var updated = await _documents
+                .TryReplaceAsync(
+                    _sagas,
+                    sagaId,
+                    claimed,
+                    current.Version,
+                    SagaTypeInfo,
+                    WriteOptions(claimed),
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+            if (updated is not null)
+                return claimed;
+        }
+    }
+
+    /// <inheritdoc />
+    public async ValueTask CompleteStepDispatchAsync(
+        string sagaId,
+        string stepId,
+        string taskId,
+        bool compensation = false,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await UpdateAsync(
+                sagaId,
+                saga =>
+                    saga with
+                    {
+                        Steps = UpdateStep(
+                            saga,
+                            stepId,
+                            step =>
+                                compensation
+                                    ? step.CompensateTaskId == taskId
+                                        ? step with
+                                        {
+                                            CompensationDispatched = true,
+                                            CompensationClaimUntil = null,
+                                        }
+                                        : step
+                                    : step.ExecuteTaskId == taskId
+                                        ? step with
+                                        {
+                                            ExecutionDispatched = true,
+                                            DispatchClaimUntil = null,
+                                        }
+                                        : step
+                        ),
+                    },
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
     public async ValueTask<bool> DeleteAsync(

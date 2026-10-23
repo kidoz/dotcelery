@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using DotCelery.Core.Canvas;
 
 namespace DotCelery.Core.Models;
@@ -12,6 +15,28 @@ namespace DotCelery.Core.Models;
 /// </remarks>
 public static class TaskMessageFactory
 {
+    /// <summary>Derives a stable, bounded publication ID from a workflow step and explicit retry attempt.</summary>
+    /// <param name="workflowId">The workflow identity.</param>
+    /// <param name="partId">The step or callback identity.</param>
+    /// <param name="phase">Execution or compensation.</param>
+    /// <param name="attempt">An explicit new attempt, not a redelivery count.</param>
+    /// <returns>A stable ID that fits every storage provider's key limit.</returns>
+    public static string ContinuationId(
+        string workflowId,
+        string partId,
+        string phase,
+        int attempt = 0
+    )
+    {
+        ArgumentNullException.ThrowIfNull(workflowId);
+        ArgumentNullException.ThrowIfNull(partId);
+        ArgumentNullException.ThrowIfNull(phase);
+        ArgumentOutOfRangeException.ThrowIfNegative(attempt);
+        var identity =
+            $"{workflowId.Length}:{workflowId}{partId.Length}:{partId}{phase.Length}:{phase}:{attempt.ToString(CultureInfo.InvariantCulture)}";
+        return "dc-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
+    }
+
     /// <summary>
     /// Creates a message for a task the application or the scheduler sends.
     /// </summary>

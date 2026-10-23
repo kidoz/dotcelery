@@ -43,10 +43,25 @@ public sealed record SagaStep
     /// </summary>
     public string? ExecuteTaskId { get; init; }
 
+    /// <summary>Gets the explicit retry attempt, used to distinguish a new execution from redelivery.</summary>
+    public int ExecutionAttempt { get; init; }
+
+    /// <summary>Gets whether the execution message was published.</summary>
+    public bool ExecutionDispatched { get; init; }
+
+    /// <summary>Gets the deadline of the recoverable publication claim.</summary>
+    public DateTimeOffset? DispatchClaimUntil { get; init; }
+
     /// <summary>
     /// Gets the compensation task ID (if compensating).
     /// </summary>
     public string? CompensateTaskId { get; init; }
+
+    /// <summary>Gets whether the compensation message was published.</summary>
+    public bool CompensationDispatched { get; init; }
+
+    /// <summary>Gets the deadline of a recoverable compensation publication claim.</summary>
+    public DateTimeOffset? CompensationClaimUntil { get; init; }
 
     /// <summary>
     /// Gets the step result (if completed).

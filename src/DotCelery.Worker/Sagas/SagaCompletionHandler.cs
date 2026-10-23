@@ -10,7 +10,8 @@ namespace DotCelery.Worker.Sagas;
 /// Follows the pattern established by BatchCompletionHandler.
 /// </summary>
 public sealed class SagaCompletionHandler
-    : ITaskSignalHandler<TaskSuccessSignal>,
+    : ICriticalTaskSignalHandler,
+        ITaskSignalHandler<TaskSuccessSignal>,
         ITaskSignalHandler<TaskFailureSignal>,
         ITaskSignalHandler<TaskRevokedSignal>,
         ITaskSignalHandler<TaskRejectedSignal>
@@ -80,6 +81,15 @@ public sealed class SagaCompletionHandler
 
         if (step.ExecuteTaskId == signal.TaskId)
         {
+            if (
+                saga.State != SagaState.Executing
+                || step.State
+                    is SagaStepState.Failed
+                        or SagaStepState.Compensating
+                        or SagaStepState.Compensated
+                        or SagaStepState.CompensationFailed
+            )
+                return;
             // Execution step completed successfully
             await HandleStepSuccessAsync(saga, step, signal, cancellationToken)
                 .ConfigureAwait(false);
@@ -145,8 +155,8 @@ public sealed class SagaCompletionHandler
             saga.Id
         );
 
-        // Update step state to Completed
-        await _sagaStore
+        // Use the durable winner when overlapping deliveries report conflicting outcomes.
+        var updated = await _sagaStore
             .UpdateStepStateAsync(
                 saga.Id,
                 step.Id,
@@ -155,6 +165,11 @@ public sealed class SagaCompletionHandler
                 cancellationToken: cancellationToken
             )
             .ConfigureAwait(false);
+        if (
+            updated?.Steps.FirstOrDefault(value => value.Id == step.Id)?.State
+            != SagaStepState.Completed
+        )
+            return;
 
         // Dispatch step completed signal
         if (_options.DispatchSignals)
@@ -281,6 +296,11 @@ public sealed class SagaCompletionHandler
 
         if (step.ExecuteTaskId == taskId)
         {
+            if (
+                saga.State != SagaState.Executing
+                || step.State is not (SagaStepState.Pending or SagaStepState.Executing)
+            )
+                return;
             // Execution step failed
             await HandleStepFailureAsync(
                     saga,
@@ -322,8 +342,8 @@ public sealed class SagaCompletionHandler
             errorMessage
         );
 
-        // Update step state to Failed
-        await _sagaStore
+        // A late failure cannot compensate a step whose successful outcome won the update.
+        var updated = await _sagaStore
             .UpdateStepStateAsync(
                 saga.Id,
                 step.Id,
@@ -332,6 +352,11 @@ public sealed class SagaCompletionHandler
                 cancellationToken: cancellationToken
             )
             .ConfigureAwait(false);
+        if (
+            updated?.Steps.FirstOrDefault(value => value.Id == step.Id)?.State
+            != SagaStepState.Failed
+        )
+            return;
 
         // Dispatch step completed signal (with failed state)
         if (_options.DispatchSignals)

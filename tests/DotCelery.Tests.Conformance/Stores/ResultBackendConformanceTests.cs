@@ -1,7 +1,9 @@
 using DotCelery.Core.Models;
 using DotCelery.Core.MultiTenancy;
+using DotCelery.Core.Security;
 using DotCelery.Core.Storage;
 using DotCelery.Core.Storage.Stores;
+using Microsoft.Extensions.Options;
 
 namespace DotCelery.Tests.Conformance.Stores;
 
@@ -20,6 +22,44 @@ public abstract class ResultBackendConformanceTests : StoreConformanceTests
         }
 
         await base.DisposeAsync();
+    }
+
+    [Theory]
+    [InlineData(7)]
+    [InlineData(14)]
+    public async Task InboxOutcome_SurvivesResultExpiryForTheEffectiveDeduplicationPeriod(
+        int retentionDays
+    )
+    {
+        var backend = CreateBackend();
+        var inbox = new InboxStore(
+            Provider,
+            CreateOptions(),
+            Time,
+            Options.Create(
+                new MessageSecurityOptions { MaxMessageAge = TimeSpan.FromDays(retentionDays) }
+            )
+        );
+        var original = Success("retained") with
+        {
+            SignalsPublished = true,
+            FollowUpsPublished = true,
+        };
+        await OutcomeRecorder.Create(backend, inbox)!.RecordAsync(original);
+
+        Time.Advance(TimeSpan.FromDays(2));
+
+        Assert.Null(await backend.GetResultAsync("retained"));
+        var recovered = await inbox.GetOutcomeAsync("retained");
+        Assert.NotNull(recovered);
+        Assert.Equal(original.Result, recovered.Result);
+        Assert.Equal(original.CompletedAt, recovered.CompletedAt);
+        Assert.True(recovered.SignalsPublished);
+        Assert.True(recovered.FollowUpsPublished);
+        Assert.True(await inbox.IsProcessedAsync("retained"));
+        Time.Advance(TimeSpan.FromDays(retentionDays - 2));
+        Assert.False(await inbox.IsProcessedAsync("retained"));
+        Assert.Null(await inbox.GetOutcomeAsync("retained"));
     }
 
     [Fact]

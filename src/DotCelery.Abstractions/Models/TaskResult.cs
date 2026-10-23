@@ -30,6 +30,9 @@ public sealed record TaskResult
     /// </summary>
     public bool FollowUpsPublished { get; init; }
 
+    /// <summary>Gets whether successful completion signals have been durably handled.</summary>
+    public bool SignalsPublished { get; init; }
+
     /// <summary>
     /// Gets the serialized result data (for Success state).
     /// </summary>

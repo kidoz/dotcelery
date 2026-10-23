@@ -83,6 +83,16 @@ public interface IBatchStore : IAsyncDisposable
         CancellationToken cancellationToken = default
     );
 
+    /// <summary>Checkpoints publication by the owner of a callback claim.</summary>
+    /// <param name="claim">The claimed batch, including its claim timestamp.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    ValueTask CompleteCallbackAsync(Batch claim, CancellationToken cancellationToken = default);
+
+    /// <summary>Finds finished batches whose callbacks still require publication.</summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Recoverable callback batches.</returns>
+    IAsyncEnumerable<Batch> GetPendingCallbacksAsync(CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Deletes a batch.
     /// </summary>

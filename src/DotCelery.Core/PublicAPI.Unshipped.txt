@@ -1,5 +1,9 @@
 #nullable enable
 static DotCelery.Core.Extensions.ServiceCollectionExtensions.AddTenantRouting(this DotCelery.Core.Extensions.DotCeleryBuilder! builder, System.Action<DotCelery.Core.MultiTenancy.MultiTenancyOptions!>? configure = null) -> DotCelery.Core.Extensions.DotCeleryBuilder!
+DotCelery.Core.Storage.Stores.BatchStore.CompleteCallbackAsync(DotCelery.Core.Batches.Batch! claim, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+DotCelery.Core.Storage.Stores.BatchStore.GetPendingCallbacksAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<DotCelery.Core.Batches.Batch!>!
+DotCelery.Core.Storage.Stores.InboxStore.GetOutcomeAsync(string! taskId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Models.TaskResult?>
+DotCelery.Core.Storage.Stores.InboxStore.StoreOutcomeAsync(DotCelery.Core.Models.TaskResult! result, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
 DotCelery.Core.Storage.TenantStorageScope
 static DotCelery.Core.Storage.TenantStorageScope.For(DotCelery.Core.Storage.IStorageProvider! storage, Microsoft.Extensions.Options.IOptions<DotCelery.Core.Storage.Stores.StorageStoreOptions!>? options) -> DotCelery.Core.Storage.IStorageProvider!
 DotCelery.Core.MultiTenancy.TenantHostedService<T>
@@ -7,4 +11,6 @@ DotCelery.Core.MultiTenancy.TenantHostedService<T>.TenantHostedService(System.IS
 override DotCelery.Core.MultiTenancy.TenantHostedService<T>.Dispose() -> void
 override DotCelery.Core.MultiTenancy.TenantHostedService<T>.StartAsync(System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task!
 override DotCelery.Core.MultiTenancy.TenantHostedService<T>.StopAsync(System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task!
+DotCelery.Core.Storage.Stores.SagaStore.CompleteStepDispatchAsync(string! sagaId, string! stepId, string! taskId, bool compensation = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+DotCelery.Core.Storage.Stores.SagaStore.TryClaimStepDispatchAsync(string! sagaId, string! stepId, string! taskId, bool compensation = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Sagas.Saga?>
 DotCelery.Core.MultiTenancy.TenantRouter.EnforcesIsolation.get -> bool

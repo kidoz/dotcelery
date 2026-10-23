@@ -70,13 +70,21 @@ public sealed class QueuedTaskSignalDispatcher : ITaskSignalDispatcher
         }
         catch (Exception ex)
         {
-            // Log but don't propagate - signals should not affect task execution
+            // Terminal task signals drive workflows; their enqueue must precede completion.
             _logger.LogError(
                 ex,
                 "Failed to queue signal {SignalType} for task {TaskId}",
                 typeof(TSignal).Name,
                 signal.TaskId
             );
+            if (
+                signal
+                is TaskSuccessSignal
+                    or TaskFailureSignal
+                    or TaskRevokedSignal
+                    or TaskRejectedSignal
+            )
+                throw;
         }
     }
 }

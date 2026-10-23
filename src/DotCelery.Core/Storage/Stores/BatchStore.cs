@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization.Metadata;
 using DotCelery.Core.Batches;
 using Microsoft.Extensions.Options;
@@ -20,6 +21,7 @@ public sealed class BatchStore : IBatchStore
     private readonly TimeProvider _timeProvider;
     private readonly string _batches;
     private readonly string _tasks;
+    private readonly TimeSpan _claimTimeout;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BatchStore"/> class.
@@ -39,6 +41,7 @@ public sealed class BatchStore : IBatchStore
         var storeOptions = options?.Value ?? new StorageStoreOptions();
         _batches = storeOptions.Name("batches");
         _tasks = storeOptions.Name("batch-tasks");
+        _claimTimeout = storeOptions.ClaimTimeout;
     }
 
     /// <inheritdoc />
@@ -111,7 +114,7 @@ public sealed class BatchStore : IBatchStore
         UpdateAsync(
             batchId,
             batch =>
-                batch.CompletedTaskIds.Contains(taskId)
+                (batch.CompletedTaskIds.Contains(taskId) || batch.FailedTaskIds.Contains(taskId))
                     ? null
                     : Advance(
                         batch with
@@ -131,7 +134,7 @@ public sealed class BatchStore : IBatchStore
         UpdateAsync(
             batchId,
             batch =>
-                batch.FailedTaskIds.Contains(taskId)
+                (batch.FailedTaskIds.Contains(taskId) || batch.CompletedTaskIds.Contains(taskId))
                     ? null
                     : Advance(batch with { FailedTaskIds = [.. batch.FailedTaskIds, taskId] }),
             cancellationToken
@@ -160,7 +163,8 @@ public sealed class BatchStore : IBatchStore
             if (
                 !batch.IsFinished
                 || batch.Callback is null
-                || batch.CallbackDispatchedAt is not null
+                || batch.CallbackPublished
+                || batch.CallbackDispatchedAt > _timeProvider.GetUtcNow() - _claimTimeout
             )
             {
                 return null;
@@ -203,6 +207,50 @@ public sealed class BatchStore : IBatchStore
                 cancellationToken
             )
             .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async ValueTask CompleteCallbackAsync(
+        Batch claim,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var updated = await UpdateAsync(
+                claim.Id,
+                batch =>
+                    batch.CallbackDispatchedAt == claim.CallbackDispatchedAt
+                        ? batch with
+                        {
+                            CallbackPublished = true,
+                        }
+                        : null,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+        if (updated is null || !updated.CallbackPublished)
+            throw new InvalidOperationException(
+                "The callback claim was lost before publication was checkpointed."
+            );
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<Batch> GetPendingCallbacksAsync(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default
+    )
+    {
+        await foreach (
+            var document in _documents.QueryAsync(
+                _batches,
+                DocumentFilter.All,
+                BatchTypeInfo,
+                cancellationToken: cancellationToken
+            )
+        )
+        {
+            var batch = document.Value;
+            if (batch.IsFinished && batch.Callback is not null && !batch.CallbackPublished)
+                yield return batch;
+        }
+    }
 
     /// <inheritdoc />
     public async ValueTask<bool> DeleteAsync(

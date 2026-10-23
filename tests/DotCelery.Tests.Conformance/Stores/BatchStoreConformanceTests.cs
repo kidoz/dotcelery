@@ -327,6 +327,28 @@ public abstract class BatchStoreConformanceTests : StoreConformanceTests
         Assert.NotNull(reclaimed.CallbackDispatchedAt);
     }
 
+    [Fact]
+    public async Task CallbackClaim_AfterACrash_ExpiresAndCanBeRecovered()
+    {
+        await _store.CreateAsync(CreateBatch("recover", ["header"], withCallback: true));
+        await _store.MarkTaskCompletedAsync("recover", "header");
+        var first = await _store.TryClaimCallbackAsync("recover");
+        Assert.NotNull(first);
+        Assert.Null(await _store.TryClaimCallbackAsync("recover"));
+        Assert.Single(await _store.GetPendingCallbacksAsync().ToListAsync());
+        Time.Advance(StoreOptions.ClaimTimeout);
+
+        var recovered = await _store.TryClaimCallbackAsync("recover");
+        Assert.NotNull(recovered);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _store.CompleteCallbackAsync(first).AsTask()
+        );
+        await _store.CompleteCallbackAsync(recovered);
+
+        Assert.Empty(await _store.GetPendingCallbacksAsync().ToListAsync());
+        Assert.Null(await _store.TryClaimCallbackAsync("recover"));
+    }
+
     private static Batch CreateBatch(string id, string[] taskIds, bool withCallback = false) =>
         new()
         {

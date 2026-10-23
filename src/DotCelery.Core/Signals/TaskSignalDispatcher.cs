@@ -44,7 +44,7 @@ public sealed class TaskSignalDispatcher : ITaskSignalDispatcher
             }
             catch (Exception ex)
             {
-                // Log but don't propagate - signals should not affect task execution
+                // Observational handlers are best effort; orchestration must be recoverable.
                 _logger.LogError(
                     ex,
                     "Signal handler {HandlerType} threw exception for signal {SignalType} on task {TaskId}",
@@ -52,6 +52,8 @@ public sealed class TaskSignalDispatcher : ITaskSignalDispatcher
                     typeof(TSignal).Name,
                     signal.TaskId
                 );
+                if (handler is ICriticalTaskSignalHandler)
+                    throw;
             }
         }
     }

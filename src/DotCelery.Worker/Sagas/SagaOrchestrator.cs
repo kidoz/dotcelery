@@ -348,65 +348,56 @@ public sealed class SagaOrchestrator : ISagaOrchestrator
         }
     }
 
-    private async Task ExecuteNextStepAsync(Saga saga, CancellationToken cancellationToken)
+    internal async Task ExecuteNextStepAsync(Saga saga, CancellationToken cancellationToken)
     {
         var step = saga.CurrentStep;
-        if (step is null || step.State != SagaStepState.Pending)
-        {
+        if (
+            step is null
+            || step.State is not (SagaStepState.Pending or SagaStepState.Executing)
+            || step.ExecutionDispatched
+        )
             return;
-        }
-
-        _logger.LogDebug(
-            "Executing step {StepOrder} '{StepName}' for saga {SagaId}",
-            step.Order,
-            step.Name,
-            saga.Id
-        );
-
-        // Update step state to Executing
-        await _sagaStore
-            .UpdateStepStateAsync(
+        var taskId =
+            step.ExecuteTaskId
+            ?? TaskMessageFactory.ContinuationId(
                 saga.Id,
                 step.Id,
-                SagaStepState.Executing,
+                "execute",
+                step.ExecutionAttempt
+            );
+        var claimed = await _sagaStore
+            .TryClaimStepDispatchAsync(
+                saga.Id,
+                step.Id,
+                taskId,
                 cancellationToken: cancellationToken
             )
             .ConfigureAwait(false);
-
-        // Send the execution task
-        var taskId = await SendSignatureAsync(
-                step.ExecuteTask,
-                saga.CorrelationId,
-                cancellationToken
-            )
+        if (claimed is null)
+            return;
+        await SendSignatureAsync(step.ExecuteTask, saga.CorrelationId, cancellationToken, taskId)
             .ConfigureAwait(false);
-
-        // Update step with task ID
         await _sagaStore
-            .UpdateStepStateAsync(
+            .CompleteStepDispatchAsync(
                 saga.Id,
                 step.Id,
-                SagaStepState.Executing,
-                taskId: taskId,
+                taskId,
                 cancellationToken: cancellationToken
             )
             .ConfigureAwait(false);
-
-        _logger.LogDebug(
-            "Sent task {TaskId} for saga {SagaId} step {StepId}",
-            taskId,
-            saga.Id,
-            step.Id
-        );
     }
 
     internal async Task ExecuteNextCompensationAsync(Saga saga, CancellationToken cancellationToken)
     {
         // Find the next step to compensate (completed steps with compensation, in reverse order)
-        var stepToCompensate = saga
-            .Steps.Where(s => s.State == SagaStepState.Completed && s.RequiresCompensation)
-            .OrderByDescending(s => s.Order)
-            .FirstOrDefault();
+        var inFlight = saga.Steps.FirstOrDefault(step => step.State == SagaStepState.Compensating);
+        if (inFlight?.CompensationDispatched == true)
+            return;
+        var stepToCompensate =
+            inFlight
+            ?? saga.Steps.Where(s => s.State == SagaStepState.Completed && s.RequiresCompensation)
+                .OrderByDescending(s => s.Order)
+                .FirstOrDefault();
 
         if (stepToCompensate is null)
         {
@@ -446,54 +437,51 @@ public sealed class SagaOrchestrator : ISagaOrchestrator
             return;
         }
 
-        _logger.LogDebug(
-            "Compensating step {StepOrder} '{StepName}' for saga {SagaId}",
-            stepToCompensate.Order,
-            stepToCompensate.Name,
-            saga.Id
-        );
-
-        // Update step state to Compensating
-        await _sagaStore
-            .UpdateStepStateAsync(
+        var taskId =
+            stepToCompensate.CompensateTaskId
+            ?? TaskMessageFactory.ContinuationId(
                 saga.Id,
                 stepToCompensate.Id,
-                SagaStepState.Compensating,
+                "compensate",
+                stepToCompensate.ExecutionAttempt
+            );
+        var claimed = await _sagaStore
+            .TryClaimStepDispatchAsync(
+                saga.Id,
+                stepToCompensate.Id,
+                taskId,
+                compensation: true,
                 cancellationToken: cancellationToken
             )
             .ConfigureAwait(false);
-
-        // Send the compensation task
-        var compensateTask = stepToCompensate.CompensateTask!;
-        var taskId = await SendSignatureAsync(compensateTask, saga.CorrelationId, cancellationToken)
+        if (claimed is null)
+            return;
+        await SendSignatureAsync(
+                stepToCompensate.CompensateTask!,
+                saga.CorrelationId,
+                cancellationToken,
+                taskId
+            )
             .ConfigureAwait(false);
-
-        // Update step with compensation task ID (keep state as Compensating)
         await _sagaStore
-            .UpdateStepStateAsync(
+            .CompleteStepDispatchAsync(
                 saga.Id,
                 stepToCompensate.Id,
-                SagaStepState.Compensating,
-                compensateTaskId: taskId,
+                taskId,
+                compensation: true,
                 cancellationToken: cancellationToken
             )
             .ConfigureAwait(false);
-
-        _logger.LogDebug(
-            "Sent compensation task {TaskId} for saga {SagaId} step {StepId}",
-            taskId,
-            saga.Id,
-            stepToCompensate.Id
-        );
     }
 
     private async ValueTask<string> SendSignatureAsync(
         Signature signature,
         string? correlationId,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        string? taskId = null
     )
     {
-        var taskId = Guid.NewGuid().ToString("N");
+        taskId ??= Guid.NewGuid().ToString("N");
 
         var eta = signature.Eta;
         if (signature.Countdown.HasValue)
@@ -516,10 +504,10 @@ public sealed class SagaOrchestrator : ISagaOrchestrator
             headers: signature.Headers
         );
 
-        await _broker.PublishAsync(message, cancellationToken).ConfigureAwait(false);
         await _backend
             .UpdateStateAsync(taskId, TaskState.Pending, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
+        await _broker.PublishAsync(message, cancellationToken).ConfigureAwait(false);
 
         return taskId;
     }

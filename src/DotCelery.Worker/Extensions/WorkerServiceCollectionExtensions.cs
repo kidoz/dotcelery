@@ -108,6 +108,7 @@ public static class WorkerServiceCollectionExtensions
                 sp.GetService<TimeProvider>() ?? TimeProvider.System,
                 sp.GetRequiredService<IOptions<DotCelery.Core.Storage.Stores.StorageStoreOptions>>()
             );
+            manager.SetTenants(TenantWorkloads.GetTenants(sp));
             return manager;
         });
         builder.Services.AddHostedService(sp => sp.GetRequiredService<RevocationManager>());
@@ -274,6 +275,9 @@ public static class WorkerServiceCollectionExtensions
     {
         // Register the batch completion handler
         builder.Services.AddScoped<BatchCompletionHandler>();
+        builder.Services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, WorkflowRecoveryService>()
+        );
 
         // Register as signal handlers for relevant signals
         builder.Services.AddScoped<ITaskSignalHandler<TaskSuccessSignal>>(sp =>
@@ -306,6 +310,9 @@ public static class WorkerServiceCollectionExtensions
     {
         builder.Services.AddScoped<ISagaOrchestrator, SagaOrchestrator>();
         builder.Services.AddScoped<SagaCompletionHandler>();
+        builder.Services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, WorkflowRecoveryService>()
+        );
 
         builder.Services.AddScoped<ITaskSignalHandler<TaskSuccessSignal>>(sp =>
             sp.GetRequiredService<SagaCompletionHandler>()

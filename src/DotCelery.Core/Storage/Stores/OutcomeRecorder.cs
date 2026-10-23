@@ -80,9 +80,7 @@ public sealed class OutcomeRecorder
             await _results
                 .StoreResultAsync(result, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
-            await _inbox
-                .MarkProcessedAsync(result.TaskId, cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
+            await StoreInboxOutcomeAsync(result, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -93,14 +91,20 @@ public sealed class OutcomeRecorder
                     await _results
                         .StoreResultAsync(result, cancellationToken: token)
                         .ConfigureAwait(false);
-                    await _inbox
-                        .MarkProcessedAsync(result.TaskId, cancellationToken: token)
-                        .ConfigureAwait(false);
+                    await StoreInboxOutcomeAsync(result, token).ConfigureAwait(false);
                 },
                 cancellationToken
             )
             .ConfigureAwait(false);
     }
+
+    private ValueTask StoreInboxOutcomeAsync(
+        TaskResult result,
+        CancellationToken cancellationToken
+    ) =>
+        _inbox is IInboxOutcomeStore outcomes
+            ? outcomes.StoreOutcomeAsync(result, cancellationToken)
+            : _inbox.MarkProcessedAsync(result.TaskId, cancellationToken: cancellationToken);
 
     // Records can only commit together when both stores write to the same database
     private static ITransactionalStorage? SharedStorage(IResultBackend results, IInboxStore inbox)

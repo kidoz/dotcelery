@@ -241,7 +241,7 @@ public sealed class SignalQueueProcessor : BackgroundService
             }
             catch (Exception ex)
             {
-                // Log but don't propagate - signals should not affect other handlers
+                // Observation handlers are best effort; critical handlers retain the queued delivery.
                 _logger.LogError(
                     ex,
                     "Signal handler {HandlerType} threw exception for signal {SignalType} on task {TaskId}",
@@ -249,6 +249,8 @@ public sealed class SignalQueueProcessor : BackgroundService
                     typeof(TSignal).Name,
                     signal.TaskId
                 );
+                if (handler is ICriticalTaskSignalHandler)
+                    throw;
             }
         }
     }

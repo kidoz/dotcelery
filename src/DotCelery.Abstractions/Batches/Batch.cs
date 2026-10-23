@@ -56,6 +56,9 @@ public sealed record Batch
     /// </summary>
     public DateTimeOffset? CallbackDispatchedAt { get; init; }
 
+    /// <summary>Gets whether publication completed after the callback was claimed.</summary>
+    public bool CallbackPublished { get; init; }
+
     /// <summary>
     /// Gets the total number of tasks in the batch.
     /// </summary>

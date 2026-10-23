@@ -65,10 +65,33 @@ DotCelery.Core.Models.TaskResult.IsDuplicate.get -> bool
 DotCelery.Core.Models.TaskResult.IsDuplicate.init -> void
 DotCelery.Core.Models.TaskResult.FollowUpsPublished.get -> bool
 DotCelery.Core.Models.TaskResult.FollowUpsPublished.init -> void
+DotCelery.Core.Abstractions.IInboxOutcomeStore
+DotCelery.Core.Abstractions.IInboxOutcomeStore.GetOutcomeAsync(string! taskId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Models.TaskResult?>
+DotCelery.Core.Abstractions.IInboxOutcomeStore.StoreOutcomeAsync(DotCelery.Core.Models.TaskResult! result, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+DotCelery.Core.Batches.Batch.CallbackPublished.get -> bool
+DotCelery.Core.Batches.Batch.CallbackPublished.init -> void
+DotCelery.Core.Batches.IBatchStore.CompleteCallbackAsync(DotCelery.Core.Batches.Batch! claim, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+DotCelery.Core.Batches.IBatchStore.GetPendingCallbacksAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<DotCelery.Core.Batches.Batch!>!
+DotCelery.Core.Models.TaskResult.SignalsPublished.get -> bool
+DotCelery.Core.Models.TaskResult.SignalsPublished.init -> void
 DotCelery.Core.MultiTenancy.MultiTenancyOptions.RequireAuthenticatedTenants.get -> bool
 DotCelery.Core.MultiTenancy.MultiTenancyOptions.RequireAuthenticatedTenants.set -> void
+DotCelery.Core.Sagas.SagaStep.DispatchClaimUntil.get -> System.DateTimeOffset?
+DotCelery.Core.Sagas.SagaStep.DispatchClaimUntil.init -> void
+DotCelery.Core.Sagas.SagaStep.ExecutionDispatched.get -> bool
+DotCelery.Core.Sagas.SagaStep.ExecutionDispatched.init -> void
 DotCelery.Core.Security.MessageSecurityOptions.TenantSigningKeys.get -> System.Collections.Generic.Dictionary<string!, byte[]!>!
 DotCelery.Core.Security.MessageSecurityOptions.TenantSigningKeys.set -> void
+DotCelery.Core.Signals.ICriticalTaskSignalHandler
 DotCelery.Core.Storage.Stores.StorageStoreOptions.RequireTenantScope.get -> bool
 DotCelery.Core.Storage.Stores.StorageStoreOptions.RequireTenantScope.set -> void
+DotCelery.Core.Sagas.SagaStep.ExecutionAttempt.get -> int
+DotCelery.Core.Sagas.SagaStep.ExecutionAttempt.init -> void
+DotCelery.Core.Sagas.SagaStep.CompensationClaimUntil.get -> System.DateTimeOffset?
+DotCelery.Core.Sagas.SagaStep.CompensationClaimUntil.init -> void
+DotCelery.Core.Sagas.SagaStep.CompensationDispatched.get -> bool
+DotCelery.Core.Sagas.SagaStep.CompensationDispatched.init -> void
+DotCelery.Core.Sagas.ISagaStore.CompleteStepDispatchAsync(string! sagaId, string! stepId, string! taskId, bool compensation = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+DotCelery.Core.Sagas.ISagaStore.TryClaimStepDispatchAsync(string! sagaId, string! stepId, string! taskId, bool compensation = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Sagas.Saga?>
+static DotCelery.Core.Models.TaskMessageFactory.ContinuationId(string! workflowId, string! partId, string! phase, int attempt = 0) -> string!
 static DotCelery.Core.MultiTenancy.TenantContext.SetTenant(string? tenantId, string? queue) -> System.IDisposable!

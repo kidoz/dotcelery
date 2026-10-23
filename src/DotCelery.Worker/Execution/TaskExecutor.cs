@@ -42,6 +42,7 @@ public sealed class TaskExecutor
     private readonly IRateLimiter? _rateLimiter;
     private readonly CompiledTaskInvoker _taskInvoker;
     private readonly OutcomeRecorder? _outcomes;
+    private readonly IInboxOutcomeStore? _inboxOutcomes;
     private readonly MultiTenancyOptions? _multiTenancyOptions;
     private readonly ResilienceOptions? _resilienceOptions;
     private readonly WorkerOptions _options;
@@ -80,6 +81,7 @@ public sealed class TaskExecutor
         _rateLimiter = rateLimiter;
         _taskInvoker = new CompiledTaskInvoker();
         _outcomes = OutcomeRecorder.Create(resultBackend, inboxStore);
+        _inboxOutcomes = inboxStore as IInboxOutcomeStore;
         _options = options.Value;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -318,13 +320,40 @@ public sealed class TaskExecutor
                     var original = await _resultBackend
                         .GetResultAsync(message.Id, cancellationToken)
                         .ConfigureAwait(false);
+                    if (original is null && _inboxOutcomes is not null)
+                        original = await _inboxOutcomes
+                            .GetOutcomeAsync(message.Id, cancellationToken)
+                            .ConfigureAwait(false);
                     if (original is null)
                     {
                         if (message.Chain is not { Count: > 0 } && message.Link is null)
                             return filterProvidedResult with { FollowUpsPublished = true };
-                        throw new InvalidOperationException(
-                            $"Task {message.Id} is marked processed but its continuation result is unavailable."
-                        );
+                        // Legacy markers may predate retained outcomes. Missing data is a
+                        // permanent recovery failure, not a transient infrastructure outage.
+                        return await RecordRejectedAsync(
+                                message,
+                                new InvalidOperationException(
+                                    "The completed task's continuation outcome is unavailable."
+                                ),
+                                startTime,
+                                workerName,
+                                cancellationToken
+                            )
+                            .ConfigureAwait(false);
+                    }
+                    if (original.State == TaskState.Success && !original.SignalsPublished)
+                    {
+                        var output =
+                            original.Result is not null && registration.OutputType is not null
+                                ? _serializer.Deserialize(original.Result, registration.OutputType)
+                                : null;
+                        original = await PublishSuccessSignalsAsync(
+                                message,
+                                original,
+                                output,
+                                cancellationToken
+                            )
+                            .ConfigureAwait(false);
                     }
                     return original with { IsDuplicate = true };
                 }
@@ -347,6 +376,24 @@ public sealed class TaskExecutor
                     filterProvidedResult.State
                 );
 
+                if (filterProvidedResult.State == TaskState.Success)
+                {
+                    var output =
+                        filterProvidedResult.Result is not null
+                        && registration.OutputType is not null
+                            ? _serializer.Deserialize(
+                                filterProvidedResult.Result,
+                                registration.OutputType
+                            )
+                            : null;
+                    return await PublishSuccessSignalsAsync(
+                            message,
+                            filterProvidedResult,
+                            output,
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false);
+                }
                 return filterProvidedResult;
             }
 
@@ -371,34 +418,10 @@ public sealed class TaskExecutor
                 duration.TotalMilliseconds
             );
 
-            // Dispatch success signals
-            await _signalDispatcher
-                .DispatchAsync(
-                    new TaskSuccessSignal
-                    {
-                        TaskId = message.Id,
-                        TaskName = message.Task,
-                        Timestamp = _timeProvider.GetUtcNow(),
-                        Result = result,
-                        Duration = duration,
-                        Worker = workerName,
-                    },
-                    cancellationToken
-                )
-                .ConfigureAwait(false);
-
-            await _signalDispatcher
-                .DispatchAsync(
-                    new TaskPostRunSignal
-                    {
-                        TaskId = message.Id,
-                        TaskName = message.Task,
-                        Timestamp = _timeProvider.GetUtcNow(),
-                        State = TaskState.Success,
-                        Duration = duration,
-                        Result = result,
-                        Worker = workerName,
-                    },
+            taskResult = await PublishSuccessSignalsAsync(
+                    message,
+                    taskResult,
+                    result,
                     cancellationToken
                 )
                 .ConfigureAwait(false);
@@ -622,19 +645,62 @@ public sealed class TaskExecutor
         }
     }
 
+    private async ValueTask<TaskResult> PublishSuccessSignalsAsync(
+        TaskMessage message,
+        TaskResult outcome,
+        object? result,
+        CancellationToken cancellationToken
+    )
+    {
+        await _signalDispatcher
+            .DispatchAsync(
+                new TaskSuccessSignal
+                {
+                    TaskId = message.Id,
+                    TaskName = message.Task,
+                    Timestamp = _timeProvider.GetUtcNow(),
+                    Result = result,
+                    Duration = outcome.Duration,
+                    Worker = outcome.Worker,
+                },
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+        await _signalDispatcher
+            .DispatchAsync(
+                new TaskPostRunSignal
+                {
+                    TaskId = message.Id,
+                    TaskName = message.Task,
+                    Timestamp = _timeProvider.GetUtcNow(),
+                    State = TaskState.Success,
+                    Duration = outcome.Duration,
+                    Result = result,
+                    Worker = outcome.Worker,
+                },
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+        var published = outcome with { SignalsPublished = true, IsDuplicate = false };
+        await RecordOutcomeAsync(published, cancellationToken).ConfigureAwait(false);
+        return published;
+    }
+
     // Checkpoint only after publication. A crash before this write can replay the same
     // deterministic continuation ID; a completed duplicate never rewrites the outcome.
     internal ValueTask CompleteFollowUpsAsync(
         TaskResult result,
         CancellationToken cancellationToken
     ) =>
-        _resultBackend.StoreResultAsync(
+        RecordOutcomeAsync(
             result with
             {
                 FollowUpsPublished = true,
                 IsDuplicate = false,
             },
-            cancellationToken: cancellationToken
+            cancellationToken
         );
 
     // A message the worker will not run is recorded as rejected, so a client sees a final state

@@ -243,6 +243,13 @@ public abstract class SagaStoreConformanceTests : StoreConformanceTests
         await _store.CreateAsync(saga);
 
         // Act
+        var before = await _store.GetAsync("saga-1");
+        await _store.UpdateStateAsync("saga-1", SagaState.Executing);
+        await _store.UpdateStepStateAsync(
+            "saga-1",
+            before!.CurrentStep!.Id,
+            SagaStepState.Completed
+        );
         var updated = await _store.AdvanceStepAsync("saga-1");
 
         // Assert
@@ -261,6 +268,13 @@ public abstract class SagaStoreConformanceTests : StoreConformanceTests
         await _store.CreateAsync(saga);
 
         // Act
+        var before = await _store.GetAsync("saga-1");
+        await _store.UpdateStateAsync("saga-1", SagaState.Executing);
+        await _store.UpdateStepStateAsync(
+            "saga-1",
+            before!.CurrentStep!.Id,
+            SagaStepState.Completed
+        );
         var updated = await _store.AdvanceStepAsync("saga-1");
 
         // Assert
@@ -374,6 +388,11 @@ public abstract class SagaStoreConformanceTests : StoreConformanceTests
         await _store.CreateAsync(CreateSaga("saga-1", 1));
         await _store.CreateAsync(CreateSaga("saga-3", 1) with { CreatedAt = Start.AddMinutes(2) });
 
+        await _store.UpdateStepStateAsync(
+            "saga-3",
+            (await _store.GetAsync("saga-3"))!.CurrentStep!.Id,
+            SagaStepState.Completed
+        );
         await _store.AdvanceStepAsync("saga-3");
 
         Assert.Equal(
@@ -453,6 +472,107 @@ public abstract class SagaStoreConformanceTests : StoreConformanceTests
         Assert.Equal("boom", failed?.FailureReason);
         Assert.Equal(SagaState.Compensated, compensated?.State);
         Assert.Equal(Start, compensated?.CompletedAt);
+    }
+
+    [Fact]
+    public async Task AdvanceStepAsync_OnlyAdvancesACompletedCurrentStep()
+    {
+        await _store.CreateAsync(CreateSaga("guarded", 3));
+        Assert.Equal(0, (await _store.AdvanceStepAsync("guarded"))!.CurrentStepIndex);
+        await _store.UpdateStepStateAsync("guarded", "step-0", SagaStepState.Completed);
+        Assert.Equal(1, (await _store.AdvanceStepAsync("guarded"))!.CurrentStepIndex);
+        Assert.Equal(1, (await _store.AdvanceStepAsync("guarded"))!.CurrentStepIndex);
+    }
+
+    [Fact]
+    public async Task StepDispatch_InterruptedPublication_ReusesItsIndexedTaskId()
+    {
+        await _store.CreateAsync(CreateSaga("recover", 2));
+        var claim = await _store.TryClaimStepDispatchAsync("recover", "step-0", "stable-task");
+        Assert.NotNull(claim);
+        Assert.Equal("recover", await _store.GetSagaIdForTaskAsync("stable-task"));
+        Assert.Equal(SagaStepState.Executing, claim.CurrentStep!.State);
+        Assert.Null(await _store.TryClaimStepDispatchAsync("recover", "step-0", "stable-task"));
+        Time.Advance(StoreOptions.ClaimTimeout);
+
+        var recovered = await _store.TryClaimStepDispatchAsync("recover", "step-0", "stable-task");
+        Assert.NotNull(recovered);
+        Assert.Equal("stable-task", recovered.CurrentStep!.ExecuteTaskId);
+        await _store.UpdateStepStateAsync("recover", "step-0", SagaStepState.Completed);
+        await _store.AdvanceStepAsync("recover");
+        await _store.CompleteStepDispatchAsync("recover", "step-0", "stable-task");
+
+        var stored = await _store.GetAsync("recover");
+        Assert.Equal(1, stored!.CurrentStepIndex);
+        Assert.Equal(SagaStepState.Completed, stored.Steps[0].State);
+        Assert.True(stored.Steps[0].ExecutionDispatched);
+    }
+
+    [Fact]
+    public async Task CompensationDispatch_InterruptedPublication_ReusesItsIndexedTaskId()
+    {
+        await _store.CreateAsync(CreateSagaWithCompensation("recover-compensation", 2));
+        await _store.UpdateStepStateAsync(
+            "recover-compensation",
+            "step-0",
+            SagaStepState.Completed
+        );
+        await _store.AdvanceStepAsync("recover-compensation");
+        await _store.UpdateStepStateAsync("recover-compensation", "step-1", SagaStepState.Failed);
+        var claim = await _store.TryClaimStepDispatchAsync(
+            "recover-compensation",
+            "step-0",
+            "stable-compensation",
+            compensation: true
+        );
+        Assert.NotNull(claim);
+        Assert.Equal(
+            "recover-compensation",
+            await _store.GetSagaIdForTaskAsync("stable-compensation")
+        );
+        Assert.Equal(SagaStepState.Compensating, claim.Steps[0].State);
+        Assert.Null(
+            await _store.TryClaimStepDispatchAsync(
+                "recover-compensation",
+                "step-0",
+                "stable-compensation",
+                compensation: true
+            )
+        );
+        Time.Advance(StoreOptions.ClaimTimeout);
+        Assert.NotNull(
+            await _store.TryClaimStepDispatchAsync(
+                "recover-compensation",
+                "step-0",
+                "stable-compensation",
+                compensation: true
+            )
+        );
+        await _store.MarkStepCompensatedAsync("recover-compensation", "step-0", success: true);
+        await _store.CompleteStepDispatchAsync(
+            "recover-compensation",
+            "step-0",
+            "stable-compensation",
+            compensation: true
+        );
+        var stored = await _store.GetAsync("recover-compensation");
+        Assert.Equal(SagaState.Compensated, stored!.State);
+        Assert.Equal(SagaStepState.Compensated, stored.Steps[0].State);
+        Assert.True(stored.Steps[0].CompensationDispatched);
+    }
+
+    [Fact]
+    public async Task LateExecutionAndConflictingCompensation_DoNotRegressACompensatedStep()
+    {
+        await _store.CreateAsync(CreateSagaWithCompensation("terminal", 1));
+        await _store.UpdateStepStateAsync("terminal", "step-0", SagaStepState.Completed);
+        await _store.UpdateStateAsync("terminal", SagaState.Compensating);
+        await _store.MarkStepCompensatedAsync("terminal", "step-0", success: true);
+        await _store.UpdateStepStateAsync("terminal", "step-0", SagaStepState.Completed);
+        await _store.MarkStepCompensatedAsync("terminal", "step-0", success: false);
+        var saga = await _store.GetAsync("terminal");
+        Assert.Equal(SagaState.Compensated, saga!.State);
+        Assert.Equal(SagaStepState.Compensated, saga.Steps[0].State);
     }
 
     private static Saga CreateSaga(string id, int stepCount) =>
