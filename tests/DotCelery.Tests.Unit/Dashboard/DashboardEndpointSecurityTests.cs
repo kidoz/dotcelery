@@ -78,6 +78,30 @@ public sealed class DashboardEndpointSecurityTests
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    [Theory]
+    [InlineData("tasks/t1/revoke")]
+    [InlineData("tasks/bulk/revoke")]
+    [InlineData("tasks/bulk/retry")]
+    public async Task ReadOnlyActions_ReturnForbiddenWithoutAnAuthenticationScheme(string path)
+    {
+        await using var host = await StartAsync(options =>
+        {
+            options.RequireAuthorization = false;
+            options.ReadOnly = true;
+        });
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/celery/api/{path}")
+        {
+            Content = new StringContent(
+                """{"taskIds":["t1"],"terminate":true}""",
+                Encoding.UTF8,
+                "application/json"
+            ),
+        };
+        request.Headers.Add(DashboardRequestVerificationFilter.RequestHeaderName, "1");
+        var response = await host.Client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
     private static StringContent JsonContent() =>
         new("""{"terminate": true}""", Encoding.UTF8, "application/json");
 

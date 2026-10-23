@@ -94,6 +94,9 @@ public static class DashboardExtensions
         // Task signals feed the records and the SignalR notifications; the monitor watches the
         // worker registry and announces workers coming and going
         services.AddScoped<DashboardTaskSignalHandler>();
+        services.AddScoped<ITaskSignalHandler<AfterTaskPublishSignal>>(sp =>
+            sp.GetRequiredService<DashboardTaskSignalHandler>()
+        );
         services.AddScoped<ITaskSignalHandler<TaskPreRunSignal>>(sp =>
             sp.GetRequiredService<DashboardTaskSignalHandler>()
         );

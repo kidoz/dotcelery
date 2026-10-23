@@ -46,6 +46,9 @@ jobs:
       - name: Vulnerability audit
         run: dotnet list DotCelery.slnx package --vulnerable --include-transitive
 
+      - name: Test dashboard UI logic
+        run: node --test eng/dashboard-ui.test.cjs
+
       - name: Build
         run: dotnet build DotCelery.slnx --configuration Release --no-restore
 

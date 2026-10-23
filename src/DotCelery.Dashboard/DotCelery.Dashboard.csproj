@@ -12,6 +12,10 @@
 
   <ItemGroup>
     <EmbeddedResource Include="wwwroot\**\*" />
+    <EmbeddedResource
+      Include="..\..\assets\dotcelery-logo.png"
+      LogicalName="DotCelery.Dashboard.wwwroot.dotcelery-logo.png"
+    />
     <EmbeddedResource Include="Pages\**\*.cshtml" />
   </ItemGroup>
 

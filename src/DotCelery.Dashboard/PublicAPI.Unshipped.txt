@@ -1,1 +1,35 @@
 #nullable enable
+DotCelery.Dashboard.Controllers.DashboardApiController.DashboardApiController(DotCelery.Core.Dashboard.IDashboardDataProvider! dataProvider, Microsoft.Extensions.Options.IOptions<DotCelery.Dashboard.DashboardOptions!>! options, DotCelery.Dashboard.Services.TaskRecordStore! taskRecords, DotCelery.Core.Abstractions.IRevocationStore? revocationStore = null, DotCelery.Core.Abstractions.IDelayedMessageStore? delayedMessageStore = null, DotCelery.Core.Abstractions.IHistoricalDataStore? historicalDataStore = null, DotCelery.Core.Abstractions.IDeadLetterStore? deadLetterStore = null) -> void
+DotCelery.Dashboard.Controllers.DashboardApiController.GetCapabilities() -> Microsoft.AspNetCore.Mvc.ActionResult!
+DotCelery.Dashboard.Controllers.DashboardApiController.PreviewActions(DotCelery.Dashboard.Models.BulkRetryRequest! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.AspNetCore.Mvc.ActionResult!>!
+DotCelery.Dashboard.Controllers.DashboardApiController.SearchTasks(DotCelery.Dashboard.Models.TaskSearchRequest! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.AspNetCore.Mvc.ActionResult<DotCelery.Dashboard.Controllers.TaskListResponse!>!>!
+DotCelery.Dashboard.Models.TaskSearchRequest
+DotCelery.Dashboard.Models.TaskSearchRequest.<Clone>$() -> DotCelery.Dashboard.Models.TaskSearchRequest!
+DotCelery.Dashboard.Models.TaskSearchRequest.Equals(DotCelery.Dashboard.Models.TaskSearchRequest? other) -> bool
+DotCelery.Dashboard.Models.TaskSearchRequest.From.get -> System.DateTimeOffset?
+DotCelery.Dashboard.Models.TaskSearchRequest.From.init -> void
+DotCelery.Dashboard.Models.TaskSearchRequest.OldestFirst.get -> bool
+DotCelery.Dashboard.Models.TaskSearchRequest.OldestFirst.init -> void
+DotCelery.Dashboard.Models.TaskSearchRequest.Page.get -> int
+DotCelery.Dashboard.Models.TaskSearchRequest.Page.init -> void
+DotCelery.Dashboard.Models.TaskSearchRequest.PageSize.get -> int
+DotCelery.Dashboard.Models.TaskSearchRequest.PageSize.init -> void
+DotCelery.Dashboard.Models.TaskSearchRequest.Queue.get -> string?
+DotCelery.Dashboard.Models.TaskSearchRequest.Queue.init -> void
+DotCelery.Dashboard.Models.TaskSearchRequest.Search.get -> string?
+DotCelery.Dashboard.Models.TaskSearchRequest.Search.init -> void
+DotCelery.Dashboard.Models.TaskSearchRequest.State.get -> DotCelery.Core.Models.TaskState?
+DotCelery.Dashboard.Models.TaskSearchRequest.State.init -> void
+DotCelery.Dashboard.Models.TaskSearchRequest.TaskName.get -> string?
+DotCelery.Dashboard.Models.TaskSearchRequest.TaskName.init -> void
+DotCelery.Dashboard.Models.TaskSearchRequest.TaskSearchRequest() -> void
+DotCelery.Dashboard.Models.TaskSearchRequest.Until.get -> System.DateTimeOffset?
+DotCelery.Dashboard.Models.TaskSearchRequest.Until.init -> void
+DotCelery.Dashboard.Models.TaskSearchRequest.Worker.get -> string?
+DotCelery.Dashboard.Models.TaskSearchRequest.Worker.init -> void
+DotCelery.Dashboard.Services.DashboardTaskSignalHandler.HandleAsync(DotCelery.Core.Signals.AfterTaskPublishSignal! signal, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+override DotCelery.Dashboard.Models.TaskSearchRequest.Equals(object? obj) -> bool
+override DotCelery.Dashboard.Models.TaskSearchRequest.GetHashCode() -> int
+override DotCelery.Dashboard.Models.TaskSearchRequest.ToString() -> string!
+static DotCelery.Dashboard.Models.TaskSearchRequest.operator !=(DotCelery.Dashboard.Models.TaskSearchRequest? left, DotCelery.Dashboard.Models.TaskSearchRequest? right) -> bool
+static DotCelery.Dashboard.Models.TaskSearchRequest.operator ==(DotCelery.Dashboard.Models.TaskSearchRequest? left, DotCelery.Dashboard.Models.TaskSearchRequest? right) -> bool

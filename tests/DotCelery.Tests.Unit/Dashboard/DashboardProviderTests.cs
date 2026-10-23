@@ -240,6 +240,30 @@ public sealed class DashboardProviderTests
     }
 
     [Fact]
+    public async Task TaskAndQueueSnapshots_DoNotDoubleCountTheSameCompletions()
+    {
+        var taskMetrics = new TaskMetricsStore(_storage, timeProvider: _time);
+        var queueMetrics = new FakeQueueMetrics();
+        queueMetrics.Data["celery"] = new QueueMetricsData { Queue = "celery", SuccessCount = 1 };
+        var history = new FakeHistoricalDataStore();
+        var collector = new DashboardMetricsCollector(
+            Options.Create(new DashboardOptions()),
+            NullLogger<DashboardMetricsCollector>.Instance,
+            history,
+            queueMetrics,
+            _time,
+            taskMetrics
+        );
+        await taskMetrics.RecordCompletedAsync("tests.alpha", true, TimeSpan.FromMilliseconds(200));
+        await collector.SnapshotAsync(CancellationToken.None);
+        queueMetrics.Data["celery"] = queueMetrics.Data["celery"] with { SuccessCount = 2 };
+        await taskMetrics.RecordCompletedAsync("tests.alpha", true, TimeSpan.FromMilliseconds(400));
+        await collector.SnapshotAsync(CancellationToken.None);
+        Assert.Equal(1, history.Snapshots.Sum(snapshot => snapshot.SuccessCount));
+        Assert.Equal("tests.alpha", Assert.Single(history.Snapshots).TaskName);
+    }
+
+    [Fact]
     public async Task PerTaskSnapshots_AreRecordedFromTheTaskMetrics()
     {
         var metrics = new TaskMetricsStore(_storage, timeProvider: _time);

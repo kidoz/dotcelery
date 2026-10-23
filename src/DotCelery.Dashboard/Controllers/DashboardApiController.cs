@@ -12,7 +12,7 @@ namespace DotCelery.Dashboard.Controllers;
 /// </summary>
 [ApiController]
 [Route("api")]
-public class DashboardApiController : ControllerBase
+public partial class DashboardApiController : ControllerBase
 {
     private readonly IDashboardDataProvider _dataProvider;
     private readonly IRevocationStore? _revocationStore;
@@ -114,6 +114,43 @@ public class DashboardApiController : ControllerBase
     {
         (page, pageSize, var offset) = ClampPaging(page, pageSize);
 
+        if (
+            _taskRecords is not null
+            || string.IsNullOrEmpty(state)
+            || !string.IsNullOrEmpty(taskName)
+        )
+        {
+            if (
+                !string.IsNullOrEmpty(state)
+                && (
+                    !Enum.TryParse<TaskState>(state, true, out var parsed)
+                    || !Enum.IsDefined(parsed)
+                )
+            )
+            {
+                return BadRequest("Unknown task state.");
+            }
+            var matches = await QueryTasksAsync(
+                new TaskSearchRequest
+                {
+                    State = string.IsNullOrEmpty(state) ? null : Enum.Parse<TaskState>(state, true),
+                    TaskName = taskName,
+                },
+                pageSize + 1,
+                offset,
+                cancellationToken
+            );
+            return Ok(
+                new TaskListResponse
+                {
+                    Tasks = matches.Take(pageSize).ToList(),
+                    Page = page,
+                    PageSize = pageSize,
+                    HasMore = matches.Count > pageSize,
+                }
+            );
+        }
+
         IReadOnlyList<TaskSummary> tasks;
 
         if (!string.IsNullOrEmpty(taskName))
@@ -189,7 +226,7 @@ public class DashboardApiController : ControllerBase
     {
         if (_options.ReadOnly || !_options.AllowTaskOperations)
         {
-            return Forbid();
+            return StatusCode(StatusCodes.Status403Forbidden);
         }
 
         if (_revocationStore is null)
@@ -208,7 +245,7 @@ public class DashboardApiController : ControllerBase
 
         await _revocationStore.RevokeAsync(taskId, options, cancellationToken);
 
-        return Ok(new { message = $"Task {taskId} has been revoked" });
+        return Ok(new { message = $"Cancellation requested for task {taskId}" });
     }
 
     /// <summary>
@@ -220,6 +257,10 @@ public class DashboardApiController : ControllerBase
         CancellationToken cancellationToken
     )
     {
+        if (windowMinutes is <= 0 or > 10080)
+        {
+            return BadRequest("The metrics window must be between 1 minute and 7 days.");
+        }
         var window = windowMinutes.HasValue
             ? TimeSpan.FromMinutes(windowMinutes.Value)
             : _options.MetricsWindow;
@@ -350,7 +391,7 @@ public class DashboardApiController : ControllerBase
     {
         if (_options.ReadOnly || !_options.AllowTaskOperations)
         {
-            return Forbid();
+            return StatusCode(StatusCodes.Status403Forbidden);
         }
 
         if (_revocationStore is null)
@@ -393,7 +434,7 @@ public class DashboardApiController : ControllerBase
                 await _revocationStore.RevokeAsync(taskId, options, cancellationToken);
                 successCount++;
             }
-            catch
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 failedIds.Add(taskId);
             }
@@ -421,7 +462,7 @@ public class DashboardApiController : ControllerBase
     {
         if (_options.ReadOnly || !_options.AllowTaskOperations)
         {
-            return Forbid();
+            return StatusCode(StatusCodes.Status403Forbidden);
         }
 
         if (_deadLetterStore is null)
@@ -459,12 +500,15 @@ public class DashboardApiController : ControllerBase
 
         var successCount = 0;
         var failedIds = new List<string>();
+        var retryMessages = await ResolveRetryMessagesAsync(taskIds, cancellationToken);
 
-        foreach (var taskId in taskIds)
+        foreach (var taskId in taskIds.Distinct(StringComparer.Ordinal))
         {
             try
             {
-                var requeued = await _deadLetterStore.RequeueAsync(taskId, cancellationToken);
+                var requeued =
+                    retryMessages.TryGetValue(taskId, out var messageId)
+                    && await _deadLetterStore.RequeueAsync(messageId, cancellationToken);
                 if (requeued)
                 {
                     successCount++;
@@ -474,7 +518,7 @@ public class DashboardApiController : ControllerBase
                     failedIds.Add(taskId);
                 }
             }
-            catch
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 failedIds.Add(taskId);
             }
@@ -522,7 +566,7 @@ public class DashboardApiController : ControllerBase
     private (int Page, int PageSize, int Offset) ClampPaging(int page, int pageSize)
     {
         page = Math.Max(1, page);
-        pageSize = Math.Clamp(pageSize, 1, Math.Max(1, _options.PageSize));
+        pageSize = Math.Clamp(pageSize, 1, Math.Clamp(_options.PageSize, 1, 1000));
 
         var offset = (long)(page - 1) * pageSize;
         return (page, pageSize, offset > int.MaxValue ? int.MaxValue : (int)offset);
@@ -568,33 +612,44 @@ public class DashboardApiController : ControllerBase
         CancellationToken cancellationToken
     )
     {
-        if (filter.State.HasValue)
+        var matches = new List<TaskSummary>();
+        var position = 0;
+        var skipped = 0;
+        while (matches.Count < limit)
         {
-            return await _dataProvider.GetTasksByStateAsync(
-                filter.State.Value,
-                limit,
-                offset,
+            var batch = await QueryTasksAsync(
+                new TaskSearchRequest { State = filter.State, Queue = filter.Queue },
+                100,
+                position,
                 cancellationToken
             );
+            foreach (var task in batch)
+            {
+                if (
+                    !string.IsNullOrEmpty(filter.TaskNamePattern)
+                    && !MatchesPattern(task.TaskName, filter.TaskNamePattern)
+                )
+                    continue;
+                if (filter.CompletedAfter.HasValue && !(task.CompletedAt >= filter.CompletedAfter))
+                    continue;
+                if (
+                    filter.CompletedBefore.HasValue && !(task.CompletedAt <= filter.CompletedBefore)
+                )
+                    continue;
+                if (skipped < offset)
+                {
+                    skipped++;
+                    continue;
+                }
+                matches.Add(task);
+                if (matches.Count >= limit)
+                    break;
+            }
+            if (batch.Count < 100)
+                break;
+            position = checked(position + batch.Count);
         }
-
-        if (!string.IsNullOrEmpty(filter.TaskNamePattern))
-        {
-            return await _dataProvider.GetTasksByNameAsync(
-                filter.TaskNamePattern,
-                limit,
-                offset,
-                cancellationToken
-            );
-        }
-
-        // Default to pending tasks if no filter criteria
-        return await _dataProvider.GetTasksByStateAsync(
-            TaskState.Pending,
-            limit,
-            offset,
-            cancellationToken
-        );
+        return matches;
     }
 
     private async Task<IReadOnlyList<TaskSummary>> GetFailedTasksAsync(

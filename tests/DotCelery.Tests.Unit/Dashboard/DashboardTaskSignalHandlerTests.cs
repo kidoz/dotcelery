@@ -49,6 +49,64 @@ public sealed class DashboardTaskSignalHandlerTests
     }
 
     [Fact]
+    public async Task PublishSignal_RecordsQueueWithoutOverwritingAnAlreadyCompletedTask()
+    {
+        var sent = _time.GetUtcNow();
+        await _handler.HandleAsync(
+            new TaskPostRunSignal
+            {
+                TaskId = "t1",
+                TaskName = "tests.alpha",
+                Timestamp = sent.AddSeconds(1),
+                State = TaskState.Success,
+                Duration = TimeSpan.FromMilliseconds(250),
+                Worker = "w1",
+            }
+        );
+        await _handler.HandleAsync(
+            new AfterTaskPublishSignal
+            {
+                TaskId = "t1",
+                TaskName = "tests.alpha",
+                Queue = "billing",
+                Timestamp = sent,
+            }
+        );
+        var task = await _records.GetAsync("t1");
+        Assert.NotNull(task);
+        Assert.Equal("Success", task.State);
+        Assert.Equal("billing", task.Queue);
+        Assert.Equal(sent, task.SentAt);
+        Assert.Equal(sent.AddSeconds(1), task.CompletedAt);
+    }
+
+    [Fact]
+    public async Task StartingARetry_ClearsThePreviousAttemptOutcome()
+    {
+        var sent = _time.GetUtcNow();
+        await _records.RecordAsync(
+            new DotCelery.Core.Dashboard.TaskSummary
+            {
+                TaskId = "t1",
+                TaskName = "tests.alpha",
+                State = "Failure",
+                Queue = "billing",
+                CompletedAt = sent,
+                Duration = TimeSpan.FromSeconds(1),
+                ExceptionMessage = "Previous failure",
+            }
+        );
+        await _handler.HandleAsync(CreatePreRun("t1", sent.AddSeconds(2)));
+        var task = await _records.GetAsync("t1");
+        Assert.NotNull(task);
+        Assert.Equal("Started", task.State);
+        Assert.Equal("billing", task.Queue);
+        Assert.Null(task.CompletedAt);
+        Assert.Null(task.Duration);
+        Assert.Null(task.ExceptionMessage);
+    }
+
+    [Fact]
     public async Task ATaskThatRunsAndSucceeds_IsRecordedWithItsTiming()
     {
         var started = _time.GetUtcNow();

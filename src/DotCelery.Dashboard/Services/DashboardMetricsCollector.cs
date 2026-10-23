@@ -106,7 +106,9 @@ public sealed class DashboardMetricsCollector : BackgroundService
     {
         var now = _timeProvider.GetUtcNow();
 
-        if (_metrics is not null)
+        // Per-task totals and queue totals describe the same completions. Historical stores
+        // aggregate snapshots, so recording both would count every completion twice.
+        if (_metrics is not null && _taskMetrics is not { IsAvailable: true })
         {
             var metrics = await _metrics
                 .GetAllMetricsAsync(cancellationToken)

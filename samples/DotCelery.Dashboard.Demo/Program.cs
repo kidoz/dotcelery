@@ -21,6 +21,7 @@ builder.Services.AddDotCelery(celery =>
         .AddInMemoryStorage() // task records for the dashboard's task list
         .AddInMemoryDelayedMessageStore()
         .AddInMemoryRevocationStore()
+        .AddInMemoryDeadLetterStore()
         .AddInMemoryRateLimiter()
         .AddInMemoryQueueMetrics() // queue statistics for the dashboard
         .AddInMemoryHistoricalDataStore() // powers the metrics panel and /metrics/historical
@@ -46,7 +47,8 @@ builder.Services.AddDotCeleryDashboard(o =>
     o.PathPrefix = "/celery";
     o.RefreshIntervalSeconds = 3;
     o.MetricsSnapshotInterval = TimeSpan.FromSeconds(15); // demo only — the default is a minute
-    o.AllowTaskOperations = true; // show Revoke buttons
+    o.AllowTaskOperations = true; // capability-aware cancellation and retry
+    o.ReadOnly = builder.Configuration.GetValue<bool>("Dashboard:ReadOnly");
     o.ExposeExceptionDetails = true; // demo only — keep false in prod
 
     // The dashboard is fail-secure by default. For the demo we open it up;

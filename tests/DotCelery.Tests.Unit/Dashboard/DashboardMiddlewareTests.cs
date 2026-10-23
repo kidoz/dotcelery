@@ -47,6 +47,52 @@ public sealed class DashboardMiddlewareTests
         Assert.NotEmpty(Encoding.UTF8.GetString(GetBody(context)));
     }
 
+    [Theory]
+    [InlineData("dashboard.css", "text/css")]
+    [InlineData("dashboard-core.js", "application/javascript")]
+    [InlineData("dashboard.js", "application/javascript")]
+    [InlineData("dotcelery-logo.png", "image/png")]
+    public async Task EmbeddedAssets_AreServedUnderTheConfiguredPrefix(
+        string asset,
+        string contentType
+    )
+    {
+        var middleware = new DashboardMiddleware(
+            _ => Task.CompletedTask,
+            Options.Create(
+                new DashboardOptions { RequireAuthorization = false, PathPrefix = "/jobs/monitor" }
+            )
+        );
+        var context = CreateContext($"/jobs/monitor/{asset}");
+        await middleware.InvokeAsync(context);
+        Assert.StartsWith(contentType, context.Response.ContentType);
+        Assert.NotEmpty(GetBody(context));
+    }
+
+    [Fact]
+    public async Task TitleAndAssetPrefix_AreEscapedInTheEmbeddedPage()
+    {
+        var middleware = new DashboardMiddleware(
+            _ => Task.CompletedTask,
+            Options.Create(
+                new DashboardOptions
+                {
+                    RequireAuthorization = false,
+                    PathPrefix = "/jobs/monitor",
+                    Title = "<script>alert(1)</script>",
+                }
+            )
+        );
+        var context = CreateContext("/jobs/monitor/");
+        await middleware.InvokeAsync(context);
+        var html = Encoding.UTF8.GetString(GetBody(context));
+        Assert.Contains("&lt;script&gt;alert(1)&lt;/script&gt;", html);
+        Assert.DoesNotContain("<script>alert(1)</script>", html);
+        Assert.Contains("/jobs/monitor/dashboard-core.js", html);
+        Assert.Contains("/jobs/monitor/dotcelery-logo.png", html);
+        Assert.Contains("<noscript", html);
+    }
+
     private static DashboardMiddleware CreateMiddleware(Action onNext) =>
         new(
             _ =>

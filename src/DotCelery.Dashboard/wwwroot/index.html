@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>{{TITLE}}</title>
+    <link rel="stylesheet" href="{{PREFIX}}/dashboard.css" />
+    <script src="{{PREFIX}}/dashboard-core.js" defer></script>
+    <script src="{{PREFIX}}/dashboard.js" defer></script>
+  </head>
+  <body data-prefix="{{PREFIX}}">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <aside class="sidebar">
+      <a
+        class="brand"
+        href="?view=overview"
+        data-view="overview"
+        aria-label="DotCelery overview"
+      >
+        <img
+          src="{{PREFIX}}/dotcelery-logo.png"
+          alt="DotCelery"
+          width="176"
+          height="62"
+        />
+        <small>Task monitoring</small>
+      </a>
+      <div class="nav-label">WORKSPACE</div>
+      <nav aria-label="Dashboard">
+        <a href="?view=overview" data-view="overview"
+          ><span aria-hidden="true">◫</span> Overview</a
+        >
+        <a href="?view=tasks" data-view="tasks"
+          ><span aria-hidden="true">≡</span> Tasks
+          <span class="nav-count" id="task-count">—</span></a
+        >
+        <a href="?view=queues" data-view="queues"
+          ><span aria-hidden="true">⇉</span> Queues</a
+        >
+        <a href="?view=workers" data-view="workers"
+          ><span aria-hidden="true">▤</span> Workers</a
+        >
+      </nav>
+      <div class="sidebar-footer">
+        <span class="status-dot"></span> Distributed task queue<small
+          >.NET · DotCelery</small
+        >
+      </div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <span class="workspace-name">{{TITLE}}</span
+        ><span id="access-mode" class="tag" hidden>Read only</span
+        ><span class="topbar-right"
+          ><span class="status-dot" id="connection-dot"></span
+          ><span id="connection-label">Connecting</span></span
+        >
+      </header>
+      <main id="main" tabindex="-1">
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">MONITOR &amp; MANAGE</p>
+            <h1 id="page-title">Execution overview</h1>
+            <p class="subtitle" id="page-subtitle">
+              A clear view of your background work.
+            </p>
+          </div>
+          <div class="refresh-controls">
+            <label class="sr-only" for="metrics-window"
+              >Metrics time window</label
+            ><select id="metrics-window">
+              <option value="15">Last 15 minutes</option>
+              <option value="60" selected>Last hour</option>
+              <option value="1440">Last 24 hours</option></select
+            ><button id="pause" class="button secondary" aria-pressed="false">
+              Pause updates</button
+            ><button
+              id="refresh"
+              class="button secondary"
+              aria-label="Refresh dashboard"
+            >
+              ↻ <span>Refresh</span></button
+            ><small id="last-updated">Waiting for data</small>
+          </div>
+        </div>
+        <div
+          id="error-banner"
+          class="notice error-notice"
+          role="alert"
+          hidden
+        ></div>
+        <noscript
+          ><div class="notice">
+            JavaScript is required to load dashboard data. Allow scripts for
+            this dashboard, then reload the page.
+          </div></noscript
+        >
+        <div
+          id="message"
+          class="notice"
+          role="status"
+          aria-live="polite"
+          hidden
+        ></div>
+        <section id="overview-view" aria-label="Overview">
+          <div class="stats-grid" id="stats" aria-busy="true">
+            <div class="loading-state">Loading task metrics…</div>
+          </div>
+          <div class="overview-grid">
+            <section class="panel chart-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Task completions</h2>
+                  <p>Successful and failed executions over time</p>
+                </div>
+                <span class="legend"
+                  ><span class="legend-success">● Successful</span
+                  ><span class="legend-failure">● Failed</span></span
+                >
+              </div>
+              <div id="chart" class="chart-container" aria-busy="true">
+                <p class="empty">Loading history…</p>
+              </div>
+              <p id="chart-note" class="panel-note"></p>
+            </section>
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Tasks that need attention</h2>
+                  <p>Failure counts in the selected window</p>
+                </div>
+              </div>
+              <div id="attention" class="attention-list">
+                <p class="empty">Loading task breakdown…</p>
+              </div>
+            </section>
+          </div>
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <h2>Recent activity</h2>
+                <p>All states · most recently updated first</p>
+              </div>
+              <a href="?view=tasks" data-view="tasks" class="text-link"
+                >View all tasks →</a
+              >
+            </div>
+            <div
+              class="table-scroll"
+              tabindex="0"
+              role="region"
+              aria-label="Recent task activity"
+            >
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Task</th>
+                    <th scope="col">State</th>
+                    <th scope="col">Worker</th>
+                    <th scope="col">Duration</th>
+                    <th scope="col">Updated</th>
+                  </tr>
+                </thead>
+                <tbody id="recent-body">
+                  <tr>
+                    <td colspan="5" class="empty">Loading tasks…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <div class="overview-grid lower-grid">
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Queue health</h2>
+                  <p>Waiting tasks and available consumers</p>
+                </div>
+                <a href="?view=queues" data-view="queues" class="text-link"
+                  >All queues →</a
+                >
+              </div>
+              <div id="queue-summary"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Worker availability</h2>
+                  <p>Live heartbeat and execution capacity</p>
+                </div>
+                <a href="?view=workers" data-view="workers" class="text-link"
+                  >All workers →</a
+                >
+              </div>
+              <div id="worker-summary"></div>
+            </section>
+          </div>
+        </section>
+        <section id="tasks-view" aria-label="Task history" hidden>
+          <section class="panel">
+            <form
+              id="task-filters"
+              class="filter-toolbar"
+              role="search"
+              aria-label="Search task history"
+            >
+              <div class="search-box">
+                <span aria-hidden="true">⌕</span
+                ><label class="sr-only" for="search"
+                  >Task ID or name contains</label
+                ><input
+                  type="search"
+                  id="search"
+                  placeholder="Search task ID or name…"
+                  maxlength="500"
+                /><button class="button secondary" type="submit">Search</button>
+              </div>
+              <label
+                >State<select id="state">
+                  <option value="">All states</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Received">Received</option>
+                  <option value="Started">Running</option>
+                  <option value="Success">Success</option>
+                  <option value="Failure">Failed</option>
+                  <option value="Retry">Retry</option>
+                  <option value="Progress">Progress</option>
+                  <option value="Revoked">Revoked</option>
+                  <option value="Rejected">Rejected</option>
+                  <option value="Requeued">Requeued</option>
+                </select></label
+              >
+              <label
+                >Task name<select id="task-name">
+                  <option value="">All task names</option>
+                </select></label
+              ><label
+                >Queue<select id="queue">
+                  <option value="">All queues</option>
+                </select></label
+              ><label
+                >Worker<select id="worker">
+                  <option value="">All workers</option>
+                </select></label
+              >
+              <label
+                >Updated<select id="task-range">
+                  <option value="">Any retained time</option>
+                  <option value="15">Last 15 minutes</option>
+                  <option value="60">Last hour</option>
+                  <option value="1440">Last 24 hours</option>
+                </select></label
+              >
+              <label
+                >Order<select id="task-order">
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                </select></label
+              >
+            </form>
+            <div
+              id="filter-chips"
+              class="filter-chips"
+              aria-label="Active filters"
+            ></div>
+            <div class="task-toolbar">
+              <span id="results-label" role="status" aria-live="polite"
+                >Loading tasks…</span
+              >
+              <div id="bulk-controls" class="bulk-controls" hidden>
+                <span id="selection-count">0 selected</span
+                ><button id="retry-selected" class="button secondary" disabled>
+                  Retry selected</button
+                ><button
+                  id="cancel-selected"
+                  class="button danger-outline"
+                  disabled
+                >
+                  Cancel selected</button
+                ><button id="clear-selection" class="text-button" disabled>
+                  Clear selection
+                </button>
+              </div>
+            </div>
+            <div
+              class="table-scroll"
+              tabindex="0"
+              role="region"
+              aria-label="Task history"
+            >
+              <table id="tasks-table">
+                <thead>
+                  <tr>
+                    <th scope="col" class="selection-column">
+                      <input
+                        type="checkbox"
+                        id="select-page"
+                        aria-label="Select all tasks on this page"
+                      />
+                    </th>
+                    <th scope="col">Task / ID</th>
+                    <th scope="col">State</th>
+                    <th scope="col">Queue</th>
+                    <th scope="col">Worker</th>
+                    <th scope="col">Duration</th>
+                    <th scope="col">Updated</th>
+                  </tr>
+                </thead>
+                <tbody id="tasks-body">
+                  <tr>
+                    <td colspan="7" class="empty">Loading tasks…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="pagination">
+              <label
+                >Rows per page<select id="page-size">
+                  <option value="10">10</option>
+                  <option value="25" selected>25</option>
+                  <option value="50">50</option>
+                </select></label
+              ><span id="page-label">Page 1</span
+              ><button id="previous" class="button secondary" disabled>
+                ← Previous</button
+              ><button id="next" class="button secondary" disabled>
+                Next →
+              </button>
+            </div>
+          </section>
+        </section>
+        <section id="queues-view" aria-label="Queues" hidden>
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <h2>Message queues</h2>
+                <p>
+                  Current queue gauges · select a queue to inspect its task
+                  history
+                </p>
+              </div>
+            </div>
+            <div
+              class="table-scroll"
+              tabindex="0"
+              role="region"
+              aria-label="Queue statistics"
+            >
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Queue</th>
+                    <th scope="col">Health</th>
+                    <th scope="col">Waiting</th>
+                    <th scope="col">Running</th>
+                    <th scope="col">Consumers</th>
+                    <th scope="col">Last published</th>
+                  </tr>
+                </thead>
+                <tbody id="queues-body">
+                  <tr>
+                    <td colspan="6" class="empty">Loading queues…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+        <section id="workers-view" aria-label="Workers" hidden>
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <h2>Worker fleet</h2>
+                <p>
+                  Availability is determined by the registered worker heartbeat
+                </p>
+              </div>
+            </div>
+            <div
+              class="table-scroll"
+              tabindex="0"
+              role="region"
+              aria-label="Worker fleet"
+            >
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Worker / host</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Queues</th>
+                    <th scope="col">Capacity</th>
+                    <th scope="col">Processed</th>
+                    <th scope="col">Last heartbeat</th>
+                  </tr>
+                </thead>
+                <tbody id="workers-body">
+                  <tr>
+                    <td colspan="6" class="empty">Loading workers…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+        <footer class="page-footer">
+          <span
+            >DotCelery <span class="footer-separator">/</span> Background work,
+            in view.</span
+          ><span id="retention-label"
+            >Task history follows your storage retention.</span
+          >
+        </footer>
+      </main>
+    </div>
+    <dialog id="task-dialog" class="task-dialog" aria-labelledby="detail-title">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">TASK DETAILS</p>
+          <h2 id="detail-title">Task</h2>
+        </div>
+        <button
+          class="icon-button"
+          id="close-details"
+          aria-label="Close task details"
+        >
+          ×
+        </button>
+      </div>
+      <div id="detail-body" class="detail-body" aria-busy="true"></div>
+      <div id="detail-actions" class="dialog-actions"></div>
+    </dialog>
+    <dialog
+      id="action-dialog"
+      class="action-dialog"
+      aria-labelledby="action-title"
+    >
+      <div class="dialog-heading">
+        <h2 id="action-title">Confirm action</h2>
+        <button
+          class="icon-button"
+          id="close-action"
+          aria-label="Close action confirmation"
+        >
+          ×
+        </button>
+      </div>
+      <div id="action-body" class="detail-body"></div>
+      <div class="dialog-actions">
+        <button id="dismiss-action" class="button secondary">Go back</button
+        ><button id="confirm-action" class="button primary" disabled>
+          Confirm
+        </button>
+      </div>
+    </dialog>
+  </body>
+</html>

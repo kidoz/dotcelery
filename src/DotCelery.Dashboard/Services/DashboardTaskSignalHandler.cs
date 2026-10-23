@@ -18,6 +18,7 @@ namespace DotCelery.Dashboard.Services;
 /// </remarks>
 public sealed class DashboardTaskSignalHandler
     : ITaskSignalHandler<TaskPreRunSignal>,
+        ITaskSignalHandler<AfterTaskPublishSignal>,
         ITaskSignalHandler<TaskPostRunSignal>,
         ITaskSignalHandler<TaskFailureSignal>,
         ITaskSignalHandler<TaskRejectedSignal>
@@ -52,6 +53,31 @@ public sealed class DashboardTaskSignalHandler
     }
 
     /// <inheritdoc />
+    public ValueTask HandleAsync(
+        AfterTaskPublishSignal signal,
+        CancellationToken cancellationToken = default
+    ) =>
+        UpdateAsync(
+            signal.TaskId,
+            existing => new TaskSummary
+            {
+                TaskId = signal.TaskId,
+                TaskName = signal.TaskName,
+                State = existing?.State ?? TaskState.Pending.ToString(),
+                Queue = signal.Queue,
+                SentAt = existing?.SentAt ?? signal.Timestamp,
+                StartedAt = existing?.StartedAt,
+                CompletedAt = existing?.CompletedAt,
+                Worker = existing?.Worker,
+                Duration = existing?.Duration,
+                Retries = existing?.Retries ?? 0,
+                ExceptionMessage = existing?.ExceptionMessage,
+                Eta = existing?.Eta,
+            },
+            cancellationToken
+        );
+
+    /// <inheritdoc />
     public async ValueTask HandleAsync(
         TaskPreRunSignal signal,
         CancellationToken cancellationToken = default
@@ -72,7 +98,12 @@ public sealed class DashboardTaskSignalHandler
                             StartedAt = signal.Timestamp,
                             Retries = signal.RetryCount,
                         }
-                    ),
+                    ) with
+                    {
+                        CompletedAt = null,
+                        Duration = null,
+                        ExceptionMessage = null,
+                    },
                 cancellationToken
             )
             .ConfigureAwait(false);

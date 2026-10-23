@@ -5,6 +5,7 @@ using DotCelery.Core.Models;
 using DotCelery.Core.Serialization;
 using DotCelery.Core.Storage;
 using DotCelery.Core.Storage.Stores;
+using DotCelery.Dashboard.Models;
 using Microsoft.Extensions.Options;
 
 namespace DotCelery.Dashboard.Services;
@@ -293,6 +294,52 @@ public sealed class TaskRecordStore
         names.Sort(StringComparer.Ordinal);
 
         return names;
+    }
+
+    // Apply secondary criteria before paging. The state/name and time predicates are pushed
+    // into the document index; remaining predicates stream records without buffering history.
+    internal async ValueTask<IReadOnlyList<TaskSummary>> SearchAsync(
+        TaskSearchRequest query,
+        int limit,
+        int offset,
+        CancellationToken cancellationToken
+    )
+    {
+        var byName = !string.IsNullOrEmpty(query.TaskName);
+        var filter = new DocumentFilter
+        {
+            IndexKey =
+                byName ? NameIndexKey(query.TaskName!)
+                : query.State.HasValue ? StateIndexKey(query.State.Value.ToString())
+                : null,
+            SortKeyFrom = query.From,
+            SortKeyBefore = query.Until,
+        };
+        var tasks = new List<TaskSummary>();
+        var skipped = 0;
+        await foreach (
+            var task in QueryAsync(
+                    byName ? _names : _collection,
+                    filter,
+                    new DocumentPage { Descending = !query.OldestFirst },
+                    cancellationToken
+                )
+                .ConfigureAwait(false)
+        )
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!query.Matches(task))
+                continue;
+            if (skipped < offset)
+            {
+                skipped++;
+                continue;
+            }
+            tasks.Add(task);
+            if (tasks.Count >= limit)
+                break;
+        }
+        return tasks;
     }
 
     private IAsyncEnumerable<TaskSummary> QueryAsync(
