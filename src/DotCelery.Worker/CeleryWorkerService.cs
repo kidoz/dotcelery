@@ -38,15 +38,18 @@ public sealed class CeleryWorkerService : BackgroundService
     private readonly IDelayedMessageStore? _delayedMessageStore;
     private readonly IGracefulShutdownHandler? _shutdownHandler;
     private readonly IKillSwitch? _killSwitch;
-    private readonly IDeadLetterHandler? _deadLetterHandler;
     private readonly IMessageSecurityValidator? _securityValidator;
-    private readonly ICircuitBreakerFactory? _circuitBreakerFactory;
     private readonly WorkerActivity? _activity;
     private readonly WorkerOptions _options;
     private readonly ILogger<CeleryWorkerService> _logger;
     private readonly Channel<BrokerMessage> _workChannel;
     private readonly string _workerName;
     private readonly TimeProvider _timeProvider;
+    private readonly WorkerMessageSettler _settler;
+    private readonly FollowUpPublisher _followUps;
+    private readonly EtaWaiter _etaWaiter;
+    private readonly CircuitBreakerMonitor _circuits;
+    private readonly RetryScheduler _retries;
     private readonly CancellationTokenSource _stopIntakeCts = new();
     private readonly CancellationTokenSource _abortExecutionCts = new();
 
@@ -73,14 +76,23 @@ public sealed class CeleryWorkerService : BackgroundService
         _delayedMessageStore = delayedMessageStore;
         _shutdownHandler = shutdownHandler;
         _killSwitch = killSwitch;
-        _deadLetterHandler = deadLetterHandler;
         _securityValidator = securityValidator;
-        _circuitBreakerFactory = circuitBreakerFactory;
         _activity = activity;
         _options = options.Value;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _workerName = WorkerIdentity.Resolve(_options);
+        _settler = new WorkerMessageSettler(
+            broker,
+            deadLetterHandler,
+            logger,
+            _workerName,
+            _timeProvider
+        );
+        _followUps = new FollowUpPublisher(broker, _settler, logger, _timeProvider, _options);
+        _etaWaiter = new EtaWaiter(_options, _timeProvider, logger, _settler);
+        _circuits = new CircuitBreakerMonitor(circuitBreakerFactory);
+        _retries = new RetryScheduler(broker, delayedMessageStore, _options, _timeProvider, logger);
 
         _workChannel = Channel.CreateBounded<BrokerMessage>(
             new BoundedChannelOptions(_options.PrefetchCount * _options.Concurrency)
@@ -239,13 +251,14 @@ public sealed class CeleryWorkerService : BackgroundService
                     );
 
                     if (
-                        !await DeadLetterAsync(message, DeadLetterReason.Rejected)
+                        !await _settler
+                            .DeadLetterAsync(message, DeadLetterReason.Rejected)
                             .ConfigureAwait(false)
                     )
                     {
                         return;
                     }
-                    await AckAsync(message).ConfigureAwait(false);
+                    await _settler.AckAsync(message).ConfigureAwait(false);
                     return;
                 }
             }
@@ -256,11 +269,15 @@ public sealed class CeleryWorkerService : BackgroundService
             if (message.Message.Expires.HasValue && message.Message.Expires.Value < now)
             {
                 _logger.LogWarning("Task {TaskId} has expired, skipping", message.Message.Id);
-                if (!await DeadLetterAsync(message, DeadLetterReason.Expired).ConfigureAwait(false))
+                if (
+                    !await _settler
+                        .DeadLetterAsync(message, DeadLetterReason.Expired)
+                        .ConfigureAwait(false)
+                )
                 {
                     return;
                 }
-                await AckAsync(message).ConfigureAwait(false);
+                await _settler.AckAsync(message).ConfigureAwait(false);
                 return;
             }
 
@@ -279,7 +296,7 @@ public sealed class CeleryWorkerService : BackgroundService
                     .AddAsync(message.Message, message.Message.Eta.Value, intakeToken)
                     .ConfigureAwait(false);
 
-                await AckAsync(message).ConfigureAwait(false);
+                await _settler.AckAsync(message).ConfigureAwait(false);
 
                 _logger.LogDebug(
                     "Task {TaskId} scheduled for {Eta} via delay store",
@@ -295,7 +312,7 @@ public sealed class CeleryWorkerService : BackgroundService
         catch (OperationCanceledException) when (intakeToken.IsCancellationRequested)
         {
             // Intake stopped before the message reached a worker
-            await ReturnToBrokerAsync(message).ConfigureAwait(false);
+            await _settler.ReturnToBrokerAsync(message).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -304,7 +321,7 @@ public sealed class CeleryWorkerService : BackgroundService
                 "Failed to dispatch message {TaskId}, returning it to the broker",
                 message.Message.Id
             );
-            await ReturnToBrokerAsync(message).ConfigureAwait(false);
+            await _settler.ReturnToBrokerAsync(message).ConfigureAwait(false);
         }
     }
 
@@ -326,7 +343,7 @@ public sealed class CeleryWorkerService : BackgroundService
             if (intakeToken.IsCancellationRequested)
             {
                 // Prefetched but not started, so another worker can take it
-                await ReturnToBrokerAsync(message).ConfigureAwait(false);
+                await _settler.ReturnToBrokerAsync(message).ConfigureAwait(false);
                 continue;
             }
 
@@ -360,7 +377,7 @@ public sealed class CeleryWorkerService : BackgroundService
     {
         // A message that arrived before its ETA waits here, in one task slot, instead of in the
         // intake loop; when the wait does not cover the remaining time it goes back to the broker
-        if (!await WaitForEtaAsync(message, executionToken).ConfigureAwait(false))
+        if (!await _etaWaiter.WaitAsync(message, executionToken).ConfigureAwait(false))
         {
             return;
         }
@@ -373,7 +390,7 @@ public sealed class CeleryWorkerService : BackgroundService
 
         // While a queue's circuit is open (or the global one, after failures that affected
         // every queue), its messages wait in the broker instead of running
-        if (OpenCircuitFor(message) is { } openCircuit)
+        if (_circuits.OpenFor(message) is { } openCircuit)
         {
             _logger.LogWarning(
                 "Circuit '{Circuit}' is open; returning task {TaskId} of queue {Queue} to the broker",
@@ -381,7 +398,13 @@ public sealed class CeleryWorkerService : BackgroundService
                 message.Message.Id,
                 message.Queue
             );
-            await ReturnToBrokerAfterFailureAsync(message, executionToken).ConfigureAwait(false);
+            await _settler
+                .ReturnAfterFailureAsync(
+                    message,
+                    _options.InfrastructureFailureRequeueDelay,
+                    executionToken
+                )
+                .ConfigureAwait(false);
             return;
         }
 
@@ -409,11 +432,15 @@ public sealed class CeleryWorkerService : BackgroundService
                 message.Message.Id,
                 message.Message.Task
             );
-            if (!await DeadLetterAsync(message, DeadLetterReason.UnknownTask).ConfigureAwait(false))
+            if (
+                !await _settler
+                    .DeadLetterAsync(message, DeadLetterReason.UnknownTask)
+                    .ConfigureAwait(false)
+            )
             {
                 return;
             }
-            await RejectAsync(message).ConfigureAwait(false);
+            await _settler.RejectAsync(message).ConfigureAwait(false);
             return;
         }
         catch (JsonException ex)
@@ -427,24 +454,34 @@ public sealed class CeleryWorkerService : BackgroundService
                 message.Message.Id,
                 message.Message.Task
             );
-            if (!await DeadLetterAsync(message, DeadLetterReason.Rejected).ConfigureAwait(false))
+            if (
+                !await _settler
+                    .DeadLetterAsync(message, DeadLetterReason.Rejected)
+                    .ConfigureAwait(false)
+            )
             {
                 return;
             }
-            await RejectAsync(message).ConfigureAwait(false);
+            await _settler.RejectAsync(message).ConfigureAwait(false);
             return;
         }
         catch (Exception ex)
         {
             // The outcome was not recorded (for example, the result backend is unavailable)
             _killSwitch?.RecordFailure(ex);
-            RecordCircuitFailure(message, ex);
+            _circuits.RecordFailure(message, ex);
             _logger.LogError(
                 ex,
                 "Failed to process message {TaskId}, returning it to the broker",
                 message.Message.Id
             );
-            await ReturnToBrokerAfterFailureAsync(message, executionToken).ConfigureAwait(false);
+            await _settler
+                .ReturnAfterFailureAsync(
+                    message,
+                    _options.InfrastructureFailureRequeueDelay,
+                    executionToken
+                )
+                .ConfigureAwait(false);
             return;
         }
 
@@ -464,7 +501,7 @@ public sealed class CeleryWorkerService : BackgroundService
 
             try
             {
-                await ScheduleRetryAsync(message, result).ConfigureAwait(false);
+                await _retries.ScheduleAsync(message, result).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -474,12 +511,17 @@ public sealed class CeleryWorkerService : BackgroundService
                     "Failed to schedule retry for task {TaskId}, returning the message to the broker",
                     message.Message.Id
                 );
-                await ReturnToBrokerAfterFailureAsync(message, executionToken)
+                await _settler
+                    .ReturnAfterFailureAsync(
+                        message,
+                        _options.InfrastructureFailureRequeueDelay,
+                        executionToken
+                    )
                     .ConfigureAwait(false);
                 return;
             }
 
-            await AckAsync(message).ConfigureAwait(false);
+            await _settler.AckAsync(message).ConfigureAwait(false);
         }
         else if (result.State == TaskState.Requeued)
         {
@@ -492,14 +534,16 @@ public sealed class CeleryWorkerService : BackgroundService
                     message.Message.Id,
                     result.RequeueDelay.Value
                 );
-                await DelayAsync(result.RequeueDelay.Value, executionToken).ConfigureAwait(false);
+                await _settler
+                    .DelayAsync(result.RequeueDelay.Value, executionToken)
+                    .ConfigureAwait(false);
             }
             else
             {
                 _logger.LogDebug("Task {TaskId} requeued for later processing", message.Message.Id);
             }
 
-            await ReturnToBrokerAsync(message).ConfigureAwait(false);
+            await _settler.ReturnToBrokerAsync(message).ConfigureAwait(false);
         }
         else
         {
@@ -514,14 +558,17 @@ public sealed class CeleryWorkerService : BackgroundService
             if (result.State == TaskState.Success)
             {
                 if (
-                    !await ContinueChainAsync(message, result, executionToken).ConfigureAwait(false)
+                    !await _followUps
+                        .ContinueChainAsync(message, result, executionToken)
+                        .ConfigureAwait(false)
                 )
                 {
                     return;
                 }
 
                 if (
-                    !await ContinueWithLinkAsync(message, result, executionToken)
+                    !await _followUps
+                        .ContinueWithLinkAsync(message, result, executionToken)
                         .ConfigureAwait(false)
                 )
                 {
@@ -531,7 +578,8 @@ public sealed class CeleryWorkerService : BackgroundService
             else if (result.State == TaskState.Failure)
             {
                 if (
-                    !await ContinueWithErrorLinkAsync(message, result, executionToken)
+                    !await _followUps
+                        .ContinueWithErrorLinkAsync(message, result, executionToken)
                         .ConfigureAwait(false)
                 )
                 {
@@ -543,256 +591,21 @@ public sealed class CeleryWorkerService : BackgroundService
                 // A rejected message is handled, not processed; the dead letter queue keeps a
                 // record of it instead of dropping it silently
                 if (
-                    !await DeadLetterAsync(message, DeadLetterReason.Rejected).ConfigureAwait(false)
+                    !await _settler
+                        .DeadLetterAsync(message, DeadLetterReason.Rejected)
+                        .ConfigureAwait(false)
                 )
                 {
                     return;
                 }
             }
 
-            await AckAsync(message).ConfigureAwait(false);
+            await _settler.AckAsync(message).ConfigureAwait(false);
 
             if (result.State == TaskState.Success)
             {
-                RecordCircuitSuccess(message);
+                _circuits.RecordSuccess(message);
             }
-        }
-    }
-
-    // Settle only after the configured dead-letter destination has accepted the message.
-    private async Task<bool> DeadLetterAsync(BrokerMessage delivery, DeadLetterReason reason)
-    {
-        if (_deadLetterHandler is null)
-        {
-            return true;
-        }
-        var message = delivery.Message;
-
-        try
-        {
-            await _deadLetterHandler
-                .HandleAsync(
-                    message,
-                    reason,
-                    worker: _workerName,
-                    cancellationToken: CancellationToken.None
-                )
-                .ConfigureAwait(false);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Failed to store task {TaskId} in the dead letter queue",
-                message.Id
-            );
-            await ReturnToBrokerAsync(delivery).ConfigureAwait(false);
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Publishes the next step of the chain the task belongs to, with the task's result as its
-    /// input. The message is only acknowledged once the next step is published, so a failure
-    /// leaves the chain to run again instead of losing its remainder.
-    /// </summary>
-    /// <returns><c>true</c> when the caller may acknowledge the message.</returns>
-    private Task<bool> ContinueChainAsync(
-        BrokerMessage message,
-        TaskResult result,
-        CancellationToken cancellationToken
-    )
-    {
-        if (message.Message.Chain is not { Count: > 0 } steps)
-        {
-            return Task.FromResult(true);
-        }
-
-        var step = steps[0];
-
-        return PublishFollowUpAsync(
-            message,
-            step.Signature,
-            step.TaskId,
-            result.Result ?? step.Signature.Args ?? [],
-            result.ContentType ?? message.Message.ContentType,
-            chain: steps.Count > 1 ? [.. steps.Skip(1)] : null,
-            cancellationToken
-        );
-    }
-
-    /// <summary>
-    /// Publishes the linked callback of a successful task with the task's result as the
-    /// callback's input, when the task has a <see cref="TaskMessage.Link"/>.
-    /// </summary>
-    /// <returns><c>true</c> when the caller may acknowledge the message.</returns>
-    private Task<bool> ContinueWithLinkAsync(
-        BrokerMessage message,
-        TaskResult result,
-        CancellationToken cancellationToken
-    )
-    {
-        if (message.Message.Link is not { } link)
-        {
-            return Task.FromResult(true);
-        }
-
-        return PublishFollowUpAsync(
-            message,
-            link,
-            $"{message.Message.Id}:link",
-            result.Result ?? link.Args ?? [],
-            result.ContentType ?? message.Message.ContentType,
-            chain: null,
-            cancellationToken
-        );
-    }
-
-    /// <summary>
-    /// Publishes the error callback of a failed task with a <see cref="TaskErrorInfo"/> payload
-    /// as the callback's input, when the task has a <see cref="TaskMessage.LinkError"/>.
-    /// </summary>
-    /// <returns><c>true</c> when the caller may acknowledge the message.</returns>
-    private Task<bool> ContinueWithErrorLinkAsync(
-        BrokerMessage message,
-        TaskResult result,
-        CancellationToken cancellationToken
-    )
-    {
-        if (message.Message.LinkError is not { } errorLink)
-        {
-            return Task.FromResult(true);
-        }
-
-        var error = new TaskErrorInfo
-        {
-            TaskId = message.Message.Id,
-            TaskName = message.Message.Task,
-            ErrorType = result.Exception?.Type,
-            ErrorMessage = result.Exception?.Message,
-        };
-
-        return PublishFollowUpAsync(
-            message,
-            errorLink,
-            $"{message.Message.Id}:link-error",
-            JsonSerializer.SerializeToUtf8Bytes(error, DotCeleryJsonContext.Default.TaskErrorInfo),
-            "application/json",
-            chain: null,
-            cancellationToken
-        );
-    }
-
-    /// <summary>
-    /// Publishes a follow-up task for a settled message: the next chain step, a linked success
-    /// callback, or an error callback. The message is only acknowledged once the follow-up is
-    /// published, so a failure leaves the follow-up to be published again instead of losing it.
-    /// </summary>
-    /// <returns><c>true</c> when the caller may acknowledge the message.</returns>
-    private async Task<bool> PublishFollowUpAsync(
-        BrokerMessage message,
-        Signature followUp,
-        string followUpId,
-        byte[] args,
-        string contentType,
-        IReadOnlyList<ChainStep>? chain,
-        CancellationToken cancellationToken
-    )
-    {
-        try
-        {
-            await _broker
-                .PublishAsync(
-                    new TaskMessage
-                    {
-                        Id = followUpId,
-                        Task = followUp.TaskName,
-                        Args = args,
-                        ContentType = contentType,
-                        Timestamp = _timeProvider.GetUtcNow(),
-                        Chain = chain,
-                        Link = followUp.Link,
-                        LinkError = followUp.LinkError,
-                        RootId = message.Message.RootId ?? message.Message.Id,
-                        ParentId = message.Message.Id,
-                        TenantId = message.Message.TenantId,
-                        PartitionKey = message.Message.PartitionKey,
-                        Queue = followUp.Queue,
-                        Priority = followUp.Priority,
-                        MaxRetries = followUp.MaxRetries,
-                        Headers = followUp.Headers,
-                        Eta = followUp.EffectiveEta,
-                        Expires = followUp.Expires,
-                    },
-                    cancellationToken
-                )
-                .ConfigureAwait(false);
-
-            _logger.LogDebug(
-                "Task {TaskId} published follow-up {FollowUpId} for task {FollowUpTaskName}",
-                message.Message.Id,
-                followUpId,
-                followUp.TaskName
-            );
-
-            return true;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogError(
-                ex,
-                "Failed to publish follow-up {FollowUpId} of task {TaskId}; returning the message to the broker",
-                followUpId,
-                message.Message.Id
-            );
-
-            await ReturnToBrokerAfterFailureAsync(message, cancellationToken).ConfigureAwait(false);
-
-            return false;
-        }
-    }
-
-    // The circuits gate a queue's messages before execution and are fed by infrastructure
-    // failures only: a task that fails is handled by its retries, not by stopping its queue.
-    // The global breaker additionally covers failures that affect every queue.
-    private ICircuitBreaker? OpenCircuitFor(BrokerMessage message)
-    {
-        if (_circuitBreakerFactory is null)
-        {
-            return null;
-        }
-
-        var queueCircuit = _circuitBreakerFactory.GetOrCreate(message.Queue);
-        if (!queueCircuit.IsAllowed)
-        {
-            return queueCircuit;
-        }
-
-        var global = _circuitBreakerFactory.GlobalCircuitBreaker;
-        return !ReferenceEquals(queueCircuit, global) && !global.IsAllowed ? global : null;
-    }
-
-    private void RecordCircuitSuccess(BrokerMessage message) =>
-        RecordCircuit(message, circuit => circuit.RecordSuccess());
-
-    private void RecordCircuitFailure(BrokerMessage message, Exception exception) =>
-        RecordCircuit(message, circuit => circuit.RecordFailure(exception));
-
-    private void RecordCircuit(BrokerMessage message, Action<ICircuitBreaker> record)
-    {
-        if (_circuitBreakerFactory is null)
-        {
-            return;
-        }
-
-        var queueCircuit = _circuitBreakerFactory.GetOrCreate(message.Queue);
-        record(queueCircuit);
-
-        var global = _circuitBreakerFactory.GlobalCircuitBreaker;
-        if (!ReferenceEquals(queueCircuit, global))
-        {
-            record(global);
         }
     }
 
@@ -820,59 +633,6 @@ public sealed class CeleryWorkerService : BackgroundService
         return null;
     }
 
-    private async Task ScheduleRetryAsync(BrokerMessage message, TaskResult result)
-    {
-        // Only increment retries if the task actually executed and failed
-        // Rate-limited tasks never executed, so they shouldn't count toward max retries
-        var retryCount = result.DoNotIncrementRetries
-            ? message.Message.Retries
-            : message.Message.Retries + 1;
-
-        var retryMessage = message.Message with { Retries = retryCount };
-
-        // Check if this is a rate-limited retry with a delay
-        if (result.RetryAfter.HasValue && result.RetryAfter.Value > TimeSpan.Zero)
-        {
-            var deliveryTime = _timeProvider.GetUtcNow().Add(result.RetryAfter.Value);
-
-            if (_options.RequeueRateLimitedToDelayQueue && _delayedMessageStore is not null)
-            {
-                // Add to delay store for delayed requeue
-                await _delayedMessageStore
-                    .AddAsync(retryMessage, deliveryTime, CancellationToken.None)
-                    .ConfigureAwait(false);
-
-                _logger.LogDebug(
-                    "Task {TaskId} rate limited, scheduled for retry at {DeliveryTime}",
-                    message.Message.Id,
-                    deliveryTime
-                );
-            }
-            else
-            {
-                // Set ETA on the message for the broker to handle
-                retryMessage = retryMessage with
-                {
-                    Eta = deliveryTime,
-                };
-                await _broker
-                    .PublishAsync(retryMessage, CancellationToken.None)
-                    .ConfigureAwait(false);
-
-                _logger.LogDebug(
-                    "Task {TaskId} rate limited, requeued with ETA {Eta}",
-                    message.Message.Id,
-                    deliveryTime
-                );
-            }
-        }
-        else
-        {
-            // Regular retry - requeue immediately
-            await _broker.PublishAsync(retryMessage, CancellationToken.None).ConfigureAwait(false);
-        }
-    }
-
     private async Task HandleInterruptedAsync(BrokerMessage message)
     {
         if (_options.NackOnForcedShutdown)
@@ -881,7 +641,7 @@ public sealed class CeleryWorkerService : BackgroundService
                 "Task {TaskId} did not finish before shutdown, returning it to the broker",
                 message.Message.Id
             );
-            await ReturnToBrokerAsync(message).ConfigureAwait(false);
+            await _settler.ReturnToBrokerAsync(message).ConfigureAwait(false);
         }
         else
         {
@@ -889,126 +649,6 @@ public sealed class CeleryWorkerService : BackgroundService
                 "Task {TaskId} did not finish before shutdown, leaving its message unacknowledged",
                 message.Message.Id
             );
-        }
-    }
-
-    private async Task ReturnToBrokerAfterFailureAsync(
-        BrokerMessage message,
-        CancellationToken executionToken
-    )
-    {
-        await DelayAsync(_options.InfrastructureFailureRequeueDelay, executionToken)
-            .ConfigureAwait(false);
-        await ReturnToBrokerAsync(message).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Waits for a message's ETA in this worker. The wait is capped at
-    /// <see cref="WorkerOptions.MaxEtaWait"/>; a message whose ETA is further out goes back to
-    /// the broker to be redelivered, and one that expires while waiting is dead-lettered.
-    /// </summary>
-    /// <returns><c>true</c> when the message should be processed now.</returns>
-    private async Task<bool> WaitForEtaAsync(
-        BrokerMessage message,
-        CancellationToken executionToken
-    )
-    {
-        if (message.Message.Eta is not { } eta || eta <= _timeProvider.GetUtcNow())
-        {
-            return true;
-        }
-
-        var wait = eta - _timeProvider.GetUtcNow();
-        if (wait > _options.MaxEtaWait)
-        {
-            wait = _options.MaxEtaWait;
-        }
-
-        await DelayAsync(wait, executionToken).ConfigureAwait(false);
-
-        if (eta > _timeProvider.GetUtcNow())
-        {
-            _logger.LogDebug(
-                "Task {TaskId} has future ETA {Eta}, returning it to the broker to be redelivered",
-                message.Message.Id,
-                eta
-            );
-            await ReturnToBrokerAsync(message).ConfigureAwait(false);
-            return false;
-        }
-
-        // The wait can carry a message past its expiry, which the intake loop checked before it
-        // handed the message over
-        if (
-            message.Message.Expires.HasValue
-            && message.Message.Expires.Value < _timeProvider.GetUtcNow()
-        )
-        {
-            _logger.LogWarning("Task {TaskId} has expired, skipping", message.Message.Id);
-            if (!await DeadLetterAsync(message, DeadLetterReason.Expired).ConfigureAwait(false))
-            {
-                return false;
-            }
-            await AckAsync(message).ConfigureAwait(false);
-            return false;
-        }
-
-        return true;
-    }
-
-    private async Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
-    {
-        if (delay <= TimeSpan.Zero)
-        {
-            return;
-        }
-
-        try
-        {
-            await Task.Delay(delay, _timeProvider, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // Stopping: settle the message without waiting out the delay
-        }
-    }
-
-    // Settlement uses CancellationToken.None so it completes during shutdown. A failed settle
-    // leaves the message unsettled, and the broker redelivers it later.
-    private Task AckAsync(BrokerMessage message) =>
-        SettleAsync(
-            message,
-            "acknowledge",
-            static (broker, m) => broker.AckAsync(m, CancellationToken.None)
-        );
-
-    private Task RejectAsync(BrokerMessage message) =>
-        SettleAsync(
-            message,
-            "reject",
-            static (broker, m) => broker.RejectAsync(m, requeue: false, CancellationToken.None)
-        );
-
-    private Task ReturnToBrokerAsync(BrokerMessage message) =>
-        SettleAsync(
-            message,
-            "requeue",
-            static (broker, m) => broker.RejectAsync(m, requeue: true, CancellationToken.None)
-        );
-
-    private async Task SettleAsync(
-        BrokerMessage message,
-        string action,
-        Func<IMessageBroker, BrokerMessage, ValueTask> settle
-    )
-    {
-        try
-        {
-            await settle(_broker, message).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to {Action} message {TaskId}", action, message.Message.Id);
         }
     }
 
@@ -1027,7 +667,7 @@ public sealed class CeleryWorkerService : BackgroundService
                 if (await pendingRead.ConfigureAwait(false))
                 {
                     // Delivered after intake stopped
-                    await ReturnToBrokerAsync(consumer.Current).ConfigureAwait(false);
+                    await _settler.ReturnToBrokerAsync(consumer.Current).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException)
