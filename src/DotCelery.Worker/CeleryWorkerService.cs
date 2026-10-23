@@ -701,9 +701,11 @@ public sealed class CeleryWorkerService : BackgroundService
     /// <inheritdoc />
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        // Stop taking messages first. Prefetched messages are returned to the broker, and the
-        // broker consumer stays open until every in-flight message is settled.
-        await _stopIntakeCts.CancelAsync().ConfigureAwait(false);
+        // Stop taking messages first. Cancel synchronously so the linked intake token is
+        // already cancelled when this method first yields, before a finishing task can free a
+        // worker for a prefetched message. Prefetched messages are returned to the broker, and
+        // the broker consumer stays open until every in-flight message is settled.
+        _stopIntakeCts.Cancel();
 
         if (!_options.EnableGracefulShutdown || _shutdownHandler is null)
         {
