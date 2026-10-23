@@ -18,7 +18,7 @@ public sealed class TrafficGeneratorService(
         await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
         logger.LogInformation("Starting traffic generator");
 
-        var ticker = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        using var ticker = new PeriodicTimer(TimeSpan.FromSeconds(2));
         try
         {
             while (await ticker.WaitForNextTickAsync(stoppingToken))

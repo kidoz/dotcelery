@@ -347,9 +347,7 @@ public sealed class WorkerChaosTests : IAsyncDisposable
         )
         {
             await foreach (
-                var message in inner
-                    .ConsumeAsync(queues, cancellationToken)
-                    .ConfigureAwait(false)
+                var message in inner.ConsumeAsync(queues, cancellationToken).ConfigureAwait(false)
             )
             {
                 yield return message;

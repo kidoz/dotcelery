@@ -452,13 +452,7 @@ public sealed class TaskExecutor
         {
             _logger.LogWarning("Task {TaskId} was rejected: {Message}", message.Id, ex.Message);
 
-            return await RecordRejectedAsync(
-                    message,
-                    ex,
-                    startTime,
-                    workerName,
-                    cancellationToken
-                )
+            return await RecordRejectedAsync(message, ex, startTime, workerName, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception ex) when (!taskCompleted)

@@ -86,9 +86,7 @@ public sealed class RabbitMQRestartChaosTests : IAsyncLifetime
         using var consumerCts = new CancellationTokenSource(WaitTimeout);
         var consumer = Task.Run(async () =>
         {
-            await foreach (
-                var delivery in _broker.ConsumeAsync([queue], consumerCts.Token)
-            )
+            await foreach (var delivery in _broker.ConsumeAsync([queue], consumerCts.Token))
             {
                 lock (deliveries)
                 {
@@ -201,7 +199,7 @@ public sealed class RabbitMQRestartChaosTests : IAsyncLifetime
             {
                 output.WriteLine(
                     $"{logLevel}: {category}: {formatter(state, exception)}"
-                    + (exception is null ? string.Empty : $" {exception}")
+                        + (exception is null ? string.Empty : $" {exception}")
                 );
             }
         }

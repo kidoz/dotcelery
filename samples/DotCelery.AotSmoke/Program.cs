@@ -38,7 +38,7 @@ builder.Services.AddDotCelery(celery =>
 
 builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
 
-var host = builder.Build();
+using var host = builder.Build();
 await host.StartAsync();
 
 try
