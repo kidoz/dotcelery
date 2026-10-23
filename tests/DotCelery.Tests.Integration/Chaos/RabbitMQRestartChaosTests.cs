@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using Docker.DotNet;
 using Docker.DotNet.Models;
 using DotCelery.Broker.RabbitMQ;
@@ -21,9 +23,15 @@ public sealed class RabbitMQRestartChaosTests : IAsyncLifetime
     private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(60);
 
     private readonly ITestOutputHelper _output;
+
+    // Docker assigns a new ephemeral host port when a container with an automatic binding
+    // restarts. Pin the mapping so the restarted broker stays reachable at the endpoint the
+    // consumer reconnects to.
     private readonly RabbitMqContainer _container = new RabbitMqBuilder(
         "rabbitmq:3.13-management-alpine"
-    ).Build();
+    )
+        .WithPortBinding(ReserveHostPort(), 5672)
+        .Build();
 
     private RabbitMQBroker? _broker;
 
@@ -158,6 +166,15 @@ public sealed class RabbitMQRestartChaosTests : IAsyncLifetime
         {
             return deliveries.Count;
         }
+    }
+
+    private static int ReserveHostPort()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition, string description)
