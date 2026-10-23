@@ -42,7 +42,7 @@ public sealed class TimeLimitEnforcer
         }
 
         // Create a CTS that will be cancelled on any time limit (soft or hard)
-        // This ensures the task is always stopped when limits are exceeded
+        // Cancellation is cooperative; keep ownership until execution has actually stopped.
         using var executionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         using var softLimitCts = policy.SoftLimit.HasValue ? new CancellationTokenSource() : null;
@@ -87,7 +87,30 @@ public sealed class TimeLimitEnforcer
                     );
 
                     // Cancel the execution to stop the running task
-                    await executionCts.CancelAsync().ConfigureAwait(false);
+                    try
+                    {
+                        await executionCts.CancelAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(
+                            ex,
+                            "Cancellation callback failed for task {TaskId}",
+                            taskId
+                        );
+                    }
+                    try
+                    {
+                        await executionTask.ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(
+                            ex,
+                            "Task {TaskId} completed after soft-limit cancellation",
+                            taskId
+                        );
+                    }
 
                     throw new SoftTimeLimitExceededException(taskId, policy.SoftLimit.Value);
                 }
@@ -113,6 +136,13 @@ public sealed class TimeLimitEnforcer
             throw new TimeoutException(
                 $"Task {taskId} exceeded hard time limit of {policy.HardLimit?.TotalSeconds} seconds."
             );
+        }
+        finally
+        {
+            if (softLimitCts is not null)
+            {
+                await softLimitCts.CancelAsync().ConfigureAwait(false);
+            }
         }
     }
 

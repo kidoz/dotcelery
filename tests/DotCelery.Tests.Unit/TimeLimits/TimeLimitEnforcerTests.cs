@@ -12,6 +12,51 @@ public sealed class TimeLimitEnforcerTests
 {
     private readonly TimeLimitEnforcer _enforcer = new(NullLogger<TimeLimitEnforcer>.Instance);
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task SoftTimeout_WaitsForExecutionAndObservesItsFinalOutcome(
+        bool fails,
+        bool callbackFails
+    )
+    {
+        var cancelled = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        var finish = new TaskCompletionSource<int>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        var execution = _enforcer.ExecuteWithTimeLimitsAsync(
+            "task",
+            new TimeLimitPolicy(SoftLimit: TimeSpan.FromMilliseconds(20)),
+            async ct =>
+            {
+                using var registration = ct.Register(() =>
+                {
+                    cancelled.TrySetResult();
+                    if (callbackFails)
+                        throw new InvalidOperationException("cancellation callback");
+                });
+                return await finish.Task;
+            },
+            CancellationToken.None
+        );
+        try
+        {
+            await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(execution.IsCompleted);
+        }
+        finally
+        {
+            if (fails)
+                finish.TrySetException(new InvalidOperationException("late failure"));
+            else
+                finish.TrySetResult(42);
+        }
+        await Assert.ThrowsAsync<SoftTimeLimitExceededException>(() => execution);
+    }
+
     [Fact]
     public async Task ExecuteWithTimeLimitsAsync_WithNoLimits_ExecutesNormally()
     {
