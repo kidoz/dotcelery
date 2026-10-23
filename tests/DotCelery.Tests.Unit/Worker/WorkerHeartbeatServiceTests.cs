@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using DotCelery.Core.Dashboard;
 using DotCelery.Worker;
@@ -37,9 +38,17 @@ public sealed class WorkerHeartbeatServiceTests
         _activity.IncrementProcessedTasks();
         _activity.IncrementProcessedTasks();
 
-        await WaitForTickAsync(() => _registry.Heartbeats.Count >= 1);
+        // Waiting for registration advances fake time too, so an earlier idle heartbeat may
+        // already exist. Wait for the activity sample rather than asserting on the first tick.
+        await WaitForTickAsync(() =>
+            _registry.Heartbeats.Any(heartbeat =>
+                heartbeat.ActiveTasks == 1 && heartbeat.ProcessedCount == 2
+            )
+        );
 
-        var (workerId, activeTasks, processedCount) = _registry.Heartbeats[0];
+        var (workerId, activeTasks, processedCount) = _registry.Heartbeats.First(heartbeat =>
+            heartbeat.ActiveTasks == 1 && heartbeat.ProcessedCount == 2
+        );
         Assert.Equal("worker-test", workerId);
         Assert.Equal(1, activeTasks);
         Assert.Equal(2, processedCount);
@@ -73,7 +82,7 @@ public sealed class WorkerHeartbeatServiceTests
         _registry.FailHeartbeat = !registrationFails;
         using var service = CreateService();
         await service.StartAsync(CancellationToken.None);
-        await WaitForTickAsync(() => _registry.Heartbeats.Count > 0);
+        await WaitForTickAsync(() => !_registry.Heartbeats.IsEmpty);
         Assert.False(service.ExecuteTask!.IsCompleted);
         await service.StopAsync(CancellationToken.None);
         Assert.Single(_registry.Unregistered);
@@ -124,8 +133,11 @@ public sealed class WorkerHeartbeatServiceTests
 
         public List<WorkerInfo> Registered { get; } = [];
 
-        public List<(string WorkerId, int ActiveTasks, long ProcessedCount)> Heartbeats { get; } =
-        [];
+        public ConcurrentQueue<(
+            string WorkerId,
+            int ActiveTasks,
+            long ProcessedCount
+        )> Heartbeats { get; } = [];
 
         public List<string> Unregistered { get; } = [];
 
@@ -155,7 +167,7 @@ public sealed class WorkerHeartbeatServiceTests
                 FailHeartbeat = false;
                 throw new IOException("heartbeat unavailable");
             }
-            Heartbeats.Add((workerId, activeTasks, processedCount));
+            Heartbeats.Enqueue((workerId, activeTasks, processedCount));
             return ValueTask.CompletedTask;
         }
 
