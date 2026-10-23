@@ -15,9 +15,10 @@ namespace DotCelery.Broker.RabbitMQ;
 /// requeues what it had delivered and the consumer rebuilds the channel, whose tags start
 /// again, so a tracked delivery is refused instead of settled.
 /// </remarks>
-internal sealed class ConsumerChannel(IChannel channel)
+internal sealed class ConsumerChannel(IChannel channel) : IDisposable
 {
     private readonly ConcurrentDictionary<ulong, BrokerMessage> _inFlight = new();
+    private readonly SemaphoreSlim _settlementLock = new(1, 1);
 
     /// <summary>
     /// Gets the channel.
@@ -50,11 +51,19 @@ internal sealed class ConsumerChannel(IChannel channel)
         CancellationToken cancellationToken = default
     )
     {
-        RequireLiveDelivery(deliveryTag);
-        await Channel
-            .BasicAckAsync(deliveryTag, multiple: false, cancellationToken)
-            .ConfigureAwait(false);
-        _inFlight.TryRemove(deliveryTag, out _);
+        await _settlementLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            RequireLiveDelivery(deliveryTag);
+            await Channel
+                .BasicAckAsync(deliveryTag, multiple: false, cancellationToken)
+                .ConfigureAwait(false);
+            _inFlight.TryRemove(deliveryTag, out _);
+        }
+        finally
+        {
+            _settlementLock.Release();
+        }
     }
 
     /// <summary>
@@ -73,11 +82,19 @@ internal sealed class ConsumerChannel(IChannel channel)
         CancellationToken cancellationToken = default
     )
     {
-        RequireLiveDelivery(deliveryTag);
-        await Channel
-            .BasicRejectAsync(deliveryTag, requeue, cancellationToken)
-            .ConfigureAwait(false);
-        _inFlight.TryRemove(deliveryTag, out _);
+        await _settlementLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            RequireLiveDelivery(deliveryTag);
+            await Channel
+                .BasicRejectAsync(deliveryTag, requeue, cancellationToken)
+                .ConfigureAwait(false);
+            _inFlight.TryRemove(deliveryTag, out _);
+        }
+        finally
+        {
+            _settlementLock.Release();
+        }
     }
 
     /// <summary>
@@ -90,6 +107,56 @@ internal sealed class ConsumerChannel(IChannel channel)
         var messages = _inFlight.Values.ToArray();
         _inFlight.Clear();
         return messages;
+    }
+
+    // The delivery callback also rejects unreadable messages before they can be tracked.
+    public async ValueTask RejectReceivedAsync(
+        ulong deliveryTag,
+        bool requeue,
+        CancellationToken cancellationToken
+    )
+    {
+        await _settlementLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await Channel
+                .BasicRejectAsync(deliveryTag, requeue, cancellationToken)
+                .ConfigureAwait(false);
+            _inFlight.TryRemove(deliveryTag, out _);
+        }
+        finally
+        {
+            _settlementLock.Release();
+        }
+    }
+
+    // Shares the settlement lock with setup and disposal, because they also use this channel.
+    public async Task UseAsync(Func<Task> action, CancellationToken cancellationToken)
+    {
+        await _settlementLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await action().ConfigureAwait(false);
+        }
+        finally
+        {
+            _settlementLock.Release();
+        }
+    }
+
+    public void Dispose()
+    {
+        _settlementLock.Wait();
+        try
+        {
+            Channel.Dispose();
+        }
+        finally
+        {
+            // Stale worker deliveries can still be settling; they must be allowed to enter,
+            // discover the closed channel, and fail without racing a disposed semaphore.
+            _settlementLock.Release();
+        }
     }
 
     private void RequireLiveDelivery(ulong deliveryTag)

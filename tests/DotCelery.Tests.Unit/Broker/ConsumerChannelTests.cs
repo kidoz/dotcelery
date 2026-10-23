@@ -98,6 +98,61 @@ public sealed class ConsumerChannelTests
         Assert.Empty(_channel.InFlight);
     }
 
+    [Fact]
+    public async Task ConcurrentAckAndReject_AreSerializedOnTheChannel()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+#pragma warning disable CA2012 // NSubstitute consumes the configured ValueTask.
+        _rabbitChannel
+            .BasicAckAsync(12, false, Arg.Any<CancellationToken>())
+            .Returns(_ => new ValueTask(BlockAckAsync()));
+#pragma warning restore CA2012
+        async Task BlockAckAsync()
+        {
+            entered.TrySetResult();
+            await release.Task;
+        }
+        _channel.Track(12, CreateMessage());
+        _channel.Track(13, CreateMessage());
+        var ack = _channel.AckAsync(12).AsTask();
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var reject = _channel.RejectAsync(13, false).AsTask();
+        try
+        {
+            Assert.False(reject.IsCompleted);
+            await _rabbitChannel
+                .DidNotReceive()
+                .BasicRejectAsync(13, false, Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            release.TrySetResult();
+            await Task.WhenAll(ack, reject).WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        Assert.Empty(_channel.InFlight);
+    }
+
+    [Fact]
+    public async Task FailedAck_CanBeRetriedWithoutLosingTheDelivery()
+    {
+        var attempts = 0;
+#pragma warning disable CA2012 // NSubstitute consumes the configured ValueTask.
+        _rabbitChannel
+            .BasicAckAsync(12, false, Arg.Any<CancellationToken>())
+            .Returns(_ =>
+                ++attempts == 1
+                    ? ValueTask.FromException(new IOException("transient"))
+                    : ValueTask.CompletedTask
+            );
+#pragma warning restore CA2012
+        _channel.Track(12, CreateMessage());
+        await Assert.ThrowsAsync<IOException>(() => _channel.AckAsync(12).AsTask());
+        Assert.Single(_channel.InFlight);
+        await _channel.AckAsync(12);
+        Assert.Empty(_channel.InFlight);
+    }
+
     private static BrokerMessage CreateMessage() =>
         new()
         {

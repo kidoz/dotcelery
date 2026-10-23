@@ -77,66 +77,75 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(message);
 
-        var channel = await GetPublishChannelAsync(cancellationToken).ConfigureAwait(false);
-
-        if (_options.AutoDeclareQueues)
+        await _publishChannelLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            await EnsureQueueDeclaredAsync(channel, message.Queue, cancellationToken)
-                .ConfigureAwait(false);
-        }
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var channel = await GetPublishChannelAsync(cancellationToken).ConfigureAwait(false);
 
-        // Serialize using AOT-friendly type info
-        var body = JsonSerializer.SerializeToUtf8Bytes(message, TaskMessageTypeInfo);
-
-        // Validate message size
-        if (_options.MaxMessageSizeBytes > 0 && body.Length > _options.MaxMessageSizeBytes)
-        {
-            throw new InvalidOperationException(
-                $"Message size ({body.Length} bytes) exceeds maximum allowed size ({_options.MaxMessageSizeBytes} bytes)."
-            );
-        }
-
-        var properties = new BasicProperties
-        {
-            Persistent = true,
-            MessageId = message.Id,
-            Type = message.Task,
-            ContentType = "application/json",
-            Timestamp = new AmqpTimestamp(message.Timestamp.ToUnixTimeSeconds()),
-            Priority = (byte)Math.Clamp(message.Priority, 0, 9),
-            CorrelationId = message.CorrelationId,
-        };
-
-        var signature = _messageSecurityValidator?.Sign(body);
-        if (!string.IsNullOrEmpty(signature))
-        {
-            properties.Headers = new Dictionary<string, object?>
+            if (_options.AutoDeclareQueues)
             {
-                ["x-dotcelery-signature"] = Encoding.UTF8.GetBytes(signature),
-            };
-        }
+                await EnsureQueueDeclaredAsync(channel, message.Queue, cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
-        if (message.Expires.HasValue)
-        {
-            var ttl = message.Expires.Value - DateTimeOffset.UtcNow;
-            if (ttl > TimeSpan.Zero)
+            // Serialize using AOT-friendly type info
+            var body = JsonSerializer.SerializeToUtf8Bytes(message, TaskMessageTypeInfo);
+
+            // Validate message size
+            if (_options.MaxMessageSizeBytes > 0 && body.Length > _options.MaxMessageSizeBytes)
             {
-                properties.Expiration = ((long)ttl.TotalMilliseconds).ToString(
-                    System.Globalization.CultureInfo.InvariantCulture
+                throw new InvalidOperationException(
+                    $"Message size ({body.Length} bytes) exceeds maximum allowed size ({_options.MaxMessageSizeBytes} bytes)."
                 );
             }
-        }
 
-        await channel
-            .BasicPublishAsync(
-                exchange: _options.Exchange,
-                routingKey: message.Queue,
-                mandatory: _options.MandatoryPublish,
-                basicProperties: properties,
-                body: body,
-                cancellationToken: cancellationToken
-            )
-            .ConfigureAwait(false);
+            var properties = new BasicProperties
+            {
+                Persistent = true,
+                MessageId = message.Id,
+                Type = message.Task,
+                ContentType = "application/json",
+                Timestamp = new AmqpTimestamp(message.Timestamp.ToUnixTimeSeconds()),
+                Priority = (byte)Math.Clamp(message.Priority, 0, 9),
+                CorrelationId = message.CorrelationId,
+            };
+
+            var signature = _messageSecurityValidator?.Sign(body);
+            if (!string.IsNullOrEmpty(signature))
+            {
+                properties.Headers = new Dictionary<string, object?>
+                {
+                    ["x-dotcelery-signature"] = Encoding.UTF8.GetBytes(signature),
+                };
+            }
+
+            if (message.Expires.HasValue)
+            {
+                var ttl = message.Expires.Value - DateTimeOffset.UtcNow;
+                if (ttl > TimeSpan.Zero)
+                {
+                    properties.Expiration = ((long)ttl.TotalMilliseconds).ToString(
+                        System.Globalization.CultureInfo.InvariantCulture
+                    );
+                }
+            }
+
+            await channel
+                .BasicPublishAsync(
+                    exchange: _options.Exchange,
+                    routingKey: message.Queue,
+                    mandatory: _options.MandatoryPublish,
+                    basicProperties: properties,
+                    body: body,
+                    cancellationToken: cancellationToken
+                )
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _publishChannelLock.Release();
+        }
 
         // The publish is confirmed, so the message is in the queue and its waiting count follows
         await _queueMetrics
@@ -268,7 +277,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
 
                     try
                     {
-                        consumerChannel.Channel.Dispose();
+                        consumerChannel.Dispose();
                     }
                     catch (Exception ex)
                     {
@@ -303,36 +312,59 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
         var channel = consumerChannel.Channel;
 
         // Set prefetch
-        await channel
-            .BasicQosAsync(
-                prefetchSize: 0,
-                prefetchCount: _options.PrefetchCount,
-                global: false,
-                cancellationToken: cancellationToken
+        await consumerChannel
+            .UseAsync(
+                async () =>
+                {
+                    await channel
+                        .BasicQosAsync(
+                            prefetchSize: 0,
+                            prefetchCount: _options.PrefetchCount,
+                            global: false,
+                            cancellationToken: cancellationToken
+                        )
+                        .ConfigureAwait(false);
+
+                    // Ensure queues exist
+                    if (_options.AutoDeclareQueues)
+                    {
+                        foreach (var queue in queues)
+                        {
+                            await EnsureQueueDeclaredAsync(channel, queue, cancellationToken)
+                                .ConfigureAwait(false);
+                        }
+                    }
+                },
+                cancellationToken
             )
             .ConfigureAwait(false);
 
-        // Ensure queues exist
-        if (_options.AutoDeclareQueues)
-        {
-            foreach (var queue in queues)
-            {
-                await EnsureQueueDeclaredAsync(channel, queue, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-        }
-
         var consumer = new AsyncEventingBasicConsumer(channel);
-        consumer.ReceivedAsync += async (_, ea) =>
+        consumer.ReceivedAsync += async (sender, ea) =>
         {
+            BrokerMessage? brokerMessage = null;
             try
             {
+                if (
+                    _options.MaxMessageSizeBytes > 0
+                    && ea.Body.Length > _options.MaxMessageSizeBytes
+                )
+                {
+                    _logger.LogWarning(
+                        "Rejecting oversized delivery {DeliveryTag}",
+                        ea.DeliveryTag
+                    );
+                    await consumerChannel
+                        .RejectReceivedAsync(ea.DeliveryTag, false, cancellationToken)
+                        .ConfigureAwait(false);
+                    return;
+                }
                 // Deserialize using AOT-friendly type info
                 var body = ea.Body.ToArray();
                 var signature = GetSignature(ea.BasicProperties);
                 if (!_messageSecurityValidator.IsSignatureValid(body, signature))
                 {
-                    await HandleSecurityFailureAsync(ea, channel, cancellationToken)
+                    await HandleSecurityFailureAsync(ea, consumerChannel, cancellationToken)
                         .ConfigureAwait(false);
                     return;
                 }
@@ -344,19 +376,29 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
                 }
                 catch (JsonException jsonEx)
                 {
-                    await HandleDeserializationFailureAsync(ea, channel, jsonEx, cancellationToken)
+                    await HandleDeserializationFailureAsync(
+                            ea,
+                            consumerChannel,
+                            jsonEx,
+                            cancellationToken
+                        )
                         .ConfigureAwait(false);
                     return;
                 }
 
                 if (taskMessage is null)
                 {
-                    await HandleDeserializationFailureAsync(ea, channel, null, cancellationToken)
+                    await HandleDeserializationFailureAsync(
+                            ea,
+                            consumerChannel,
+                            null,
+                            cancellationToken
+                        )
                         .ConfigureAwait(false);
                     return;
                 }
 
-                var brokerMessage = new BrokerMessage
+                brokerMessage = new BrokerMessage
                 {
                     Message = taskMessage,
                     DeliveryTag = ea.DeliveryTag,
@@ -379,12 +421,14 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
                     ea.DeliveryTag
                 );
 
-                // Reject without requeue to prevent infinite loops
+                // Infrastructure failures must not discard an accepted delivery.
                 try
                 {
-                    await channel
-                        .BasicRejectAsync(ea.DeliveryTag, requeue: false, cancellationToken)
+                    await consumerChannel
+                        .RejectReceivedAsync(ea.DeliveryTag, requeue: true, cancellationToken)
                         .ConfigureAwait(false);
+                    if (brokerMessage is not null)
+                        _deliveries.TryRemove(brokerMessage, out _);
                 }
                 catch (Exception rejectEx)
                 {
@@ -400,12 +444,21 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
         // Start consuming from all queues
         foreach (var queue in queues)
         {
-            var tag = await channel
-                .BasicConsumeAsync(
-                    queue: queue,
-                    autoAck: false,
-                    consumer: consumer,
-                    cancellationToken: cancellationToken
+            string? tag = null;
+            await consumerChannel
+                .UseAsync(
+                    async () =>
+                    {
+                        tag = await channel
+                            .BasicConsumeAsync(
+                                queue: queue,
+                                autoAck: false,
+                                consumer: consumer,
+                                cancellationToken: cancellationToken
+                            )
+                            .ConfigureAwait(false);
+                    },
+                    cancellationToken
                 )
                 .ConfigureAwait(false);
             _logger.LogInformation(
@@ -442,6 +495,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
 
         var consumerChannel = RequireDeliveringChannel(message, "acknowledged");
         await consumerChannel.AckAsync(deliveryTag, cancellationToken).ConfigureAwait(false);
+        _deliveries.TryRemove(message, out _);
 
         _logger.LogDebug("Acknowledged message {MessageId}", message.Message.Id);
     }
@@ -465,6 +519,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
         await consumerChannel
             .RejectAsync(deliveryTag, requeue, cancellationToken)
             .ConfigureAwait(false);
+        _deliveries.TryRemove(message, out _);
 
         _logger.LogDebug(
             "Rejected message {MessageId} (requeue: {Requeue})",
@@ -511,6 +566,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
         }
 
         _disposed = true;
+        await _publishChannelLock.WaitAsync().ConfigureAwait(false);
 
         try
         {
@@ -530,9 +586,11 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
         {
             _logger.LogWarning(ex, "Error during RabbitMQ broker disposal");
         }
-
+        finally
+        {
+            _publishChannelLock.Release();
+        }
         _connectionLock.Dispose();
-        _publishChannelLock.Dispose();
         _deliveries.Clear();
 
         _logger.LogInformation("RabbitMQ broker disposed");
@@ -620,7 +678,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
     // channel-local, so another channel's tag of the same value means another message
     private ConsumerChannel RequireDeliveringChannel(BrokerMessage message, string action)
     {
-        if (!_deliveries.TryRemove(message, out var consumerChannel))
+        if (!_deliveries.TryGetValue(message, out var consumerChannel))
         {
             throw new InvalidOperationException(
                 $"Message {message.Message.Id} cannot be {action}: it was settled already, or its "
@@ -638,31 +696,17 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
             return _publishChannel;
         }
 
-        await _publishChannelLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (_publishChannel?.IsOpen == true)
-            {
-                return _publishChannel;
-            }
-
-            var connection = await GetConnectionAsync(cancellationToken).ConfigureAwait(false);
-            var channelOptions = new CreateChannelOptions(
-                publisherConfirmationsEnabled: _options.EnablePublisherConfirms,
-                publisherConfirmationTrackingEnabled: _options.EnablePublisherConfirms
-            );
-            var replaced = _publishChannel;
-            _publishChannel = await connection
-                .CreateChannelAsync(channelOptions, cancellationToken)
-                .ConfigureAwait(false);
-            replaced?.Dispose();
-
-            return _publishChannel;
-        }
-        finally
-        {
-            _publishChannelLock.Release();
-        }
+        var connection = await GetConnectionAsync(cancellationToken).ConfigureAwait(false);
+        var channelOptions = new CreateChannelOptions(
+            publisherConfirmationsEnabled: _options.EnablePublisherConfirms,
+            publisherConfirmationTrackingEnabled: _options.EnablePublisherConfirms
+        );
+        var replaced = _publishChannel;
+        _publishChannel = await connection
+            .CreateChannelAsync(channelOptions, cancellationToken)
+            .ConfigureAwait(false);
+        replaced?.Dispose();
+        return _publishChannel;
     }
 
     private async Task EnsureQueueDeclaredAsync(
@@ -685,7 +729,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
 
     private async Task HandleDeserializationFailureAsync(
         BasicDeliverEventArgs ea,
-        IChannel channel,
+        ConsumerChannel channel,
         JsonException? exception,
         CancellationToken cancellationToken
     )
@@ -732,6 +776,10 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
                     "Failed to store message {DeliveryTag} in dead letter queue",
                     ea.DeliveryTag
                 );
+                await channel
+                    .RejectReceivedAsync(ea.DeliveryTag, requeue: true, cancellationToken)
+                    .ConfigureAwait(false);
+                return;
             }
         }
 
@@ -739,7 +787,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
         try
         {
             await channel
-                .BasicRejectAsync(ea.DeliveryTag, requeue: false, cancellationToken)
+                .RejectReceivedAsync(ea.DeliveryTag, requeue: false, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception rejectEx)
@@ -750,7 +798,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
 
     private async Task HandleSecurityFailureAsync(
         BasicDeliverEventArgs ea,
-        IChannel channel,
+        ConsumerChannel channel,
         CancellationToken cancellationToken
     )
     {
@@ -781,7 +829,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
         }
 
         await channel
-            .BasicRejectAsync(ea.DeliveryTag, requeue: false, cancellationToken)
+            .RejectReceivedAsync(ea.DeliveryTag, requeue: false, cancellationToken)
             .ConfigureAwait(false);
     }
 

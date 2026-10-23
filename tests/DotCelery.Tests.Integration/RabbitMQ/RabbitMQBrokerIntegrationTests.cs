@@ -420,6 +420,106 @@ public class RabbitMQBrokerIntegrationTests : IAsyncLifetime
         Assert.Empty(metrics.Enqueued);
     }
 
+    [Fact]
+    public async Task ConcurrentPublishingAndSettlement_PreserveEveryMessage()
+    {
+        var queue = $"concurrent-{Guid.NewGuid():N}";
+        await using var broker = new RabbitMQBroker(
+            Options.Create(
+                new RabbitMQBrokerOptions
+                {
+                    ConnectionString = _container.GetConnectionString(),
+                    PrefetchCount = 64,
+                }
+            ),
+            CreateLogger()
+        );
+        var messages = Enumerable
+            .Range(0, 100)
+            .Select(_ => CreateTestMessage() with { Queue = queue, Args = new byte[32_768] })
+            .ToArray();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await Task.WhenAll(
+            messages.Select(message => broker.PublishAsync(message, timeout.Token).AsTask())
+        );
+        var received = new List<BrokerMessage>();
+        await using var consumer = broker.ConsumeAsync([queue], timeout.Token).GetAsyncEnumerator();
+        while (received.Count < messages.Length)
+        {
+            Assert.True(await consumer.MoveNextAsync());
+            received.Add(consumer.Current);
+            if (received.Count % 25 == 0)
+            {
+                await Task.WhenAll(
+                    received
+                        .TakeLast(25)
+                        .Select(
+                            (message, i) =>
+                                i % 2 == 0
+                                    ? broker.AckAsync(message, timeout.Token).AsTask()
+                                    : broker.RejectAsync(message, false, timeout.Token).AsTask()
+                        )
+                );
+            }
+        }
+        Assert.Equal(
+            messages.Select(m => m.Id).Order(),
+            received.Select(m => m.Message.Id).Order()
+        );
+        Assert.True(await broker.IsHealthyAsync(timeout.Token));
+    }
+
+    [Fact]
+    public async Task OversizedDirectBrokerWrite_IsRejectedBeforeDeserializing()
+    {
+        var queue = $"size-{Guid.NewGuid():N}";
+        await using var receiver = new RabbitMQBroker(
+            Options.Create(
+                new RabbitMQBrokerOptions
+                {
+                    ConnectionString = _container.GetConnectionString(),
+                    MaxMessageSizeBytes = 2048,
+                }
+            ),
+            CreateLogger()
+        );
+        await _broker!.PublishAsync(
+            CreateTestMessage() with
+            {
+                Queue = queue,
+                Args = new byte[4096],
+            }
+        );
+        var valid = CreateTestMessage() with { Queue = queue };
+        await _broker.PublishAsync(valid);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await foreach (var delivery in receiver.ConsumeAsync([queue], timeout.Token))
+        {
+            Assert.Equal(valid.Id, delivery.Message.Id);
+            await receiver.AckAsync(delivery, timeout.Token);
+            break;
+        }
+    }
+
+    [Fact]
+    public async Task CancelledAcknowledgement_RetainsDeliveryOwnershipForRetry()
+    {
+        var queue = $"ack-retry-{Guid.NewGuid():N}";
+        await _broker!.PublishAsync(CreateTestMessage() with { Queue = queue });
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var consumer = _broker
+            .ConsumeAsync([queue], timeout.Token)
+            .GetAsyncEnumerator();
+        Assert.True(await consumer.MoveNextAsync());
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            _broker.AckAsync(consumer.Current, cancelled.Token).AsTask()
+        );
+        await _broker.AckAsync(consumer.Current, timeout.Token);
+        Assert.True(await _broker.IsHealthyAsync(timeout.Token));
+    }
+
     private static TaskMessage CreateTestMessage() =>
         new()
         {
