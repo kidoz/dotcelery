@@ -32,6 +32,39 @@ public sealed class KillSwitchTests : IDisposable
         );
     }
 
+    [Fact]
+    public async Task RestartDeadline_ReleasesWaitingConsumersUsingTheInjectedClock()
+    {
+        for (var i = 0; i <= _options.ActivationThreshold; i++)
+            _killSwitch.RecordFailure();
+        Assert.True(_killSwitch.IsPaused);
+        var ready = _killSwitch.WaitUntilReadyAsync().AsTask();
+        Assert.False(ready.IsCompleted);
+        _timeProvider.Advance(_options.RestartTimeout);
+        await ready.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(KillSwitchState.Ready, _killSwitch.State);
+        Assert.Equal(0, _killSwitch.TrackedMessageCount);
+    }
+
+    [Fact]
+    public async Task ResetAndRetrip_OldTimerCannotResumeTheNewPause()
+    {
+        void Trip()
+        {
+            for (var i = 0; i <= _options.ActivationThreshold; i++)
+                _killSwitch.RecordFailure();
+        }
+        Trip();
+        _timeProvider.Advance(TimeSpan.FromSeconds(40));
+        _killSwitch.Reset();
+        Trip();
+        _timeProvider.Advance(TimeSpan.FromSeconds(20));
+        await Task.Delay(20);
+        Assert.True(_killSwitch.IsPaused);
+        _timeProvider.Advance(TimeSpan.FromSeconds(40));
+        Assert.False(_killSwitch.IsPaused);
+    }
+
     public void Dispose()
     {
         _killSwitch.Dispose();

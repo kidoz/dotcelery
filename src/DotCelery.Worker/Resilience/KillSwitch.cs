@@ -15,12 +15,14 @@ public sealed class KillSwitch : IKillSwitch, IDisposable
     private readonly ILogger<KillSwitch> _logger;
     private readonly Lock _lock = new();
     private readonly Queue<(DateTimeOffset Timestamp, bool Success)> _window = new();
-    private readonly SemaphoreSlim _pauseGate = new(1, 1);
+    private TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly CancellationTokenSource _disposeCts = new();
 
     private KillSwitchState _state = KillSwitchState.Ready;
     private DateTimeOffset? _lastTrippedAt;
     private Task? _restartTask;
+    private long _restartVersion;
+    private bool _disposed;
     private int _failureCount;
     private int _successCount;
 
@@ -43,24 +45,28 @@ public sealed class KillSwitch : IKillSwitch, IDisposable
     {
         get
         {
+            List<KillSwitchStateChangedEventArgs> changes = [];
+            KillSwitchState state;
             lock (_lock)
             {
-                return _state;
+                if (
+                    !_disposed
+                    && _state == KillSwitchState.Tripped
+                    && _timeProvider.GetUtcNow() - _lastTrippedAt >= _options.RestartTimeout
+                )
+                {
+                    changes = RestartAndGetEvents();
+                }
+                state = _state;
             }
+            foreach (var change in changes)
+                RaiseStateChanged(change);
+            return state;
         }
     }
 
     /// <inheritdoc />
-    public bool IsPaused
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _state == KillSwitchState.Tripped;
-            }
-        }
-    }
+    public bool IsPaused => State == KillSwitchState.Tripped;
 
     /// <inheritdoc />
     public DateTimeOffset? LastTrippedAt
@@ -187,11 +193,9 @@ public sealed class KillSwitch : IKillSwitch, IDisposable
             _failureCount = 0;
             _successCount = 0;
             _state = KillSwitchState.Ready;
+            _restartVersion++;
 
-            if (_pauseGate.CurrentCount == 0)
-            {
-                _pauseGate.Release();
-            }
+            _ready.TrySetResult();
 
             if (oldState != KillSwitchState.Ready)
             {
@@ -222,16 +226,45 @@ public sealed class KillSwitch : IKillSwitch, IDisposable
             _disposeCts.Token
         );
 
-        await _pauseGate.WaitAsync(linkedCts.Token).ConfigureAwait(false);
-        _pauseGate.Release();
+        while (IsPaused)
+        {
+            TimeSpan remaining;
+            Task ready;
+            lock (_lock)
+            {
+                if (_state != KillSwitchState.Tripped)
+                    return;
+                remaining =
+                    _options.RestartTimeout - (_timeProvider.GetUtcNow() - _lastTrippedAt!.Value);
+                ready = _ready.Task;
+            }
+            if (remaining <= TimeSpan.Zero)
+                continue;
+            try
+            {
+                await ready
+                    .WaitAsync(remaining, _timeProvider, linkedCts.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                // Reading IsPaused completes the restart even if its timer failed.
+            }
+        }
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
+        lock (_lock)
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            _restartVersion++;
+        }
         _disposeCts.Cancel();
         _disposeCts.Dispose();
-        _pauseGate.Dispose();
     }
 
     private void PruneWindow()
@@ -314,9 +347,9 @@ public sealed class KillSwitch : IKillSwitch, IDisposable
         _state = KillSwitchState.Tripped;
         _lastTrippedAt = _timeProvider.GetUtcNow();
 
-        // Acquire the gate to block consumers - use TryWait to avoid blocking
-        // We don't block because we're already in a lock
-        _pauseGate.Wait(0);
+        // Each pause owns its completion signal, so a waiter from an earlier pause cannot
+        // release consumers after a reset followed by another trip.
+        _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         _logger.LogWarning(
             "Kill switch TRIPPED. Failure rate: {Rate:P1}, Threshold: {Threshold:P1}. "
@@ -327,7 +360,7 @@ public sealed class KillSwitch : IKillSwitch, IDisposable
         );
 
         // Schedule automatic restart (fire and forget)
-        _restartTask = ScheduleRestartAsync();
+        _restartTask = ScheduleRestartAsync(++_restartVersion);
 
         return CreateStateChangedEvent(
             KillSwitchState.Tracking,
@@ -336,51 +369,19 @@ public sealed class KillSwitch : IKillSwitch, IDisposable
         );
     }
 
-    private async Task ScheduleRestartAsync()
+    private async Task ScheduleRestartAsync(long version)
     {
         try
         {
-            await Task.Delay(_options.RestartTimeout, _disposeCts.Token).ConfigureAwait(false);
+            await Task.Delay(_options.RestartTimeout, _timeProvider, _disposeCts.Token)
+                .ConfigureAwait(false);
 
-            var eventsToRaise = new List<KillSwitchStateChangedEventArgs>(2);
-
+            List<KillSwitchStateChangedEventArgs> eventsToRaise = [];
             lock (_lock)
             {
-                if (_state == KillSwitchState.Tripped)
+                if (!_disposed && version == _restartVersion && _state == KillSwitchState.Tripped)
                 {
-                    var oldState = _state;
-                    _state = KillSwitchState.Restarting;
-
-                    _logger.LogInformation(
-                        "Kill switch restart timeout elapsed. Resuming consumption..."
-                    );
-
-                    eventsToRaise.Add(
-                        CreateStateChangedEvent(oldState, KillSwitchState.Restarting, null)
-                    );
-
-                    // Clear tracking window for fresh start
-                    _window.Clear();
-                    _failureCount = 0;
-                    _successCount = 0;
-
-                    _state = KillSwitchState.Ready;
-
-                    // Release the gate
-                    if (_pauseGate.CurrentCount == 0)
-                    {
-                        _pauseGate.Release();
-                    }
-
-                    _logger.LogInformation("Kill switch reset. Consumption resumed.");
-
-                    eventsToRaise.Add(
-                        CreateStateChangedEvent(
-                            KillSwitchState.Restarting,
-                            KillSwitchState.Ready,
-                            null
-                        )
-                    );
+                    eventsToRaise = RestartAndGetEvents();
                 }
             }
 
@@ -394,6 +395,26 @@ public sealed class KillSwitch : IKillSwitch, IDisposable
         {
             // Dispose was called
         }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Kill switch timed restart failed; state checks will retry it");
+        }
+    }
+
+    private List<KillSwitchStateChangedEventArgs> RestartAndGetEvents()
+    {
+        var restarting = CreateStateChangedEvent(_state, KillSwitchState.Restarting, null);
+        _window.Clear();
+        _failureCount = 0;
+        _successCount = 0;
+        _state = KillSwitchState.Ready;
+        _ready.TrySetResult();
+        _logger.LogInformation("Kill switch reset. Consumption resumed.");
+        return
+        [
+            restarting,
+            CreateStateChangedEvent(KillSwitchState.Restarting, KillSwitchState.Ready, null),
+        ];
     }
 
     private KillSwitchStateChangedEventArgs CreateStateChangedEvent(

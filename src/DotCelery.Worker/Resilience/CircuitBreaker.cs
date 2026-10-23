@@ -21,6 +21,8 @@ public sealed class CircuitBreaker : ICircuitBreaker, IDisposable
     private DateTimeOffset? _lastOpenedAt;
     private DateTimeOffset? _lastFailureAt;
     private Task? _halfOpenTransitionTask;
+    private long _transitionVersion;
+    private bool _disposed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CircuitBreaker"/> class.
@@ -46,24 +48,30 @@ public sealed class CircuitBreaker : ICircuitBreaker, IDisposable
     {
         get
         {
+            CircuitStateChangedEventArgs? change = null;
+            CircuitState state;
             lock (_lock)
             {
-                return _state;
+                if (
+                    !_disposed
+                    && _state == CircuitState.Open
+                    && _timeProvider.GetUtcNow() - _lastOpenedAt >= _options.OpenDuration
+                )
+                {
+                    change = TransitionToAndGetEvent(CircuitState.HalfOpen, null);
+                }
+                state = _state;
             }
+            if (change is not null)
+            {
+                RaiseStateChanged(change);
+            }
+            return state;
         }
     }
 
     /// <inheritdoc />
-    public bool IsAllowed
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _state != CircuitState.Open;
-            }
-        }
-    }
+    public bool IsAllowed => State != CircuitState.Open;
 
     /// <inheritdoc />
     public DateTimeOffset? LastOpenedAt
@@ -276,6 +284,7 @@ public sealed class CircuitBreaker : ICircuitBreaker, IDisposable
         {
             var oldState = _state;
             _state = CircuitState.Closed;
+            _transitionVersion++;
             _failureCount = 0;
             _successCount = 0;
 
@@ -296,6 +305,13 @@ public sealed class CircuitBreaker : ICircuitBreaker, IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
+        lock (_lock)
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            _transitionVersion++;
+        }
         _disposeCts.Cancel();
         _disposeCts.Dispose();
     }
@@ -326,7 +342,7 @@ public sealed class CircuitBreaker : ICircuitBreaker, IDisposable
                 );
 
                 // Schedule transition to half-open
-                _halfOpenTransitionTask = ScheduleHalfOpenAsync();
+                _halfOpenTransitionTask = ScheduleHalfOpenAsync(++_transitionVersion);
                 break;
 
             case CircuitState.HalfOpen:
@@ -344,17 +360,18 @@ public sealed class CircuitBreaker : ICircuitBreaker, IDisposable
         return CreateStateChangedEvent(oldState, newState, exception);
     }
 
-    private async Task ScheduleHalfOpenAsync()
+    private async Task ScheduleHalfOpenAsync(long version)
     {
         try
         {
-            await Task.Delay(_options.OpenDuration, _disposeCts.Token).ConfigureAwait(false);
+            await Task.Delay(_options.OpenDuration, _timeProvider, _disposeCts.Token)
+                .ConfigureAwait(false);
 
             CircuitStateChangedEventArgs? stateChangeEvent = null;
 
             lock (_lock)
             {
-                if (_state == CircuitState.Open)
+                if (!_disposed && version == _transitionVersion && _state == CircuitState.Open)
                 {
                     stateChangeEvent = TransitionToAndGetEvent(CircuitState.HalfOpen, null);
                 }
@@ -369,6 +386,14 @@ public sealed class CircuitBreaker : ICircuitBreaker, IDisposable
         catch (OperationCanceledException)
         {
             // Dispose was called
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Circuit '{Name}' timed transition failed; state checks will retry it",
+                Name
+            );
         }
     }
 

@@ -32,6 +32,30 @@ public sealed class CircuitBreakerTests : IDisposable
         );
     }
 
+    [Fact]
+    public void OpenDeadline_TransitionsUsingTheInjectedClock()
+    {
+        _circuitBreaker.Trip();
+        _timeProvider.Advance(_options.OpenDuration);
+        Assert.True(_circuitBreaker.IsAllowed);
+        Assert.Equal(CircuitState.HalfOpen, _circuitBreaker.State);
+    }
+
+    [Fact]
+    public async Task ResetAndReopen_OldTimerCannotEndTheNewOpenPeriod()
+    {
+        _circuitBreaker.Trip();
+        _timeProvider.Advance(TimeSpan.FromSeconds(20));
+        _circuitBreaker.Reset();
+        _circuitBreaker.Trip();
+        _timeProvider.Advance(TimeSpan.FromSeconds(10));
+        // Drain queued timer continuations without advancing the clock.
+        await Task.Delay(20);
+        Assert.Equal(CircuitState.Open, _circuitBreaker.State);
+        _timeProvider.Advance(TimeSpan.FromSeconds(20));
+        Assert.True(_circuitBreaker.IsAllowed);
+    }
+
     public void Dispose()
     {
         _circuitBreaker.Dispose();
