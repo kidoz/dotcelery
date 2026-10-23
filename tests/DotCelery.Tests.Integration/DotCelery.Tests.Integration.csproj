@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DotCelery.Core\DotCelery.Core.csproj" />
+    <ProjectReference Include="..\..\src\DotCelery.Broker.InMemory\DotCelery.Broker.InMemory.csproj" />
     <ProjectReference Include="..\..\src\DotCelery.Broker.RabbitMQ\DotCelery.Broker.RabbitMQ.csproj" />
     <ProjectReference Include="..\..\src\DotCelery.Broker.Sqs\DotCelery.Broker.Sqs.csproj" />
     <ProjectReference Include="..\..\src\DotCelery.Broker.Redis\DotCelery.Broker.Redis.csproj" />
