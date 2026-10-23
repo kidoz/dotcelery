@@ -4,6 +4,8 @@
     <Description>Web dashboard for monitoring DotCelery distributed task queue</Description>
     <OutputType>Library</OutputType>
     <IsPackable>true</IsPackable>
+    <DashboardToolingRoot>$(MSBuildProjectDirectory)/../..</DashboardToolingRoot>
+    <DashboardFrontendOutput>$(MSBuildProjectDirectory)/obj/dashboard</DashboardFrontendOutput>
   </PropertyGroup>
 
   <ItemGroup>
@@ -11,19 +13,51 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="wwwroot\**\*" />
-    <EmbeddedResource
-      Include="..\..\assets\dotcelery-logo.png"
-      LogicalName="DotCelery.Dashboard.wwwroot.dotcelery-logo.png"
-    />
     <EmbeddedResource Include="Pages\**\*.cshtml" />
+    <Content Remove="Frontend/**/*" />
+    <None Update="Frontend/**/*" Pack="false" />
+    <DashboardFrontendInput Include="Frontend/**/*;$(DashboardToolingRoot)/vite.config.mts;$(DashboardToolingRoot)/tsconfig.json;$(DashboardToolingRoot)/package.json;$(DashboardToolingRoot)/package-lock.json;$(DashboardToolingRoot)/assets/dotcelery-logo.png" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.402" />
+    <PackageReference Include="Asp.Versioning.Mvc" Version="10.2.1" />
+    <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" Version="10.2.1" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="DotCelery.Tests.Unit" />
   </ItemGroup>
+
+  <Target
+    Name="RestoreDashboardFrontend"
+    Inputs="$(DashboardToolingRoot)/package.json;$(DashboardToolingRoot)/package-lock.json"
+    Outputs="$(DashboardToolingRoot)/node_modules/.package-lock.json"
+  >
+    <Exec WorkingDirectory="$(DashboardToolingRoot)" Command="npm ci" />
+  </Target>
+
+  <Target
+    Name="BuildDashboardFrontend"
+    DependsOnTargets="RestoreDashboardFrontend"
+    Inputs="@(DashboardFrontendInput)"
+    Outputs="$(DashboardFrontendOutput)/index.html"
+  >
+    <Exec WorkingDirectory="$(DashboardToolingRoot)" Command="npm run build" />
+  </Target>
+
+  <Target
+    Name="IncludeDashboardFrontend"
+    BeforeTargets="PrepareForBuild"
+    DependsOnTargets="BuildDashboardFrontend"
+    Condition="'$(DesignTimeBuild)' != 'true'"
+  >
+    <ItemGroup>
+      <!-- Slash-delimited logical names preserve dots and casing in Vite asset hashes. -->
+      <DashboardAsset Include="$(DashboardFrontendOutput)/**/*" />
+      <EmbeddedResource Include="@(DashboardAsset)">
+        <LogicalName>DotCelery.Dashboard.wwwroot/%(DashboardAsset.RecursiveDir)%(DashboardAsset.Filename)%(DashboardAsset.Extension)</LogicalName>
+      </EmbeddedResource>
+    </ItemGroup>
+  </Target>
 </Project>

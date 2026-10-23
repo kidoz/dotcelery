@@ -53,6 +53,7 @@ public partial class DashboardApiController
                 RetentionSeconds = _options.TaskRecordRetention.TotalSeconds,
                 SnapshotSeconds = _options.MetricsSnapshotInterval.TotalSeconds,
                 RefreshSeconds = Math.Max(1, _options.RefreshIntervalSeconds),
+                MetricsWindowMinutes = _options.MetricsWindow.TotalMinutes,
                 PageSize = Math.Clamp(_options.PageSize, 1, 1000),
             }
         );

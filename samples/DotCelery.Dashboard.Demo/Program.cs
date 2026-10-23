@@ -41,10 +41,11 @@ builder.Services.AddDotCelery(celery =>
 );
 
 // 2. Mount the dashboard. Default prefix is "/celery".
+var dashboardPrefix = builder.Configuration["Dashboard:PathPrefix"] ?? "/celery";
 builder.Services.AddDotCeleryDashboard(o =>
 {
     o.Title = "DotCelery Demo Dashboard";
-    o.PathPrefix = "/celery";
+    o.PathPrefix = dashboardPrefix;
     o.RefreshIntervalSeconds = 3;
     o.MetricsSnapshotInterval = TimeSpan.FromSeconds(15); // demo only — the default is a minute
     o.AllowTaskOperations = true; // capability-aware cancellation and retry
@@ -64,7 +65,7 @@ builder.Services.AddHostedService<TrafficGeneratorService>();
 var app = builder.Build();
 
 app.UseDotCeleryDashboard(); // the UI page; API and hub paths pass through to their endpoints
-app.MapDotCeleryDashboard("/celery"); // API controllers + SignalR hub
-app.MapGet("/", () => Results.Redirect("/celery/"));
+app.MapDotCeleryDashboard(dashboardPrefix); // API controllers + SignalR hub
+app.MapGet("/", () => Results.Redirect($"{dashboardPrefix.TrimEnd('/')}/"));
 
 app.Run();

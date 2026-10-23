@@ -111,6 +111,6 @@ bench-memory:
 bench-quick:
     dotnet run --project benchmarks/DotCelery.Benchmarks -c Release -- --job short
 
-# Verify dashboard formatting, status labels, HTTP handling, and request races (Node.js 22+)
+# Verify dashboard formatting, status labels, HTTP handling, and request races (Node.js 24.3+)
 test-dashboard-ui:
     node --test eng/dashboard-ui.test.cjs

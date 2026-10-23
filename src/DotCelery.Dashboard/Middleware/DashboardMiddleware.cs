@@ -109,7 +109,7 @@ public sealed class DashboardMiddleware
     private void LoadEmbeddedResources()
     {
         var assembly = typeof(DashboardMiddleware).Assembly;
-        var resourcePrefix = "DotCelery.Dashboard.wwwroot.";
+        const string resourcePrefix = "DotCelery.Dashboard.wwwroot/";
 
         foreach (var resourceName in assembly.GetManifestResourceNames())
         {
@@ -118,11 +118,8 @@ public sealed class DashboardMiddleware
                 continue;
             }
 
-            // Extract the path after the prefix
-            // Resource names look like: DotCelery.Dashboard.wwwroot.js.app.js
-            // We need to convert to: /js/app.js
-            var pathPart = resourceName[resourcePrefix.Length..];
-            var relativePath = ConvertResourceNameToPath(pathPart);
+            // Explicit logical names preserve Vite's filenames, including dots and hash casing.
+            var relativePath = "/" + resourceName[resourcePrefix.Length..].Replace('\\', '/');
 
             using var stream = assembly.GetManifestResourceStream(resourceName);
             if (stream is null)
@@ -135,7 +132,7 @@ public sealed class DashboardMiddleware
             var content = ms.ToArray();
 
             var contentType = GetContentType(relativePath);
-            _embeddedResources[relativePath] = (contentType, content);
+            _embeddedResources[relativePath.ToLowerInvariant()] = (contentType, content);
         }
 
         if (!_embeddedResources.TryGetValue("/index.html", out var index))
@@ -151,40 +148,6 @@ public sealed class DashboardMiddleware
                 StringComparison.Ordinal
             );
         _embeddedResources["/index.html"] = (index.ContentType, Encoding.UTF8.GetBytes(html));
-    }
-
-    /// <summary>
-    /// Converts a resource name path part to a URL path.
-    /// Resource names use dots as separators, but the last segment before the extension
-    /// contains the actual filename with its extension.
-    /// Example: "js.app.js" -> "/js/app.js", "index.html" -> "/index.html"
-    /// </summary>
-    private static string ConvertResourceNameToPath(string resourcePath)
-    {
-        // Split by dots
-        var parts = resourcePath.Split('.');
-
-        if (parts.Length < 2)
-        {
-            // No extension, just return as-is
-            return "/" + resourcePath.ToLowerInvariant();
-        }
-
-        // The last part is the extension (e.g., "js", "html", "css")
-        var extension = parts[^1];
-
-        // The second-to-last part is the filename without extension
-        var fileName = parts[^2];
-
-        // Everything before that forms the directory path
-        var directoryParts = parts[..^2];
-
-        var path =
-            directoryParts.Length > 0
-                ? "/" + string.Join("/", directoryParts) + "/" + fileName + "." + extension
-                : "/" + fileName + "." + extension;
-
-        return path.ToLowerInvariant();
     }
 
     private static string GetContentType(string path) =>

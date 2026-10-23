@@ -14,6 +14,8 @@ public sealed class DashboardMiddlewareTests
 {
     [Theory]
     [InlineData("/celery/api/overview")]
+    [InlineData("/celery/api/v1/overview")]
+    [InlineData("/celery/api/v2/overview")]
     [InlineData("/celery/api")]
     [InlineData("/celery/hub/negotiate")]
     [InlineData("/celery/hub")]
@@ -48,12 +50,11 @@ public sealed class DashboardMiddlewareTests
     }
 
     [Theory]
-    [InlineData("dashboard.css", "text/css")]
-    [InlineData("dashboard-core.js", "application/javascript")]
-    [InlineData("dashboard.js", "application/javascript")]
-    [InlineData("dotcelery-logo.png", "image/png")]
+    [InlineData(".css", "text/css")]
+    [InlineData(".js", "application/javascript")]
+    [InlineData(".png", "image/png")]
     public async Task EmbeddedAssets_AreServedUnderTheConfiguredPrefix(
-        string asset,
+        string extension,
         string contentType
     )
     {
@@ -63,10 +64,23 @@ public sealed class DashboardMiddlewareTests
                 new DashboardOptions { RequireAuthorization = false, PathPrefix = "/jobs/monitor" }
             )
         );
-        var context = CreateContext($"/jobs/monitor/{asset}");
-        await middleware.InvokeAsync(context);
-        Assert.StartsWith(contentType, context.Response.ContentType);
-        Assert.NotEmpty(GetBody(context));
+        const string resourcePrefix = "DotCelery.Dashboard.wwwroot/";
+        var resources = typeof(DashboardMiddleware).Assembly.GetManifestResourceNames();
+        var assets = resources
+            .Where(name =>
+                name.StartsWith(resourcePrefix, StringComparison.Ordinal)
+                && name.EndsWith(extension, StringComparison.Ordinal)
+            )
+            .ToList();
+        Assert.NotEmpty(assets);
+        foreach (var resource in assets)
+        {
+            var asset = resource[resourcePrefix.Length..].Replace('\\', '/');
+            var context = CreateContext($"/jobs/monitor/{asset}");
+            await middleware.InvokeAsync(context);
+            Assert.StartsWith(contentType, context.Response.ContentType);
+            Assert.NotEmpty(GetBody(context));
+        }
     }
 
     [Fact]
@@ -88,8 +102,12 @@ public sealed class DashboardMiddlewareTests
         var html = Encoding.UTF8.GetString(GetBody(context));
         Assert.Contains("&lt;script&gt;alert(1)&lt;/script&gt;", html);
         Assert.DoesNotContain("<script>alert(1)</script>", html);
-        Assert.Contains("/jobs/monitor/dashboard-core.js", html);
-        Assert.Contains("/jobs/monitor/dotcelery-logo.png", html);
+        Assert.Contains("<base href=\"/jobs/monitor/\"", html);
+        Assert.Contains("./assets/", html);
+        Assert.Contains("type=\"module\"", html);
+        Assert.Contains("data-title=\"&lt;script&gt;", html);
+        Assert.DoesNotContain("{{PREFIX}}", html);
+        Assert.DoesNotContain("{{TITLE}}", html);
         Assert.Contains("<noscript", html);
     }
 
