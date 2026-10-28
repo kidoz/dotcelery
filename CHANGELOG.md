@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-28
+
+### Added
+- `HistoricalDataOptions.MaxQueryRange` (30 days) and `MaxQuerySnapshots` (100,000) bound dashboard history queries; over-budget requests are rejected instead of scanning unbounded data
+- `ISagaStore.GetRecoveryBatchAsync` exposes bounded recovery pages to custom saga stores
+
+### Changed
+- Partition locks are renewed as leases while a task runs; `PartitionOptions.LockTimeout` now bounds lease expiry rather than total execution time. Losing a lease cancels the task token and prevents successful completion
+- A globally configured partition, overlap, or inbox filter now resolves its required store at startup, and a filter that cannot be constructed fails the execution instead of being silently skipped
+- Inbox and outbox documentation now states at-least-once delivery instead of exactly-once processing
+
+### Fixed
+- Unreadable task payloads are rejected and dead-lettered without redelivery: invalid JSON, disallowed or unregistered types, and missing JSON metadata surface as `JsonException`
+- Redis and RabbitMQ settle only the current delivery; a stale receipt after redelivery, reconnect, or ownership transfer is rejected instead of acknowledging another consumer's delivery, and Redis removes consumer metadata once its pending entries are gone
+- Saga recovery scans executing and compensating sagas in bounded pages and rotates offsets, so sagas beyond the first page are no longer starved; already published or claimed work is skipped
+- Dashboard history endpoints return `400` for reversed ranges or ranges beyond `MaxQueryRange`, and a query exceeding `MaxQuerySnapshots` fails without returning partial aggregates
+
 ## [1.2.0] - 2026-10-24
 
 ### Added
@@ -288,7 +305,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Requires .NET 10.0 and C# 14
 - First public release
 
-[Unreleased]: https://github.com/kidoz/dotcelery/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/kidoz/dotcelery/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/kidoz/dotcelery/releases/tag/v1.2.1
 [1.2.0]: https://github.com/kidoz/dotcelery/releases/tag/v1.2.0
 [1.1.0]: https://github.com/kidoz/dotcelery/releases/tag/v1.1.0
 [1.0.0]: https://github.com/kidoz/dotcelery/releases/tag/v1.0.0
