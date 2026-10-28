@@ -18,6 +18,45 @@ public abstract class HistoricalDataStoreConformanceTests : StoreConformanceTest
         );
 
     [Fact]
+    public async Task HistoricalQueries_RejectReversedAndExcessiveRanges()
+    {
+        var store = CreateStore(
+            new HistoricalDataOptions { MaxQueryRange = TimeSpan.FromHours(1) }
+        );
+        foreach (var until in new[] { Start.AddMinutes(-1), Start.AddHours(2) })
+        {
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+                store.GetMetricsAsync(Start, until).AsTask()
+            );
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+                ToListAsync(store.GetTimeSeriesAsync(Start, until))
+            );
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+                store.GetMetricsByTaskNameAsync(Start, until).AsTask()
+            );
+        }
+    }
+
+    [Fact]
+    public async Task HistoricalQueries_RejectExcessSnapshotsWithoutReturningPartialAggregates()
+    {
+        var store = CreateStore(new HistoricalDataOptions { MaxQuerySnapshots = 2 });
+        await store.RecordMetricsAsync(Snapshot(Start.AddMinutes(-2), "task", 1, 0, 0));
+        await store.RecordMetricsAsync(Snapshot(Start.AddMinutes(-1), "task", 1, 0, 0));
+        Assert.Equal(2, (await store.GetMetricsAsync(Start.AddMinutes(-2), Start)).SuccessCount);
+        await store.RecordMetricsAsync(Snapshot(Start, "task", 1, 0, 0));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            store.GetMetricsAsync(Start.AddMinutes(-2), Start).AsTask()
+        );
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            ToListAsync(store.GetTimeSeriesAsync(Start.AddMinutes(-2), Start))
+        );
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            store.GetMetricsByTaskNameAsync(Start.AddMinutes(-2), Start).AsTask()
+        );
+    }
+
+    [Fact]
     public async Task GetMetricsAsync_AggregatesSnapshotsInTheRange()
     {
         var store = CreateStore();

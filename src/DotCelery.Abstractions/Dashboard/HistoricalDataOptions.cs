@@ -25,6 +25,15 @@ public sealed class HistoricalDataOptions
     /// </summary>
     public int MaxDataPoints { get; set; } = 1000;
 
+    /// <summary>Gets or sets the maximum query span. Default is 30 days.</summary>
+    public TimeSpan MaxQueryRange { get; set; } = TimeSpan.FromDays(30);
+
+    /// <summary>
+    /// Gets or sets the maximum snapshots read per query. Default is 100,000.
+    /// Queries exceeding this budget are rejected; use a shorter range.
+    /// </summary>
+    public int MaxQuerySnapshots { get; set; } = 100_000;
+
     /// <summary>
     /// Gets or sets the default granularity for queries when not specified.
     /// </summary>

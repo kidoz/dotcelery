@@ -41,6 +41,12 @@ public sealed class HistoricalDataStore : IHistoricalDataStore
         ArgumentNullException.ThrowIfNull(storage);
         _documents = TenantStorageScope.For(storage, storeOptions).Documents;
         _options = options?.Value ?? new HistoricalDataOptions();
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(_options.MaxQuerySnapshots);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(
+            _options.MaxQuerySnapshots,
+            int.MaxValue - 1
+        );
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_options.MaxQueryRange, TimeSpan.Zero);
         _timeProvider = timeProvider ?? TimeProvider.System;
         _collection = (storeOptions?.Value ?? new StorageStoreOptions()).Name("metrics-history");
     }
@@ -224,6 +230,11 @@ public sealed class HistoricalDataStore : IHistoricalDataStore
         CancellationToken cancellationToken
     )
     {
+        if (until < from || until - from > _options.MaxQueryRange)
+            throw new ArgumentOutOfRangeException(
+                nameof(until),
+                "Historical range is reversed or exceeds the configured maximum span."
+            );
         var snapshots = new List<MetricsSnapshot>();
         await foreach (
             var document in _documents
@@ -232,14 +243,23 @@ public sealed class HistoricalDataStore : IHistoricalDataStore
                     new DocumentFilter
                     {
                         SortKeyFrom = from,
-                        SortKeyBefore = until.AddTicks(TimeSpan.TicksPerMicrosecond),
+                        SortKeyBefore =
+                            until > DateTimeOffset.MaxValue.AddTicks(-TimeSpan.TicksPerMicrosecond)
+                                ? null
+                                : until.AddTicks(TimeSpan.TicksPerMicrosecond),
                     },
                     SnapshotTypeInfo,
-                    cancellationToken: cancellationToken
+                    new DocumentPage { Limit = _options.MaxQuerySnapshots + 1 },
+                    cancellationToken
                 )
                 .ConfigureAwait(false)
         )
         {
+            if (snapshots.Count == _options.MaxQuerySnapshots)
+                throw new ArgumentOutOfRangeException(
+                    nameof(until),
+                    "Historical query exceeds the snapshot budget; request a shorter range."
+                );
             snapshots.Add(document.Value);
         }
 

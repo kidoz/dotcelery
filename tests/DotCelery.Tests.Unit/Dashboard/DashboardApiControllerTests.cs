@@ -34,6 +34,62 @@ public sealed class DashboardApiControllerTests
 #pragma warning restore CA2012
     }
 
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(31)]
+    public async Task HistoricalEndpoints_RejectInvalidRangesBeforeCallingTheStore(int days)
+    {
+        var history = Substitute.For<IHistoricalDataStore>();
+        var controller = new DashboardApiController(
+            _provider,
+            Options.Create(new DashboardOptions()),
+            historicalDataStore: history
+        );
+        var from = DateTimeOffset.UtcNow;
+        var until = from.AddDays(days);
+        Assert.IsType<BadRequestObjectResult>(
+            (await controller.GetHistoricalMetrics(from, until)).Result
+        );
+        Assert.IsType<BadRequestObjectResult>((await controller.GetTimeSeries(from, until)).Result);
+        Assert.IsType<BadRequestObjectResult>(
+            (await controller.GetMetricsByTask(from, until)).Result
+        );
+        Assert.Empty(history.ReceivedCalls());
+    }
+
+    [Fact]
+    public async Task HistoricalSnapshotBudgetFailure_IsReportedAsBadRequest()
+    {
+        var history = Substitute.For<IHistoricalDataStore>();
+#pragma warning disable CA2012 // NSubstitute consumes the configured ValueTask.
+        history
+            .GetMetricsAsync(
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<MetricsGranularity>(),
+                Arg.Any<CancellationToken>()
+            )
+            .Returns(_ =>
+                ValueTask.FromException<AggregatedMetrics>(
+                    new ArgumentOutOfRangeException("until", "Snapshot budget exceeded")
+                )
+            );
+#pragma warning restore CA2012
+        var controller = new DashboardApiController(
+            _provider,
+            Options.Create(new DashboardOptions()),
+            historicalDataStore: history
+        );
+        Assert.IsType<BadRequestObjectResult>(
+            (
+                await controller.GetHistoricalMetrics(
+                    DateTimeOffset.UtcNow.AddHours(-1),
+                    DateTimeOffset.UtcNow
+                )
+            ).Result
+        );
+    }
+
     [Fact]
     public async Task GetTasks_ClampsNegativePaging()
     {

@@ -304,15 +304,29 @@ public partial class DashboardApiController : ControllerBase
 
         var fromDate = from ?? DateTimeOffset.UtcNow.AddDays(-1);
         var untilDate = until ?? DateTimeOffset.UtcNow;
+        var historyOptions =
+            HttpContext?.RequestServices?.GetService<IOptions<HistoricalDataOptions>>()?.Value
+            ?? new HistoricalDataOptions();
+        if (untilDate < fromDate || untilDate - fromDate > historyOptions.MaxQueryRange)
+            return BadRequest(
+                "Historical range is reversed or exceeds the configured maximum span."
+            );
 
-        var metrics = await _historicalDataStore.GetMetricsAsync(
-            fromDate,
-            untilDate,
-            granularity,
-            cancellationToken
-        );
+        try
+        {
+            var metrics = await _historicalDataStore.GetMetricsAsync(
+                fromDate,
+                untilDate,
+                granularity,
+                cancellationToken
+            );
 
-        return Ok(metrics);
+            return Ok(metrics);
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     /// <summary>
@@ -333,21 +347,35 @@ public partial class DashboardApiController : ControllerBase
 
         var fromDate = from ?? DateTimeOffset.UtcNow.AddDays(-1);
         var untilDate = until ?? DateTimeOffset.UtcNow;
+        var historyOptions =
+            HttpContext?.RequestServices?.GetService<IOptions<HistoricalDataOptions>>()?.Value
+            ?? new HistoricalDataOptions();
+        if (untilDate < fromDate || untilDate - fromDate > historyOptions.MaxQueryRange)
+            return BadRequest(
+                "Historical range is reversed or exceeds the configured maximum span."
+            );
 
-        var dataPoints = new List<MetricsDataPoint>();
-        await foreach (
-            var point in _historicalDataStore.GetTimeSeriesAsync(
-                fromDate,
-                untilDate,
-                granularity,
-                cancellationToken
-            )
-        )
+        try
         {
-            dataPoints.Add(point);
-        }
+            var dataPoints = new List<MetricsDataPoint>();
+            await foreach (
+                var point in _historicalDataStore.GetTimeSeriesAsync(
+                    fromDate,
+                    untilDate,
+                    granularity,
+                    cancellationToken
+                )
+            )
+            {
+                dataPoints.Add(point);
+            }
 
-        return Ok(dataPoints);
+            return Ok(dataPoints);
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     /// <summary>
@@ -369,14 +397,28 @@ public partial class DashboardApiController : ControllerBase
 
         var fromDate = from ?? DateTimeOffset.UtcNow.AddDays(-1);
         var untilDate = until ?? DateTimeOffset.UtcNow;
+        var historyOptions =
+            HttpContext?.RequestServices?.GetService<IOptions<HistoricalDataOptions>>()?.Value
+            ?? new HistoricalDataOptions();
+        if (untilDate < fromDate || untilDate - fromDate > historyOptions.MaxQueryRange)
+            return BadRequest(
+                "Historical range is reversed or exceeds the configured maximum span."
+            );
 
-        var metrics = await _historicalDataStore.GetMetricsByTaskNameAsync(
-            fromDate,
-            untilDate,
-            cancellationToken
-        );
+        try
+        {
+            var metrics = await _historicalDataStore.GetMetricsByTaskNameAsync(
+                fromDate,
+                untilDate,
+                cancellationToken
+            );
 
-        return Ok(metrics);
+            return Ok(metrics);
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     #endregion
