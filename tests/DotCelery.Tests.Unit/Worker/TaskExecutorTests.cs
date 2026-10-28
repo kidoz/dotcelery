@@ -185,6 +185,35 @@ public class TaskExecutorTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task FilterConstructionFailure_PreventsExecutionAndOutcomeRecording()
+    {
+        _filterPipeline.AddGlobalFilter<BrokenFilter>();
+        var message = CreateBrokerMessage("broken-filter", TestTaskNoInput.TaskName, null);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _executor.ExecuteAsync(message, "worker", CancellationToken.None)
+        );
+        Assert.Null(await _backend.GetResultAsync("broken-filter"));
+    }
+
+    private sealed class BrokenFilter : ITaskFilter
+    {
+        public BrokenFilter() =>
+            throw new InvalidOperationException("filter configuration invalid");
+
+        public int Order => 0;
+
+        public ValueTask OnExecutingAsync(
+            TaskExecutingContext context,
+            CancellationToken cancellationToken
+        ) => ValueTask.CompletedTask;
+
+        public ValueTask OnExecutedAsync(
+            TaskExecutedContext context,
+            CancellationToken cancellationToken
+        ) => ValueTask.CompletedTask;
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ValidTask_ReturnsSuccess()
     {
         var message = CreateBrokerMessage(

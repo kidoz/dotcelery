@@ -122,7 +122,9 @@ public sealed class TaskFilterPipeline
                     "Filter type {FilterType} does not implement required interfaces",
                     filterType.Name
                 );
-                return null;
+                throw new InvalidOperationException(
+                    $"Filter {filterType.Name} does not implement a filter interface."
+                );
             }
 
             var order = taskFilter?.Order ?? 0;
@@ -132,7 +134,7 @@ public sealed class TaskFilterPipeline
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to resolve filter {FilterType}", filterType.Name);
-            return null;
+            throw;
         }
     }
 

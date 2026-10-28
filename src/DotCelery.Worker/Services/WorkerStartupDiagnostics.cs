@@ -1,5 +1,8 @@
+using DotCelery.Core.Abstractions;
+using DotCelery.Core.Execution;
 using DotCelery.Core.Filters;
 using DotCelery.Core.MultiTenancy;
+using DotCelery.Core.Partitioning;
 using DotCelery.Core.Security;
 using DotCelery.Worker.Filters;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,6 +26,15 @@ internal sealed class WorkerStartupDiagnostics(
 {
     public Task StartAsync(CancellationToken cancellationToken)
     {
+        using var scope = services.CreateScope();
+        var filters = filterOptions.Value.GlobalFilterTypes;
+        if (filters.Contains(typeof(PartitionedExecutionFilter)))
+            scope.ServiceProvider.GetRequiredService<IPartitionLockStore>();
+        if (filters.Contains(typeof(PreventOverlappingFilter)))
+            scope.ServiceProvider.GetRequiredService<ITaskExecutionTracker>();
+        if (filters.Contains(typeof(InboxDeduplicationFilter)))
+            scope.ServiceProvider.GetRequiredService<IInboxStore>();
+
         var security = securityOptions.Value;
 
         if (!security.EnableMessageSigning)
