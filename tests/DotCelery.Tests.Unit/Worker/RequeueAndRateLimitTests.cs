@@ -37,7 +37,7 @@ public class RequeueAndRateLimitTests : IAsyncDisposable
         var lockStore = new PartitionLockStore(new InMemoryStorageProvider());
         var options = new PartitionOptions { RequeueDelay = TimeSpan.FromSeconds(5) };
 
-        var filter = new PartitionedExecutionFilter(
+        await using var filter = new PartitionedExecutionFilter(
             lockStore,
             Options.Create(options),
             NullLogger<PartitionedExecutionFilter>.Instance
@@ -88,7 +88,7 @@ public class RequeueAndRateLimitTests : IAsyncDisposable
         var lockStore = new PartitionLockStore(new InMemoryStorageProvider());
         var options = new PartitionOptions { RequeueDelay = TimeSpan.FromSeconds(5) };
 
-        var filter = new PartitionedExecutionFilter(
+        await using var filter = new PartitionedExecutionFilter(
             lockStore,
             Options.Create(options),
             NullLogger<PartitionedExecutionFilter>.Instance
@@ -131,7 +131,7 @@ public class RequeueAndRateLimitTests : IAsyncDisposable
         var lockStore = new PartitionLockStore(new InMemoryStorageProvider());
         var options = new PartitionOptions { RequeueDelay = TimeSpan.FromSeconds(5) };
 
-        var filter = new PartitionedExecutionFilter(
+        await using var filter = new PartitionedExecutionFilter(
             lockStore,
             Options.Create(options),
             NullLogger<PartitionedExecutionFilter>.Instance
@@ -162,7 +162,7 @@ public class RequeueAndRateLimitTests : IAsyncDisposable
 
         // Acquire the lock
         await filter.OnExecutingAsync(executingContext, CancellationToken.None);
-        Assert.True(executingContext.Properties.ContainsKey("PartitionLockAcquired"));
+        Assert.True(await lockStore.IsLockedAsync("partition-1"));
 
         var executedContext = new TaskExecutedContext
         {

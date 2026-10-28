@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using DotCelery.Core.Filters;
 using DotCelery.Core.Partitioning;
 using Microsoft.Extensions.Logging;
@@ -9,14 +10,22 @@ namespace DotCelery.Worker.Filters;
 /// Filter that ensures sequential processing for tasks with the same partition key.
 /// Tasks without a partition key are processed without any locking.
 /// </summary>
-public sealed class PartitionedExecutionFilter : ITaskFilterWithExceptionHandling
+/// <remarks>
+/// Lease loss cancels the task token and prevents successful ordered completion. Tasks must
+/// observe cancellation; external effects requiring strict fencing must validate ownership too.
+/// </remarks>
+public sealed class PartitionedExecutionFilter
+    : ITaskFilterWithExceptionHandling,
+        IExecutionResourceFilter,
+        IAsyncDisposable
 {
     private readonly IPartitionLockStore _lockStore;
     private readonly PartitionOptions _options;
     private readonly ILogger<PartitionedExecutionFilter> _logger;
 
-    private const string PartitionKeyProperty = "PartitionKey";
-    private const string LockAcquiredProperty = "PartitionLockAcquired";
+    private readonly TimeProvider _timeProvider;
+    private readonly ConcurrentDictionary<PartitionLease, byte> _leases = new();
+    private const string LeaseProperty = "PartitionExecutionLease";
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PartitionedExecutionFilter"/> class.
@@ -26,10 +35,29 @@ public sealed class PartitionedExecutionFilter : ITaskFilterWithExceptionHandlin
         IOptions<PartitionOptions> options,
         ILogger<PartitionedExecutionFilter> logger
     )
+        : this(lockStore, options, logger, TimeProvider.System) { }
+
+    /// <summary>Initializes the filter with the clock used to renew partition leases.</summary>
+    /// <param name="lockStore">The partition lock store.</param>
+    /// <param name="options">The partition options.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="timeProvider">The renewal clock.</param>
+    public PartitionedExecutionFilter(
+        IPartitionLockStore lockStore,
+        IOptions<PartitionOptions> options,
+        ILogger<PartitionedExecutionFilter> logger,
+        TimeProvider timeProvider
+    )
     {
+        _timeProvider = timeProvider;
         _lockStore = lockStore;
         _options = options.Value;
         _logger = logger;
+        ArgumentOutOfRangeException.ThrowIfLessThan(
+            _options.LockTimeout,
+            TimeSpan.FromMilliseconds(3)
+        );
+        ArgumentOutOfRangeException.ThrowIfLessThan(_options.RequeueDelay, TimeSpan.Zero);
     }
 
     /// <inheritdoc />
@@ -48,10 +76,10 @@ public sealed class PartitionedExecutionFilter : ITaskFilterWithExceptionHandlin
             return; // No partition key, no locking needed
         }
 
-        context.Properties[PartitionKeyProperty] = partitionKey;
+        var owner = $"{context.TaskId}:{Guid.NewGuid():N}";
 
         var acquired = await _lockStore
-            .TryAcquireAsync(partitionKey, context.TaskId, _options.LockTimeout, cancellationToken)
+            .TryAcquireAsync(partitionKey, owner, _options.LockTimeout, cancellationToken)
             .ConfigureAwait(false);
 
         if (!acquired)
@@ -70,7 +98,15 @@ public sealed class PartitionedExecutionFilter : ITaskFilterWithExceptionHandlin
             return;
         }
 
-        context.Properties[LockAcquiredProperty] = true;
+        var lease = new PartitionLease(
+            _lockStore,
+            partitionKey,
+            owner,
+            _options.LockTimeout,
+            _timeProvider
+        );
+        _leases.TryAdd(lease, 0);
+        context.Properties[LeaseProperty] = lease;
 
         _logger.LogDebug(
             "Acquired partition lock for {PartitionKey}, task {TaskId}",
@@ -85,52 +121,139 @@ public sealed class PartitionedExecutionFilter : ITaskFilterWithExceptionHandlin
         CancellationToken cancellationToken
     )
     {
-        await ReleaseLockIfHeldAsync(context.TaskId, context.Properties, cancellationToken)
-            .ConfigureAwait(false);
+        try
+        {
+            await ReleaseLockIfHeldAsync(context.Properties).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            context.Exception = ex;
+        }
     }
 
     /// <inheritdoc />
-    public async ValueTask<bool> OnExceptionAsync(
+    public ValueTask<bool> OnExceptionAsync(
         TaskExceptionContext context,
         CancellationToken cancellationToken
     )
     {
-        await ReleaseLockIfHeldAsync(context.TaskId, context.Properties, cancellationToken)
-            .ConfigureAwait(false);
-
-        return false; // Don't handle the exception, let other filters/handlers deal with it
+        // Completion reports lease loss even when an exception filter handles the task error.
+        return ValueTask.FromResult(false);
     }
 
-    private async ValueTask ReleaseLockIfHeldAsync(
-        string taskId,
-        IDictionary<string, object?> properties,
-        CancellationToken cancellationToken
-    )
-    {
-        if (!properties.TryGetValue(LockAcquiredProperty, out var acquired) || acquired is not true)
-        {
-            return;
-        }
+    internal static CancellationToken LeaseLostToken(TaskExecutingContext context) =>
+        context.Properties.TryGetValue(LeaseProperty, out var value)
+        && value is PartitionLease lease
+            ? lease.LostToken
+            : CancellationToken.None;
 
+    private async ValueTask ReleaseLockIfHeldAsync(IDictionary<string, object?> properties)
+    {
         if (
-            !properties.TryGetValue(PartitionKeyProperty, out var partitionKeyObj)
-            || partitionKeyObj is not string partitionKey
+            properties.TryGetValue(LeaseProperty, out var value)
+            && value is PartitionLease lease
+            && _leases.TryRemove(lease, out _)
+        )
+            await lease.DisposeAsync().ConfigureAwait(false);
+    }
+
+    ValueTask IExecutionResourceFilter.ReleaseAsync(TaskExecutingContext context) =>
+        ReleaseLockIfHeldAsync(context.Properties);
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var lease in _leases.Keys)
+            if (_leases.TryRemove(lease, out _))
+                await lease.DisposeAsync().ConfigureAwait(false);
+    }
+
+    private sealed class PartitionLease : IAsyncDisposable
+    {
+        private readonly IPartitionLockStore _store;
+        private readonly string _key;
+        private readonly string _owner;
+        private readonly CancellationTokenSource _stop = new();
+        private readonly CancellationTokenSource _lost = new();
+        private readonly Task _renewal;
+        private readonly TimeSpan _timeout;
+        private readonly TimeProvider _clock;
+        private Exception? _failure;
+
+        public PartitionLease(
+            IPartitionLockStore store,
+            string key,
+            string owner,
+            TimeSpan timeout,
+            TimeProvider clock
         )
         {
-            return;
+            _store = store;
+            _key = key;
+            _owner = owner;
+            _timeout = timeout;
+            _clock = clock;
+            _renewal = RenewAsync(timeout, clock);
         }
 
-        var released = await _lockStore
-            .ReleaseAsync(partitionKey, taskId, cancellationToken)
-            .ConfigureAwait(false);
+        public CancellationToken LostToken => _lost.Token;
 
-        if (released)
+        private async Task RenewAsync(TimeSpan timeout, TimeProvider clock)
         {
-            _logger.LogDebug(
-                "Released partition lock for {PartitionKey}, task {TaskId}",
-                partitionKey,
-                taskId
-            );
+            try
+            {
+                while (true)
+                {
+                    await Task.Delay(timeout / 3, clock, _stop.Token).ConfigureAwait(false);
+                    if (
+                        !await _store
+                            .ExtendAsync(_key, _owner, timeout, _stop.Token)
+                            .AsTask()
+                            .WaitAsync(timeout / 3, clock, _stop.Token)
+                            .ConfigureAwait(false)
+                    )
+                        throw new InvalidOperationException(
+                            $"Partition lease for {_key} was lost."
+                        );
+                }
+            }
+            catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
+            catch (Exception ex)
+            {
+                _failure = new InvalidOperationException(
+                    $"Partition lease for {_key} could not be renewed.",
+                    ex
+                );
+                await _lost.CancelAsync().ConfigureAwait(false);
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await _stop.CancelAsync().ConfigureAwait(false);
+            try
+            {
+                await _renewal.ConfigureAwait(false);
+                // A final renewal verifies ownership before an ordered success is accepted.
+                if (_failure is not null)
+                    throw _failure;
+                if (
+                    !await _store
+                        .ExtendAsync(_key, _owner, _timeout, CancellationToken.None)
+                        .AsTask()
+                        .WaitAsync(_timeout / 3, _clock)
+                        .ConfigureAwait(false)
+                )
+                    throw new InvalidOperationException($"Partition lease for {_key} was lost.");
+            }
+            finally
+            {
+                _stop.Dispose();
+                _lost.Dispose();
+                await _store
+                    .ReleaseAsync(_key, _owner, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
         }
     }
 }
@@ -141,7 +264,7 @@ public sealed class PartitionedExecutionFilter : ITaskFilterWithExceptionHandlin
 public sealed class PartitionOptions
 {
     /// <summary>
-    /// Gets or sets the lock timeout. Locks will auto-expire after this duration.
+    /// Gets or sets the lock timeout. Leases are renewed while execution runs and expire after this duration if renewal stops.
     /// Default is 30 minutes.
     /// </summary>
     public TimeSpan LockTimeout { get; set; } = TimeSpan.FromMinutes(30);

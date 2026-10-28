@@ -968,6 +968,12 @@ public sealed class TaskExecutor
                 );
             }
 
+            using var executionCts = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken,
+                PartitionedExecutionFilter.LeaseLostToken(executingContext)
+            );
+            var executionToken = executionCts.Token;
+            executionToken.ThrowIfCancellationRequested();
             await onStarting().ConfigureAwait(false);
 
             // The tenant context is set here rather than in a filter: a value written to an
@@ -985,7 +991,7 @@ public sealed class TaskExecutor
                         input,
                         context,
                         registration,
-                        cancellationToken
+                        executionToken
                     )
                     .ConfigureAwait(false);
             }

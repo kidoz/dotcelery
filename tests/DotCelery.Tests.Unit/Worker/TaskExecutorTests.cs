@@ -6,6 +6,7 @@ using DotCelery.Core.Attributes;
 using DotCelery.Core.Execution;
 using DotCelery.Core.Filters;
 using DotCelery.Core.Models;
+using DotCelery.Core.Partitioning;
 using DotCelery.Core.Serialization;
 using DotCelery.Core.Storage.Stores;
 using DotCelery.Worker;
@@ -16,6 +17,8 @@ using DotCelery.Worker.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
+using NSubstitute;
 
 public class TaskExecutorTests : IAsyncDisposable
 {
@@ -76,6 +79,109 @@ public class TaskExecutorTests : IAsyncDisposable
         _registry.Register(typeof(TestTaskWithInput), TestTaskWithInput.TaskName);
         _registry.Register(typeof(TestTaskNoInput), TestTaskNoInput.TaskName);
         _registry.Register(typeof(TestTaskReturnsNull), TestTaskReturnsNull.TaskName);
+    }
+
+    [Fact]
+    public async Task LostPartitionLease_CancelsTheBodyAndRecordsFailure()
+    {
+        var time = new FakeTimeProvider();
+        var store = Substitute.For<IPartitionLockStore>();
+#pragma warning disable CA2012 // NSubstitute consumes the configured ValueTask.
+        store
+            .TryAcquireAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<TimeSpan>(),
+                Arg.Any<CancellationToken>()
+            )
+            .Returns(true);
+        store
+            .ExtendAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<TimeSpan>(),
+                Arg.Any<CancellationToken>()
+            )
+            .Returns(false);
+#pragma warning restore CA2012
+        var task = new PartitionLeaseTask();
+        await using var services = new ServiceCollection()
+            .AddLogging()
+            .AddSingleton(task)
+            .AddSingleton(store)
+            .AddSingleton<TimeProvider>(time)
+            .AddSingleton(
+                Options.Create(new PartitionOptions { LockTimeout = TimeSpan.FromSeconds(3) })
+            )
+            .AddScoped<PartitionedExecutionFilter>()
+            .BuildServiceProvider();
+        var registry = new TaskRegistry();
+        registry.Register(typeof(PartitionLeaseTask), PartitionLeaseTask.TaskName);
+        var filterOptions = new TaskFilterOptions();
+        filterOptions.GlobalFilterTypes.Add(typeof(PartitionedExecutionFilter));
+        var workerOptions = Options.Create(
+            new WorkerOptions { EnableRevocation = false, EnableRateLimiting = false }
+        );
+        var executor = new TaskExecutor(
+            registry,
+            services,
+            _serializer,
+            _backend,
+            _revocationManager,
+            new TaskFilterPipeline(
+                services,
+                Options.Create(filterOptions),
+                NullLogger<TaskFilterPipeline>.Instance
+            ),
+            workerOptions,
+            NullLogger<TaskExecutor>.Instance
+        );
+        var original = CreateBrokerMessage(
+            "lease-loss",
+            PartitionLeaseTask.TaskName,
+            new TestInput { Value = 1 }
+        );
+        var message = new BrokerMessage
+        {
+            Message = original.Message with { PartitionKey = "partition" },
+            DeliveryTag = original.DeliveryTag,
+            Queue = original.Queue,
+            ReceivedAt = original.ReceivedAt,
+        };
+        var execution = executor.ExecuteAsync(message, "worker", CancellationToken.None);
+        await task.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        time.Advance(TimeSpan.FromSeconds(1));
+        var result = await execution.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(task.Cancelled);
+        Assert.Equal(TaskState.Failure, result.State);
+        Assert.Contains("lease", result.Exception!.Message);
+    }
+
+    private sealed class PartitionLeaseTask : ITask<TestInput, TestInput>
+    {
+        public static string TaskName => "tests.partition-lease";
+        public TaskCompletionSource Started { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool Cancelled { get; private set; }
+
+        public async Task<TestInput> ExecuteAsync(
+            TestInput input,
+            ITaskContext context,
+            CancellationToken cancellationToken
+        )
+        {
+            Started.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                Cancelled = true;
+                throw;
+            }
+            return input;
+        }
     }
 
     [Fact]
