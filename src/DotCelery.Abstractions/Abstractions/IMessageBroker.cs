@@ -69,9 +69,8 @@ public sealed class BrokerMessage
     /// Gets the broker-specific delivery tag for acknowledgment.
     /// </summary>
     /// <remarks>
-    /// The type varies by broker implementation (e.g., <c>ulong</c> for RabbitMQ, <c>Guid</c> for InMemory).
-    /// Broker implementations should use pattern matching to extract the expected type:
-    /// <code>if (message.DeliveryTag is not ulong deliveryTag) throw ...</code>
+    /// Treat this as an opaque receipt for one delivery attempt. Preserve it when copying a
+    /// broker message; a redelivery has a new receipt even when it carries the same task.
     /// </remarks>
     public required object DeliveryTag { get; init; }
 

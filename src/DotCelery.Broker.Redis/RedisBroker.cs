@@ -194,7 +194,7 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
 
         // The deliveries of this consumption, so their claims are renewed while it is alive and
         // left to expire when it stops
-        var session = new ConsumeSession();
+        var session = new ConsumeSession($"{_consumerName}-{Guid.NewGuid():N}");
 
         // Start background task to read from streams
         var readTask = ReadStreamMessagesAsync(
@@ -264,6 +264,9 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
             {
                 _deliveries.TryRemove(tag, out _);
             }
+            foreach (var streamKey in streamKeys)
+                await RemoveIdleConsumerAsync(db, streamKey, session.ConsumerName)
+                    .ConfigureAwait(false);
         }
     }
 
@@ -285,12 +288,12 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
             );
         }
 
-        RequireOwned(message, deliveryTag);
+        var delivery = RequireOwned(message, deliveryTag);
 
         var (streamKey, messageId) = ParseDeliveryTag(deliveryTag);
 
         var db = await GetDatabaseAsync(cancellationToken).ConfigureAwait(false);
-        await SettleEntryAsync(db, streamKey, messageId).ConfigureAwait(false);
+        await SettleEntryAsync(db, delivery, requeue: false).ConfigureAwait(false);
 
         _deliveries.TryRemove(deliveryTag, out _);
 
@@ -320,38 +323,12 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
             );
         }
 
-        RequireOwned(message, deliveryTag);
+        var delivery = RequireOwned(message, deliveryTag);
 
-        var (streamKey, messageId) = ParseDeliveryTag(deliveryTag);
         var db = await GetDatabaseAsync(cancellationToken).ConfigureAwait(false);
 
-        if (requeue)
-        {
-            // Add the copy before acknowledging the original: a failure in between leaves a
-            // duplicate delivery instead of losing the message. The requeue is not recorded as
-            // a fresh enqueue: the message was counted when it was first published.
-            await PublishCoreAsync(message.Message, cancellationToken).ConfigureAwait(false);
-            await SettleEntryAsync(db, streamKey, messageId).ConfigureAwait(false);
-            _deliveries.TryRemove(deliveryTag, out _);
-
-            _logger.LogDebug(
-                "Rejected and requeued message {MessageId} from stream {Stream}",
-                messageId,
-                streamKey
-            );
-        }
-        else
-        {
-            // Acknowledge to remove from pending list (message is lost)
-            await SettleEntryAsync(db, streamKey, messageId).ConfigureAwait(false);
-            _deliveries.TryRemove(deliveryTag, out _);
-
-            _logger.LogDebug(
-                "Rejected and removed message {MessageId} from stream {Stream}",
-                messageId,
-                streamKey
-            );
-        }
+        await SettleEntryAsync(db, delivery, requeue).ConfigureAwait(false);
+        _deliveries.TryRemove(deliveryTag, out _);
     }
 
     /// <inheritdoc />
@@ -530,7 +507,7 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
         var entries = await db.StreamReadGroupAsync(
                 streamKey,
                 _options.ConsumerGroupName,
-                _consumerName,
+                session.ConsumerName,
                 ">", // Only new messages
                 _options.PrefetchCount,
                 noAck: false
@@ -571,17 +548,25 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
         CancellationToken cancellationToken
     )
     {
-        for (var i = 0; i < batch.Count; i++)
-        {
-            TrackDelivery(batch[i], session);
+        // Track the entire read batch before exposing its first delivery. If enumeration stops
+        // after that first delivery, every buffered entry can still be returned immediately.
+        var owned = new List<BrokerMessage>(batch.Count);
+        foreach (var message in batch)
+            if (
+                await TrackDeliveryAsync(message, session, CancellationToken.None)
+                    .ConfigureAwait(false)
+            )
+                owned.Add(message);
 
+        for (var i = 0; i < owned.Count; i++)
+        {
             try
             {
-                await writer.WriteAsync(batch[i], cancellationToken).ConfigureAwait(false);
+                await writer.WriteAsync(owned[i], cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                await ReturnUndeliveredAsync(batch[i..]).ConfigureAwait(false);
+                await ReturnUndeliveredAsync(owned[i..]).ConfigureAwait(false);
                 throw;
             }
         }
@@ -628,43 +613,16 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
                 continue;
             }
 
-            foreach (var stream in live.GroupBy(delivery => delivery.StreamKey))
+            foreach (var delivery in live)
             {
                 try
                 {
-                    // Only entries still pending for this consumer are renewed: one that another
-                    // consumer claimed while this one was unresponsive is not taken back.
-                    var pending = await db.StreamPendingMessagesAsync(
-                            stream.Key,
-                            _options.ConsumerGroupName,
-                            stream.Count(),
-                            _consumerName
-                        )
-                        .ConfigureAwait(false);
-
-                    if (pending.Length == 0)
-                    {
-                        continue;
-                    }
-
-                    var owned = pending.Select(entry => entry.MessageId).ToHashSet();
-                    var ids = stream
-                        .Select(delivery => (RedisValue)delivery.MessageId)
-                        .Where(owned.Contains)
-                        .ToArray();
-
-                    if (ids.Length == 0)
-                    {
-                        continue;
-                    }
-
-                    // Claiming with JUSTID resets the idle time without counting as a delivery
-                    await db.StreamClaimIdsOnlyAsync(
-                            stream.Key,
-                            _options.ConsumerGroupName,
-                            _consumerName,
-                            0,
-                            ids
+                    // Check and renew in one operation, so renewal never steals a newer claim.
+                    await db.ScriptEvaluateAsync(
+                            OwnershipCheckScript
+                                + "redis.call('XCLAIM', KEYS[1], ARGV[1], ARGV[3], 0, ARGV[2], 'JUSTID'); return 1",
+                            [(RedisKey)delivery.StreamKey],
+                            DeliveryArguments(delivery)
                         )
                         .ConfigureAwait(false);
                 }
@@ -672,31 +630,50 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
                 {
                     _logger.LogDebug(
                         ex,
-                        "Failed to renew the claims on stream {Stream}",
-                        stream.Key
+                        "Failed to renew claim on stream {Stream}",
+                        delivery.StreamKey
                     );
                 }
             }
         }
     }
 
-    private void TrackDelivery(BrokerMessage message, ConsumeSession session)
+    private async Task<bool> TrackDeliveryAsync(
+        BrokerMessage message,
+        ConsumeSession session,
+        CancellationToken cancellationToken
+    )
     {
-        if (message.DeliveryTag is not string deliveryTag)
-        {
-            return;
-        }
-
+        var deliveryTag = (string)message.DeliveryTag;
         var (streamKey, messageId) = ParseDeliveryTag(deliveryTag);
-        _deliveries[deliveryTag] = new RedisDelivery(streamKey, messageId);
+        var db = await GetDatabaseAsync(cancellationToken).ConfigureAwait(false);
+        var count = (long)
+            await db.ScriptEvaluateAsync(
+                    "local p = redis.call('XPENDING', KEYS[1], ARGV[1], ARGV[2], ARGV[2], 1); "
+                        + "if #p == 0 or p[1][2] ~= ARGV[3] then return 0 end; return p[1][4]",
+                    [(RedisKey)streamKey],
+                    [(RedisValue)_options.ConsumerGroupName, messageId, session.ConsumerName]
+                )
+                .ConfigureAwait(false);
+        if (count == 0)
+            return false;
+        _deliveries[deliveryTag] = new RedisDelivery(
+            streamKey,
+            messageId,
+            session.ConsumerName,
+            count
+        );
         session.Track(deliveryTag);
+        return true;
     }
 
     // The deliveries one consumption session handed to its caller; claims are renewed for
     // these and only these, so an unsettled delivery of a session that stopped does not keep
     // its claim alive after the session is gone
-    private sealed class ConsumeSession
+    private sealed class ConsumeSession(string consumerName)
     {
+        public string ConsumerName { get; } = consumerName;
+
         private readonly ConcurrentDictionary<string, byte> _tags = new(StringComparer.Ordinal);
 
         public void Track(string deliveryTag) => _tags.TryAdd(deliveryTag, 0);
@@ -788,7 +765,7 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
                 var claimed = await db.StreamClaimAsync(
                         streamKey,
                         _options.ConsumerGroupName,
-                        _consumerName,
+                        session.ConsumerName,
                         minIdleTime,
                         idlePending
                     )
@@ -817,6 +794,9 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
                 await WriteBatchAsync(writer, batch, session, cancellationToken)
                     .ConfigureAwait(false);
                 reclaimed += batch.Count;
+                foreach (var previousConsumer in pending.Select(p => p.ConsumerName).Distinct())
+                    await RemoveIdleConsumerAsync(db, streamKey, previousConsumer)
+                        .ConfigureAwait(false);
             }
             catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
@@ -831,14 +811,33 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
         return reclaimed;
     }
 
-    private void RequireOwned(BrokerMessage message, string deliveryTag)
+    private async Task RemoveIdleConsumerAsync(IDatabase db, string streamKey, RedisValue consumer)
     {
-        if (!_deliveries.ContainsKey(deliveryTag))
+        try
+        {
+            await db.ScriptEvaluateAsync(
+                    "local p = redis.call('XPENDING', KEYS[1], ARGV[1], '-', '+', 1, ARGV[2]); "
+                        + "if #p == 0 then return redis.call('XGROUP', 'DELCONSUMER', KEYS[1], ARGV[1], ARGV[2]) end; return 0",
+                    [(RedisKey)streamKey],
+                    [(RedisValue)_options.ConsumerGroupName, consumer]
+                )
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not clean up Redis consumer {Consumer}", consumer);
+        }
+    }
+
+    private RedisDelivery RequireOwned(BrokerMessage message, string deliveryTag)
+    {
+        if (!_deliveries.TryGetValue(deliveryTag, out var delivery))
         {
             throw new InvalidOperationException(
                 $"Message {message.Message.Id} cannot be settled: it was settled already, or its consumer stopped."
             );
         }
+        return delivery;
     }
 
     // Preserve the exact entry before acknowledging it. The Lua script makes quarantine
@@ -859,14 +858,38 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
             [(RedisValue)_options.ConsumerGroupName, entryId]
         );
 
-    private async Task SettleEntryAsync(IDatabase db, string streamKey, RedisValue messageId)
+    private const string OwnershipCheckScript =
+        "local p = redis.call('XPENDING', KEYS[1], ARGV[1], ARGV[2], ARGV[2], 1); "
+        + "if #p == 0 or p[1][2] ~= ARGV[3] or p[1][4] ~= tonumber(ARGV[4]) then return 0 end; ";
+
+    private RedisValue[] DeliveryArguments(RedisDelivery delivery) =>
+        [
+            _options.ConsumerGroupName,
+            delivery.MessageId,
+            delivery.ConsumerName,
+            delivery.DeliveryCount,
+        ];
+
+    private async Task SettleEntryAsync(IDatabase db, RedisDelivery delivery, bool requeue)
     {
-        await db.ScriptEvaluateAsync(
-                "redis.call('XACK', KEYS[1], ARGV[1], ARGV[2]); return redis.call('XDEL', KEYS[1], ARGV[2])",
-                [(RedisKey)streamKey],
-                [(RedisValue)_options.ConsumerGroupName, messageId]
-            )
-            .ConfigureAwait(false);
+        var result = (long)
+            await db.ScriptEvaluateAsync(
+                    OwnershipCheckScript
+                        + (
+                            requeue
+                                ? "local entries = redis.call('XRANGE', KEYS[1], ARGV[2], ARGV[2]); "
+                                    + "if #entries == 0 then return 0 end; redis.call('XADD', KEYS[1], '*', unpack(entries[1][2])); "
+                                : ""
+                        )
+                        + "redis.call('XACK', KEYS[1], ARGV[1], ARGV[2]); redis.call('XDEL', KEYS[1], ARGV[2]); return 1",
+                    [(RedisKey)delivery.StreamKey],
+                    DeliveryArguments(delivery)
+                )
+                .ConfigureAwait(false);
+        if (result == 0)
+            throw new InvalidOperationException(
+                "The Redis delivery is no longer owned by this consumer."
+            );
     }
 
     private BrokerMessage? ParseStreamEntry(string streamKey, StreamEntry entry)
@@ -1042,14 +1065,21 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
     /// </summary>
     /// <param name="StreamKey">The stream the entry belongs to.</param>
     /// <param name="MessageId">The stream entry id.</param>
-    private readonly record struct RedisDelivery(string StreamKey, string MessageId);
+    /// <param name="ConsumerName">The unique consumption session.</param>
+    /// <param name="DeliveryCount">The pending delivery generation.</param>
+    private readonly record struct RedisDelivery(
+        string StreamKey,
+        string MessageId,
+        string ConsumerName,
+        long DeliveryCount
+    );
 
     private static string CreateDeliveryTag(string streamKey, RedisValue messageId) =>
-        $"{streamKey}:{messageId}";
+        $"{Guid.NewGuid():N}:{streamKey}:{messageId}";
 
     private static (string StreamKey, string MessageId) ParseDeliveryTag(string deliveryTag)
     {
-        // The tag is "{stream key}:{message id}". The stream key can contain colons, but a
+        // The tag is "{generation}:{stream key}:{message id}". The stream key can contain colons, but a
         // stream message id ("timestamp-sequence") never does, so the boundary is the last colon.
         var lastColonIndex = deliveryTag.LastIndexOf(':');
         if (lastColonIndex < 0)
@@ -1069,6 +1099,6 @@ public sealed class RedisBroker : IMessageBroker, IBrokerCapabilities
             );
         }
 
-        return (deliveryTag[..lastColonIndex], messageId);
+        return (deliveryTag[(deliveryTag.IndexOf(':') + 1)..lastColonIndex], messageId);
     }
 }

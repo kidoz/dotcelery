@@ -58,6 +58,34 @@ public class RabbitMQBrokerIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Reconnect_RedeliveryCannotBeSettledWithTheOldReceipt()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        const string queue = "stale-reconnected";
+        await _broker!.PublishAsync(CreateTestMessage() with { Queue = queue });
+        await using var consumer = _broker
+            .ConsumeAsync([queue], timeout.Token)
+            .GetAsyncEnumerator();
+        Assert.True(await consumer.MoveNextAsync());
+        var stale = consumer.Current;
+        var closed = await _container.ExecAsync([
+            "rabbitmqctl",
+            "close_all_connections",
+            "stale delivery test",
+        ]);
+        Assert.Equal(0, closed.ExitCode);
+        Assert.True(await consumer.MoveNextAsync());
+        var current = consumer.Current;
+        Assert.Equal(stale.Message.Id, current.Message.Id);
+        Assert.NotEqual(stale.DeliveryTag, current.DeliveryTag);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _broker.AckAsync(stale).AsTask());
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _broker.RejectAsync(stale, true).AsTask()
+        );
+        await _broker.AckAsync(current);
+    }
+
+    [Fact]
     public async Task IsHealthyAsync_ConnectedBroker_ReturnsTrue()
     {
         var healthy = await _broker!.IsHealthyAsync();

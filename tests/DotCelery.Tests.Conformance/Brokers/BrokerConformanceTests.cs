@@ -309,6 +309,36 @@ public abstract class BrokerConformanceTests : IAsyncLifetime
         Assert.Equal(sent.Id, redelivered.Message.Id);
     }
 
+    [Fact]
+    public async Task StaleSettlementAfterRedelivery_DoesNotSettleTheNewDelivery()
+    {
+        Assert.SkipWhen(
+            !Capabilities.RejectsStaleSettlements,
+            "Stale settlement rejection is unsupported"
+        );
+        var queue = Unique("settle-aba");
+        await Broker.PublishAsync(CreateMessage(queue));
+        var stale = await ConsumeWithoutSettlingAsync(queue);
+        using var timeout = new CancellationTokenSource(Timeout);
+        await using var consumer = Broker.ConsumeAsync([queue], timeout.Token).GetAsyncEnumerator();
+        Assert.True(await consumer.MoveNextAsync());
+        var current = consumer.Current;
+        Assert.Equal(stale.Message.Id, current.Message.Id);
+        await Assert.ThrowsAnyAsync<Exception>(() => Broker.AckAsync(stale).AsTask());
+        await Assert.ThrowsAnyAsync<Exception>(() => Broker.RejectAsync(stale, false).AsTask());
+        await Assert.ThrowsAnyAsync<Exception>(() => Broker.RejectAsync(stale, true).AsTask());
+        // Settling the live receipt must still work, including with an equivalent message copy.
+        await Broker.AckAsync(
+            new BrokerMessage
+            {
+                Message = current.Message,
+                DeliveryTag = current.DeliveryTag,
+                Queue = current.Queue,
+                ReceivedAt = current.ReceivedAt,
+            }
+        );
+    }
+
     protected static TaskMessage CreateMessage(string queue) =>
         new()
         {

@@ -62,6 +62,63 @@ public class RedisBrokerIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SettledSession_RemovesItsEmptyConsumerMetadata()
+    {
+        const string queue = "empty-session";
+        await _broker!.PublishAsync(CreateTestMessage() with { Queue = queue });
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await foreach (var message in _broker.ConsumeAsync([queue], timeout.Token))
+        {
+            await _broker.AckAsync(message);
+            break;
+        }
+        await using var connection = await ConnectionMultiplexer.ConnectAsync(
+            _container.GetConnectionString()
+        );
+        Assert.Empty(
+            await connection
+                .GetDatabase()
+                .StreamConsumerInfoAsync("dotcelery:stream:" + queue, "dotcelery-workers")
+        );
+    }
+
+    [Fact]
+    public async Task PendingOwnershipTransfer_RefusesStaleSettlementAndRenewal()
+    {
+        await using var broker = CreateBroker(o => o.ClaimTimeout = TimeSpan.FromSeconds(1));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        const string queue = "ownership-transfer";
+        const string stream = "dotcelery:stream:" + queue;
+        const string group = "dotcelery-workers";
+        await broker.PublishAsync(CreateTestMessage() with { Queue = queue });
+        await using var consumer = broker.ConsumeAsync([queue], timeout.Token).GetAsyncEnumerator();
+        Assert.True(await consumer.MoveNextAsync());
+        var stale = consumer.Current;
+        await using var connection = await ConnectionMultiplexer.ConnectAsync(
+            _container.GetConnectionString()
+        );
+        var db = connection.GetDatabase();
+        var pending = Assert.Single(
+            await db.StreamPendingMessagesAsync(stream, group, 10, RedisValue.Null)
+        );
+        await db.StreamClaimAsync(stream, group, "replacement", 0, [pending.MessageId]);
+        // Allow several heartbeats: an old consumer must never take the entry back.
+        await Task.Delay(TimeSpan.FromMilliseconds(750), timeout.Token);
+        Assert.Equal(
+            "replacement",
+            Assert
+                .Single(await db.StreamPendingMessagesAsync(stream, group, 10, RedisValue.Null))
+                .ConsumerName
+        );
+        await Assert.ThrowsAsync<InvalidOperationException>(() => broker.AckAsync(stale).AsTask());
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            broker.RejectAsync(stale, true).AsTask()
+        );
+        Assert.Equal(1, await db.StreamLengthAsync(stream));
+        Assert.Equal(1, (await db.StreamPendingAsync(stream, group)).PendingMessageCount);
+    }
+
+    [Fact]
     public async Task IsHealthyAsync_ConnectedBroker_ReturnsTrue()
     {
         var healthy = await _broker!.IsHealthyAsync();

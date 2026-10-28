@@ -403,7 +403,7 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
                 brokerMessage = new BrokerMessage
                 {
                     Message = taskMessage,
-                    DeliveryTag = ea.DeliveryTag,
+                    DeliveryTag = new DeliveryReceipt(ea.DeliveryTag, Guid.NewGuid()),
                     Queue = ea.RoutingKey,
                     ReceivedAt = DateTimeOffset.UtcNow,
                     RawBody = body,
@@ -490,13 +490,13 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(message);
 
-        if (message.DeliveryTag is not ulong deliveryTag)
+        if (message.DeliveryTag is not DeliveryReceipt receipt)
         {
             throw new ArgumentException("Invalid delivery tag", nameof(message));
         }
 
         var consumerChannel = RequireDeliveringChannel(message, "acknowledged");
-        await consumerChannel.AckAsync(deliveryTag, cancellationToken).ConfigureAwait(false);
+        await consumerChannel.AckAsync(receipt.Tag, cancellationToken).ConfigureAwait(false);
         _deliveries.TryRemove(KeyOf(message), out _);
 
         _logger.LogDebug("Acknowledged message {MessageId}", message.Message.Id);
@@ -512,14 +512,14 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(message);
 
-        if (message.DeliveryTag is not ulong deliveryTag)
+        if (message.DeliveryTag is not DeliveryReceipt receipt)
         {
             throw new ArgumentException("Invalid delivery tag", nameof(message));
         }
 
         var consumerChannel = RequireDeliveringChannel(message, "rejected");
         await consumerChannel
-            .RejectAsync(deliveryTag, requeue, cancellationToken)
+            .RejectAsync(receipt.Tag, requeue, cancellationToken)
             .ConfigureAwait(false);
         _deliveries.TryRemove(KeyOf(message), out _);
 
@@ -837,11 +837,17 @@ public sealed class RabbitMQBroker : IMessageBroker, IBrokerCapabilities
     }
 
     private static DeliveryKey KeyOf(BrokerMessage message) =>
-        new((ulong)message.DeliveryTag, message.Message.Id, message.Queue);
+        new((DeliveryReceipt)message.DeliveryTag, message.Message.Id, message.Queue);
 
     // A delivery is identified by its channel-local tag and the message it carries, so an
     // equivalent copy of the delivered message settles the same delivery
-    private readonly record struct DeliveryKey(ulong DeliveryTag, string MessageId, string Queue);
+    private readonly record struct DeliveryReceipt(ulong Tag, Guid Generation);
+
+    private readonly record struct DeliveryKey(
+        DeliveryReceipt DeliveryTag,
+        string MessageId,
+        string Queue
+    );
 
     private static string? GetSignature(IReadOnlyBasicProperties? properties)
     {
