@@ -157,4 +157,17 @@ public interface ISagaStore : IAsyncDisposable
         int limit = 100,
         CancellationToken cancellationToken = default
     );
+
+    /// <summary>Gets a bounded page of sagas in a state for incremental recovery scans.</summary>
+    /// <param name="state">The saga state.</param>
+    /// <param name="offset">The number of sagas to skip.</param>
+    /// <param name="limit">The maximum page size.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A page ordered consistently with <see cref="GetByStateAsync"/>.</returns>
+    IAsyncEnumerable<Saga> GetRecoveryBatchAsync(
+        SagaState state,
+        int offset,
+        int limit,
+        CancellationToken cancellationToken = default
+    ) => GetByStateAsync(state, checked(offset + limit), cancellationToken).Skip(offset);
 }

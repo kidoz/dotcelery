@@ -18,6 +18,32 @@ public abstract class SagaStoreConformanceTests : StoreConformanceTests
     }
 
     [Fact]
+    public async Task RecoveryBatches_AreBoundedAndReachLaterSagas()
+    {
+        for (var i = 0; i < 5; i++)
+            await _store.CreateAsync(
+                CreateSaga($"page-{i}", 1) with
+                {
+                    CreatedAt = Start.AddSeconds(i),
+                }
+            );
+        Assert.Equal(
+            ["page-0", "page-1"],
+            (await _store.GetRecoveryBatchAsync(SagaState.Executing, 0, 2).ToListAsync()).Select(
+                s => s.Id
+            )
+        );
+        Assert.Equal(
+            ["page-2", "page-3"],
+            (await _store.GetRecoveryBatchAsync(SagaState.Executing, 2, 2).ToListAsync()).Select(
+                s => s.Id
+            )
+        );
+        Assert.Single(await _store.GetRecoveryBatchAsync(SagaState.Executing, 4, 2).ToListAsync());
+        Assert.Empty(await _store.GetRecoveryBatchAsync(SagaState.Executing, 6, 2).ToListAsync());
+    }
+
+    [Fact]
     public async Task CreateAsync_StoresSaga()
     {
         // Arrange

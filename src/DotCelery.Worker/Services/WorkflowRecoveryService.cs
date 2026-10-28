@@ -21,6 +21,8 @@ internal sealed class WorkflowRecoveryService(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var clock = timeProvider ?? TimeProvider.System;
+        const int batchSize = 100;
+        var offsets = new Dictionary<(string?, SagaState), int>();
         while (!stoppingToken.IsCancellationRequested)
         {
             foreach (var tenant in TenantWorkloads.GetTenants(services))
@@ -67,60 +69,75 @@ internal sealed class WorkflowRecoveryService(
                             is SagaOrchestrator orchestrator
                     )
                     {
-                        await foreach (
-                            var saga in sagas
-                                .GetByStateAsync(SagaState.Executing, int.MaxValue, stoppingToken)
-                                .ConfigureAwait(false)
-                        )
+                        foreach (var state in new[] { SagaState.Executing, SagaState.Compensating })
                         {
-                            try
+                            var key = (tenant, state);
+                            var offset = offsets.GetValueOrDefault(key);
+                            var count = 0;
+                            await foreach (
+                                var saga in sagas
+                                    .GetRecoveryBatchAsync(state, offset, batchSize, stoppingToken)
+                                    .ConfigureAwait(false)
+                            )
                             {
-                                if (saga.CurrentStep?.State == SagaStepState.Completed)
-                                    await orchestrator
-                                        .ContinueStepAsync(
-                                            saga.Id,
-                                            saga.CurrentStep.Id,
-                                            stoppingToken
+                                count++;
+                                // Active, successfully published work needs no recovery attempt.
+                                var step =
+                                    state == SagaState.Executing
+                                        ? saga.CurrentStep
+                                        : saga.Steps.FirstOrDefault(s =>
+                                            s.State == SagaStepState.Compensating
                                         )
-                                        .ConfigureAwait(false);
-                                else
-                                    await orchestrator
-                                        .ExecuteNextStepAsync(saga, stoppingToken)
-                                        .ConfigureAwait(false);
-                            }
-                            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
-                            {
-                                logger.LogWarning(
-                                    ex,
-                                    "Step recovery failed for saga {SagaId}",
-                                    saga.Id
-                                );
-                            }
-                        }
-                        await foreach (
-                            var saga in sagas
-                                .GetByStateAsync(
-                                    SagaState.Compensating,
-                                    int.MaxValue,
-                                    stoppingToken
+                                            ?? saga.Steps.Where(s =>
+                                                    s.State == SagaStepState.Completed
+                                                    && s.RequiresCompensation
+                                                )
+                                                .OrderByDescending(s => s.Order)
+                                                .FirstOrDefault();
+                                if (
+                                    step is not null
+                                    && (
+                                        state == SagaState.Executing
+                                            ? step.State != SagaStepState.Completed
+                                                && (
+                                                    step.ExecutionDispatched
+                                                    || step.DispatchClaimUntil > clock.GetUtcNow()
+                                                )
+                                            : step.CompensationDispatched
+                                                || step.CompensationClaimUntil > clock.GetUtcNow()
+                                    )
                                 )
-                                .ConfigureAwait(false)
-                        )
-                        {
-                            try
-                            {
-                                await orchestrator
-                                    .ExecuteNextCompensationAsync(saga, stoppingToken)
-                                    .ConfigureAwait(false);
+                                    continue;
+                                try
+                                {
+                                    if (state == SagaState.Compensating)
+                                        await orchestrator
+                                            .ExecuteNextCompensationAsync(saga, stoppingToken)
+                                            .ConfigureAwait(false);
+                                    else if (saga.CurrentStep?.State == SagaStepState.Completed)
+                                        await orchestrator
+                                            .ContinueStepAsync(
+                                                saga.Id,
+                                                saga.CurrentStep.Id,
+                                                stoppingToken
+                                            )
+                                            .ConfigureAwait(false);
+                                    else
+                                        await orchestrator
+                                            .ExecuteNextStepAsync(saga, stoppingToken)
+                                            .ConfigureAwait(false);
+                                }
+                                catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+                                {
+                                    logger.LogWarning(
+                                        ex,
+                                        "Recovery failed for saga {SagaId}",
+                                        saga.Id
+                                    );
+                                }
                             }
-                            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
-                            {
-                                logger.LogWarning(
-                                    ex,
-                                    "Compensation recovery failed for saga {SagaId}",
-                                    saga.Id
-                                );
-                            }
+                            // Rotate through later pages; never let the oldest running sagas starve recovery.
+                            offsets[key] = count < batchSize ? 0 : checked(offset + count);
                         }
                     }
                 }

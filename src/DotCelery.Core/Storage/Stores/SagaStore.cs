@@ -480,6 +480,30 @@ public sealed class SagaStore : ISagaStore
     }
 
     /// <inheritdoc />
+    public async IAsyncEnumerable<Saga> GetRecoveryBatchAsync(
+        SagaState state,
+        int offset,
+        int limit,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        await foreach (
+            var document in _documents
+                .QueryAsync(
+                    _sagas,
+                    new DocumentFilter { IndexKey = state.ToString() },
+                    SagaTypeInfo,
+                    new DocumentPage { Offset = offset, Limit = limit },
+                    cancellationToken
+                )
+                .ConfigureAwait(false)
+        )
+            yield return document.Value;
+    }
+
+    /// <inheritdoc />
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     private static bool IsFinished(SagaState state) =>

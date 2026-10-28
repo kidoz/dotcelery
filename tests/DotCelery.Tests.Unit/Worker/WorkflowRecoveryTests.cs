@@ -17,6 +17,70 @@ namespace DotCelery.Tests.Unit.Worker;
 
 public sealed class WorkflowRecoveryTests
 {
+    [Fact]
+    public async Task Recovery_ReachesPendingWorkBehindAFullPageOfPublishedSagas()
+    {
+        var time = new FakeTimeProvider();
+        await using var broker = new InMemoryBroker();
+        var services = new ServiceCollection()
+            .AddLogging()
+            .AddSingleton<TimeProvider>(time)
+            .AddSingleton<IMessageBroker>(broker);
+        services.AddDotCelery(builder =>
+            builder.UseInMemoryBackend().AddInMemorySagaStore().AddSagaSupport()
+        );
+        await using var provider = services.BuildServiceProvider();
+        var sagas = provider.GetRequiredService<ISagaStore>();
+        for (var i = 0; i < 100; i++)
+        {
+            var saga = CreateSaga($"published-{i}", time.GetUtcNow().AddSeconds(i));
+            await sagas.CreateAsync(
+                saga with
+                {
+                    Steps =
+                    [
+                        saga.Steps[0] with
+                        {
+                            State = SagaStepState.Executing,
+                            ExecutionDispatched = true,
+                            ExecuteTaskId = $"already-published-{i}",
+                        },
+                    ],
+                }
+            );
+        }
+        await sagas.CreateAsync(CreateSaga("pending-after-page", time.GetUtcNow().AddSeconds(100)));
+        var recovery = Assert.Single(
+            provider.GetServices<IHostedService>(),
+            service => service.GetType().Name == "WorkflowRecoveryService"
+        );
+        await recovery.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try
+        {
+            while (broker.GetQueueLength("celery") == 0)
+            {
+                time.Advance(TimeSpan.FromSeconds(1));
+                await Task.Delay(10, timeout.Token);
+            }
+            await foreach (var delivery in broker.ConsumeAsync(["celery"], timeout.Token))
+            {
+                Assert.Equal("execute", delivery.Message.Task);
+                Assert.Equal(
+                    (await sagas.GetAsync("pending-after-page"))!.CurrentStep!.ExecuteTaskId,
+                    delivery.Message.Id
+                );
+                await broker.AckAsync(delivery);
+                break;
+            }
+            Assert.Equal(0, broker.GetQueueLength("celery"));
+        }
+        finally
+        {
+            await recovery.StopAsync(CancellationToken.None);
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

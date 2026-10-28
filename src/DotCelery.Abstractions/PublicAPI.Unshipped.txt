@@ -97,3 +97,5 @@ static DotCelery.Core.Models.TaskMessageFactory.ContinuationId(string! workflowI
 static DotCelery.Core.MultiTenancy.TenantContext.SetTenant(string? tenantId, string? queue) -> System.IDisposable!
 DotCelery.Core.Sagas.ISagaStore.TryAdvanceStepAsync(string! sagaId, string! completedStepId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Sagas.Saga?>
 DotCelery.Core.Sagas.ISagaOrchestrator.ContinueStepAsync(string! sagaId, string! completedStepId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Sagas.Saga?>
+
+DotCelery.Core.Sagas.ISagaStore.GetRecoveryBatchAsync(DotCelery.Core.Sagas.SagaState state, int offset, int limit, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<DotCelery.Core.Sagas.Saga!>!
