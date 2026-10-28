@@ -23,7 +23,7 @@ public sealed class SerializerRegistrationTests
         var serializer = provider.GetRequiredService<IMessageSerializer>();
 
         // The allowlist only takes effect when the serializer reads it from DI
-        Assert.Throws<InvalidOperationException>(() =>
+        Assert.Throws<System.Text.Json.JsonException>(() =>
             serializer.Deserialize<DisallowedInput>("{}"u8)
         );
     }

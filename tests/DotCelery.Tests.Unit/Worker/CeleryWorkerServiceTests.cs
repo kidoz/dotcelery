@@ -61,6 +61,34 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
     }
 
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PermanentPayloadRefusal_IsDeadLetteredWithoutRedelivery(bool allowlist)
+    {
+        var serializer = new JsonMessageSerializer(
+            null,
+            new JsonMessageSerializerOptions
+            {
+                EnforceDeserializationTypeAllowlist = allowlist,
+                Context = allowlist ? null : DotCeleryJsonContext.Default,
+            }
+        );
+        var worker = CreateWorker(serializer: serializer);
+        _broker.Enqueue(CreateMessage("disallowed-type", EchoTask.TaskName));
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForAsync(() => _broker.HasEvent("ack:disallowed-type"));
+        await worker.StopAsync(CancellationToken.None);
+        var deadLetter = Assert.Single(await ReadDeadLettersAsync());
+        Assert.Equal(DeadLetterReason.Rejected, deadLetter.Reason);
+        Assert.Contains(
+            allowlist ? "is not allowed" : "is not registered",
+            (await _backend.GetResultAsync("disallowed-type"))!.Exception!.Message
+        );
+        Assert.Equal(TaskState.Rejected, (await _backend.GetResultAsync("disallowed-type"))?.State);
+        Assert.False(_broker.HasEvent("requeue:disallowed-type"));
+    }
+
+    [Theory]
     [InlineData("expired")]
     [InlineData("unknown")]
     [InlineData("rejected")]
@@ -680,7 +708,8 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
         WorkerActivity? activity = null,
         TimeProvider? timeProvider = null,
         IDeadLetterHandler? deadLetterHandler = null,
-        bool inboxDeduplication = false
+        bool inboxDeduplication = false,
+        IMessageSerializer? serializer = null
     )
     {
         var options = new WorkerOptions
@@ -708,7 +737,7 @@ public sealed class CeleryWorkerServiceTests : IAsyncDisposable
         var executor = new TaskExecutor(
             registry,
             _serviceProvider,
-            new JsonMessageSerializer(),
+            serializer ?? new JsonMessageSerializer(),
             _backend,
             new RevocationManager(workerOptions, NullLogger<RevocationManager>.Instance),
             new TaskFilterPipeline(

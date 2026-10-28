@@ -196,7 +196,7 @@ public sealed class TaskExecutor
                 {
                     input = _serializer.Deserialize(message.Args, registration.InputType);
                 }
-                catch (JsonException ex)
+                catch (Exception ex) when (ex is JsonException or NotSupportedException)
                 {
                     // A payload that cannot be read will never become readable, so it is a
                     // rejected message rather than a task failure that is retried

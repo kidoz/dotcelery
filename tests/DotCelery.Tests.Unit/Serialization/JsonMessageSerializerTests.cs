@@ -334,7 +334,7 @@ public class JsonMessageSerializerTests
         );
         var bytes = """{"name":"Test","value":42}"""u8.ToArray();
 
-        var ex = Assert.Throws<InvalidOperationException>(() =>
+        var ex = Assert.Throws<System.Text.Json.JsonException>(() =>
             serializer.Deserialize<TestData>(bytes)
         );
 

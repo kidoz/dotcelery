@@ -123,6 +123,7 @@ public sealed class JsonMessageSerializer : IMessageSerializer
     }
 
     /// <inheritdoc />
+    /// <exception cref="JsonException">The payload is invalid, its type is disallowed, or required JSON metadata is missing.</exception>
     [UnconditionalSuppressMessage(
         "Trimming",
         "IL2026",
@@ -140,16 +141,15 @@ public sealed class JsonMessageSerializer : IMessageSerializer
         if (TryGetPayloadTypeInfo(typeof(T)) is JsonTypeInfo<T> typeInfo)
         {
             return JsonSerializer.Deserialize(data, typeInfo)
-                ?? throw new InvalidOperationException(
-                    $"Failed to deserialize to {typeof(T).Name}"
-                );
+                ?? throw new JsonException($"Failed to deserialize to {typeof(T).Name}");
         }
 
-        EnsureReflectionFallbackAllowed(typeof(T));
+        EnsureDeserializationFallbackAllowed(typeof(T));
         return DeserializeWithReflection<T>(data);
     }
 
     /// <inheritdoc />
+    /// <exception cref="JsonException">The payload is invalid, its type is disallowed, or required JSON metadata is missing.</exception>
     [UnconditionalSuppressMessage(
         "Trimming",
         "IL2026",
@@ -168,10 +168,10 @@ public sealed class JsonMessageSerializer : IMessageSerializer
         if (TryGetPayloadTypeInfo(type) is { } typeInfo)
         {
             return JsonSerializer.Deserialize(data, typeInfo)
-                ?? throw new InvalidOperationException($"Failed to deserialize to {type.Name}");
+                ?? throw new JsonException($"Failed to deserialize to {type.Name}");
         }
 
-        EnsureReflectionFallbackAllowed(type);
+        EnsureDeserializationFallbackAllowed(type);
         return DeserializeWithReflection(data, type);
     }
 
@@ -251,7 +251,7 @@ public sealed class JsonMessageSerializer : IMessageSerializer
     )]
     private T DeserializeWithReflection<T>(ReadOnlySpan<byte> data) =>
         JsonSerializer.Deserialize<T>(data, _reflectionOptions)
-        ?? throw new InvalidOperationException($"Failed to deserialize to {typeof(T).Name}");
+        ?? throw new JsonException($"Failed to deserialize to {typeof(T).Name}");
 
     [RequiresUnreferencedCode(
         "Deserializing a type that no source-generated JSON context registers needs reflection."
@@ -261,7 +261,19 @@ public sealed class JsonMessageSerializer : IMessageSerializer
     )]
     private object DeserializeWithReflection(ReadOnlySpan<byte> data, Type type) =>
         JsonSerializer.Deserialize(data, type, _reflectionOptions)
-        ?? throw new InvalidOperationException($"Failed to deserialize to {type.Name}");
+        ?? throw new JsonException($"Failed to deserialize to {type.Name}");
+
+    private void EnsureDeserializationFallbackAllowed(Type type)
+    {
+        try
+        {
+            EnsureReflectionFallbackAllowed(type);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new JsonException(ex.Message, ex);
+        }
+    }
 
     private void EnsureDeserializationAllowed(Type type)
     {
@@ -280,7 +292,7 @@ public sealed class JsonMessageSerializer : IMessageSerializer
             return;
         }
 
-        throw new InvalidOperationException(
+        throw new JsonException(
             $"Deserialization type '{type.FullName}' is not allowed. "
                 + "Add the type to JsonMessageSerializerOptions.AllowedDeserializationTypes "
                 + "or disable EnforceDeserializationTypeAllowlist."
