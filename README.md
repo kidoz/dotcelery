@@ -825,7 +825,7 @@ await transaction.CommitAsync();
 
 The record is written on the transaction's connection and is dispatched or counted as processed only if the transaction commits. A provider that cannot write in the caller's transaction (in-memory, Redis, MongoDB) refuses the record with `NotSupportedException` instead of storing it outside the transaction.
 
-The worker uses the same mechanism for task outcomes. With `UseInboxDeduplication()` and a result backend and inbox store that share a PostgreSQL or SQL Server provider, a successful task's result and its inbox record commit in one transaction, so the message is acked only after both are durable and a redelivery after a crash does not run the task again (exactly-once processing, as long as the task's own effects do not need to join the transaction). Without an inbox store, or when the stores cannot share a transaction, the result is stored first and the record afterwards, which gives at-least-once delivery.
+The worker uses the same mechanism for task outcomes. With `UseInboxDeduplication()` and a result backend and inbox store that share a PostgreSQL or SQL Server provider, a successful task's result and its inbox record commit in one transaction. The worker acknowledges the delivery after that commit, and deduplication skips a redelivery while the completed outcome is retained. Delivery remains at least once: a crash before outcome recording can repeat execution and business effects. When the stores cannot share a transaction, the result is stored first and the inbox record afterwards; without an inbox store, there is no completed-delivery deduplication.
 
 ## Native AOT and Trimming
 

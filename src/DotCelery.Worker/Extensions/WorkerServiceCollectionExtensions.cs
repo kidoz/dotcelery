@@ -415,7 +415,8 @@ public static class WorkerServiceCollectionExtensions
 
     /// <summary>
     /// Adds inbox deduplication functionality to the worker.
-    /// The inbox pattern ensures exactly-once processing by tracking processed message IDs.
+    /// The inbox pattern tracks completed message IDs to deduplicate redeliveries.
+    /// Business effects can repeat if execution stops before its outcome is recorded.
     /// </summary>
     /// <typeparam name="TInboxStore">The inbox store implementation type.</typeparam>
     /// <param name="builder">The DotCelery builder.</param>

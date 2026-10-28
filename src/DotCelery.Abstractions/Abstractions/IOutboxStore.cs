@@ -3,7 +3,7 @@ using DotCelery.Core.Outbox;
 namespace DotCelery.Core.Abstractions;
 
 /// <summary>
-/// Transactional outbox store for exactly-once message delivery.
+/// Transactional outbox store for at-least-once message delivery.
 /// Messages are stored in the same transaction as the business operation,
 /// then dispatched asynchronously by a background processor.
 /// </summary>
