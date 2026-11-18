@@ -7,7 +7,7 @@ Both run in one process, using the in-memory broker and result backend.
 
 ## Before you begin
 
-Install the .NET 10 SDK and open a terminal at the root of a DotCelery checkout.
+Install the .NET 11 SDK and open a terminal at the root of a DotCelery checkout.
 Docker is not required for this lesson. The project will live under `artifacts/`,
 which the repository ignores.
 
@@ -16,7 +16,7 @@ which the repository ignores.
 Run these commands from the repository root:
 
 ```bash
-dotnet new console --framework net10.0 --output artifacts/tutorials/FirstTask
+dotnet new console --framework net11.0 --output artifacts/tutorials/FirstTask
 dotnet add artifacts/tutorials/FirstTask/FirstTask.csproj reference \
   src/DotCelery.Core/DotCelery.Core.csproj \
   src/DotCelery.Client/DotCelery.Client.csproj \
@@ -95,7 +95,7 @@ the worker before the client submits work.
 ## 3. Run it
 
 ```bash
-dotnet run --project artifacts/tutorials/FirstTask
+dotnet run --project artifacts/tutorials/FirstTask --framework net11.0
 ```
 
 After the build output, you should see:

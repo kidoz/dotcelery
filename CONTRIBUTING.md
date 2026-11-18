@@ -29,7 +29,8 @@ Thank you for your interest in contributing to DotCelery! This document provides
 
 ### Prerequisites
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
+- [.NET 11 SDK](https://dotnet.microsoft.com/download/dotnet/11.0) to build both target frameworks
+- [.NET 10 and ASP.NET Core 10 runtimes](https://dotnet.microsoft.com/download/dotnet/10.0) to execute the .NET 10 tests
 - [Node.js 24.3 or later](https://nodejs.org/) (builds the embedded dashboard)
 - [Docker](https://www.docker.com/) (for integration tests)
 - IDE: Visual Studio 2026, JetBrains Rider, or VS Code with C# Dev Kit
@@ -65,7 +66,7 @@ The `justfile` wraps the common commands:
 | Unit tests | `dotnet test tests/DotCelery.Tests.Unit` | `just test` |
 | All tests | `dotnet test` | `just test-all` |
 | Native AOT smoke test | see [Native AOT and Trimming](#native-aot-and-trimming) | `just aot-smoke` |
-| Benchmarks | `dotnet run --project benchmarks/DotCelery.Benchmarks -c Release` | `just bench` |
+| Benchmarks | `dotnet run --project benchmarks/DotCelery.Benchmarks --framework net11.0 -c Release` | `just bench` |
 
 ### Dashboard frontend checks
 
@@ -265,7 +266,7 @@ When changing an AOT-compatible project:
 Verify an AOT change by publishing and running the smoke sample:
 
 ```bash
-# Uses the host RID, publishes with PublishAot, and runs the result
+# Publishes and runs both target frameworks for the host RID
 just aot-smoke
 ```
 

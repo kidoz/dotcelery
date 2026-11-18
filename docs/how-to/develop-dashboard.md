@@ -2,7 +2,7 @@
 
 [How-to guides](README.md) / Develop the dashboard
 
-Use a DotCelery checkout with the .NET 10 SDK and Node.js 24.3 or later. Run the
+Use a DotCelery checkout with the .NET 11 SDK and Node.js 24.3 or later. Run the
 commands below from the repository root.
 
 ## Restore the frontend tools
@@ -16,7 +16,7 @@ npm ci
 Run the demo backend in one terminal:
 
 ```bash
-dotnet run --project samples/DotCelery.Dashboard.Demo --no-launch-profile -- --urls http://localhost:5099
+dotnet run --project samples/DotCelery.Dashboard.Demo --framework net11.0 --no-launch-profile -- --urls http://localhost:5099
 ```
 
 In a second terminal:

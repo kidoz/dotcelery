@@ -15,7 +15,12 @@ internal static class StoreJson
 {
     private static readonly JsonSerializerOptions Options = CreateStoreOptions();
 
-    public static JsonTypeInfo<T> TypeInfo<T>() => (JsonTypeInfo<T>)Options.GetTypeInfo(typeof(T));
+    public static JsonTypeInfo<T> TypeInfo<T>() =>
+#if NET11_0_OR_GREATER
+        Options.GetTypeInfo<T>();
+#else
+        (JsonTypeInfo<T>)Options.GetTypeInfo(typeof(T));
+#endif
 
     private static JsonSerializerOptions CreateStoreOptions()
     {

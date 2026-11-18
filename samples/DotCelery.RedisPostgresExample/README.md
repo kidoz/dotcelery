@@ -15,13 +15,13 @@ docker compose up -d redis postgres
 Run with Redis broker and PostgreSQL result storage:
 
 ```bash
-dotnet run --project samples/DotCelery.RedisPostgresExample
+dotnet run --project samples/DotCelery.RedisPostgresExample --framework net11.0
 ```
 
 Run with Redis broker and Redis result storage:
 
 ```bash
-dotnet run --project samples/DotCelery.RedisPostgresExample -- --result-backend=redis
+dotnet run --project samples/DotCelery.RedisPostgresExample --framework net11.0 -- --result-backend=redis
 ```
 
 Override connection strings when needed:
@@ -29,7 +29,7 @@ Override connection strings when needed:
 ```bash
 DOTCELERY_REDIS_CONNECTION_STRING=localhost:6380 \
 DOTCELERY_POSTGRES_CONNECTION_STRING="Host=localhost;Port=5433;Database=dotcelery;Username=dotcelery;Password=dotcelery" \
-dotnet run --project samples/DotCelery.RedisPostgresExample
+dotnet run --project samples/DotCelery.RedisPostgresExample --framework net11.0
 ```
 
 Stop the dependencies:

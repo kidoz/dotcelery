@@ -54,20 +54,16 @@ install-tools:
     dotnet tool restore || dotnet tool install csharpier
 
 # Run the demo project
-run-demo:
-    dotnet run --project samples/DotCelery.Demo
+run-demo FRAMEWORK="net11.0":
+    dotnet run --project samples/DotCelery.Demo --framework {{FRAMEWORK}}
 
 # Run the canvas workflow example
-run-canvas-example:
-    dotnet run --project samples/DotCelery.CanvasExample
+run-canvas-example FRAMEWORK="net11.0":
+    dotnet run --project samples/DotCelery.CanvasExample --framework {{FRAMEWORK}}
 
 # Publish the Native AOT smoke test for the host platform and run it
 aot-smoke:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    rid=$(dotnet --info | awk '/RID:/ {print $2; exit}')
-    dotnet publish samples/DotCelery.AotSmoke --configuration Release --runtime "$rid"
-    "samples/DotCelery.AotSmoke/bin/Release/net10.0/$rid/publish/DotCelery.AotSmoke"
+    ./eng/run-aot-smoke.sh
 
 # Start local dependencies used by the Redis/Postgres example
 compose-up:
@@ -78,12 +74,12 @@ compose-down:
     docker compose down
 
 # Run the Redis broker + PostgreSQL backend example
-run-redis-postgres-example:
-    dotnet run --project samples/DotCelery.RedisPostgresExample
+run-redis-postgres-example FRAMEWORK="net11.0":
+    dotnet run --project samples/DotCelery.RedisPostgresExample --framework {{FRAMEWORK}}
 
 # Run the Redis broker + Redis backend example
-run-redis-example:
-    dotnet run --project samples/DotCelery.RedisPostgresExample -- --result-backend=redis
+run-redis-example FRAMEWORK="net11.0":
+    dotnet run --project samples/DotCelery.RedisPostgresExample --framework {{FRAMEWORK}} -- --result-backend=redis
 
 # Pack NuGet packages
 pack:
@@ -96,20 +92,20 @@ fb: format build
 fbt: format build test
 
 # Run benchmarks
-bench:
-    dotnet run --project benchmarks/DotCelery.Benchmarks -c Release
+bench FRAMEWORK="net11.0":
+    dotnet run --project benchmarks/DotCelery.Benchmarks --framework {{FRAMEWORK}} -c Release
 
 # Run specific benchmark class
-bench-filter FILTER:
-    dotnet run --project benchmarks/DotCelery.Benchmarks -c Release -- --filter "*{{FILTER}}*"
+bench-filter FILTER FRAMEWORK="net11.0":
+    dotnet run --project benchmarks/DotCelery.Benchmarks --framework {{FRAMEWORK}} -c Release -- --filter "*{{FILTER}}*"
 
 # Run benchmarks with memory diagnoser
-bench-memory:
-    dotnet run --project benchmarks/DotCelery.Benchmarks -c Release -- --memory
+bench-memory FRAMEWORK="net11.0":
+    dotnet run --project benchmarks/DotCelery.Benchmarks --framework {{FRAMEWORK}} -c Release -- --memory
 
 # Run benchmarks with shorter iterations (for quick testing)
-bench-quick:
-    dotnet run --project benchmarks/DotCelery.Benchmarks -c Release -- --job short
+bench-quick FRAMEWORK="net11.0":
+    dotnet run --project benchmarks/DotCelery.Benchmarks --framework {{FRAMEWORK}} -c Release -- --job short
 
 # Verify dashboard formatting, status labels, HTTP handling, and request races (Node.js 24.3+)
 test-dashboard-ui:

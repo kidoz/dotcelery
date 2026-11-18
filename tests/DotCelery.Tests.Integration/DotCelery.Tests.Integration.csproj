@@ -3,6 +3,7 @@
     <RootNamespace>DotCelery.Tests.Integration</RootNamespace>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <TestTfmsInParallel>false</TestTfmsInParallel>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <!-- Disable code analysis rules that are noise for test projects -->
     <NoWarn>$(NoWarn);CA1707;CA1001;CA2263;CA1816;CS1591;xUnit1051</NoWarn>

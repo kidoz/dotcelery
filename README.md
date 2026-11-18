@@ -4,7 +4,7 @@
 [![C#](https://img.shields.io/badge/C%23-14-239120)](https://learn.microsoft.com/dotnet/csharp/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A distributed task queue for .NET 10, inspired by Python's [Celery](https://docs.celeryq.dev/). DotCelery provides asynchronous task execution, scheduling, and distributed processing with enterprise-grade reliability.
+A distributed task queue for .NET 10 and .NET 11, inspired by Python's [Celery](https://docs.celeryq.dev/). DotCelery provides asynchronous task execution, scheduling, and distributed processing with enterprise-grade reliability.
 
 ## Documentation
 
@@ -74,7 +74,7 @@ The repository includes a runnable sample that sends a chain, a group, a chord w
 a nested canvas over the in-memory transport, checking every result:
 
 ```bash
-dotnet run --project samples/DotCelery.CanvasExample
+dotnet run --project samples/DotCelery.CanvasExample --framework net11.0
 ```
 
 ### Local Redis/Postgres Example
@@ -83,13 +83,13 @@ The repository includes a runnable sample that uses Redis Streams as the broker 
 
 ```bash
 docker compose up -d redis postgres
-dotnet run --project samples/DotCelery.RedisPostgresExample
+dotnet run --project samples/DotCelery.RedisPostgresExample --framework net11.0
 ```
 
 The same sample can store task results in Redis:
 
 ```bash
-dotnet run --project samples/DotCelery.RedisPostgresExample -- --result-backend=redis
+dotnet run --project samples/DotCelery.RedisPostgresExample --framework net11.0 -- --result-backend=redis
 ```
 
 ### Define a Task
@@ -592,7 +592,7 @@ The client records sends, and the worker records tasks it receives, completes (w
 ## Dashboard
 
 The [dashboard demo](samples/DotCelery.Dashboard.Demo) runs an in-memory worker and generates
-sample traffic. Start it with `dotnet run --project samples/DotCelery.Dashboard.Demo`, then open
+sample traffic. Start it with `dotnet run --project samples/DotCelery.Dashboard.Demo --framework net11.0`, then open
 <http://localhost:5080/celery/>.
 
 The overview brings together live queue and worker gauges, completion trends, and recent activity.
@@ -624,7 +624,7 @@ retained dead-letter entry; a failed task record alone is insufficient. Cancella
 requested until the worker reports the outcome. To browse the demo in read-only mode, run:
 
 ```bash
-dotnet run --project samples/DotCelery.Dashboard.Demo -- --Dashboard:ReadOnly=true
+dotnet run --project samples/DotCelery.Dashboard.Demo --framework net11.0 -- --Dashboard:ReadOnly=true
 ```
 
 The React/TypeScript UI, compiled Tailwind CSS, and logo are embedded in `DotCelery.Dashboard`;
@@ -852,7 +852,7 @@ internal sealed partial class MyJsonContext : JsonSerializerContext;
 
 DotCelery's own model types keep coming from the built-in `DotCeleryJsonContext`, so the application's context only registers its inputs and results. A payload type that neither context registers is an error at runtime, not a reflection fallback. The reflective scan (`AddTasksFromAssembly`) is annotated `[RequiresUnreferencedCode]`, and `UsePreventOverlapping` (keying by input) and `UseQueuedSignalDispatch` carry `[RequiresUnreferencedCode]` and `[RequiresDynamicCode]`, so an AOT or trimmed build warns when it uses a path that needs reflection.
 
-`samples/DotCelery.AotSmoke` is a complete example; `just aot-smoke` publishes it for the host platform and runs it, as does CI.
+`samples/DotCelery.AotSmoke` is a complete example; `just aot-smoke` publishes and runs it for .NET 10 and .NET 11 on the host platform.
 
 ## Production Checklist
 
@@ -867,7 +867,7 @@ DotCelery's own model types keep coming from the built-in `DotCeleryJsonContext`
 - **Scheduling.** Run one Beat scheduler per schedule: with shared storage the schedulers elect one leader per `SchedulerName`. Shared storage retains cursors and pending occurrences across hosts; without storage, `PersistState` uses a local file. Decide `RunMissedOnStartup`.
 - **Time limits.** Hard time limits are cooperative: a task that ignores its cancellation token keeps its worker slot, so bound such work inside the task.
 - **Native AOT.** Only Abstractions, Core, Worker, Client, the in-memory broker and backend, and the generated registration and JSON contexts are verified for AOT and trimming; the dashboard and the driver-based providers are not.
-- **Versions.** DotCelery targets .NET 10 and follows semantic versioning for its public API, which the packages track in `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt`.
+- **Versions.** DotCelery targets .NET 10 and .NET 11 and follows semantic versioning for its public API, which the packages track in `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt`.
 
 ## Project Structure
 
@@ -903,7 +903,7 @@ dotcelery/
 
 ## Requirements
 
-- .NET 10.0 or later
+- .NET 10 or .NET 11
 - C# 14
 
 ### Broker Requirements
@@ -957,4 +957,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - Inspired by [Celery](https://docs.celeryq.dev/) for Python
-- Built with [.NET 10](https://dotnet.microsoft.com/) and [C# 14](https://learn.microsoft.com/dotnet/csharp/)
+- Built with [.NET](https://dotnet.microsoft.com/) and [C# 14](https://learn.microsoft.com/dotnet/csharp/)

@@ -3,7 +3,7 @@
 [How-to guides](README.md) / Use Redis and PostgreSQL
 
 Run the repository sample against Redis Streams and a PostgreSQL result backend.
-You need the .NET 10 SDK, Docker with Compose, and free ports 6380 and 5433.
+You need the .NET 11 SDK, Docker with Compose, and free ports 6380 and 5433.
 Run all commands from the repository root.
 
 ## Start the local services
@@ -19,7 +19,7 @@ maps Redis to `localhost:6380` and PostgreSQL to `localhost:5433`.
 ## Run the sample
 
 ```bash
-dotnet run --project samples/DotCelery.RedisPostgresExample
+dotnet run --project samples/DotCelery.RedisPostgresExample --framework net11.0
 ```
 
 The sample publishes a task to the `media` queue, runs a worker, and prints a
@@ -28,7 +28,7 @@ stored result with dimensions `1280x720`. Its default result backend is PostgreS
 To use Redis for results as well as transport:
 
 ```bash
-dotnet run --project samples/DotCelery.RedisPostgresExample -- --result-backend=redis
+dotnet run --project samples/DotCelery.RedisPostgresExample --framework net11.0 -- --result-backend=redis
 ```
 
 ## Use different connection settings

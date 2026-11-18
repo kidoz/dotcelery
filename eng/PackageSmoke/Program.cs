@@ -1,15 +1,21 @@
+using System.Reflection;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Text.RegularExpressions;
 using DotCelery.Backend.InMemory.Extensions;
+using DotCelery.Backend.InMemory.Storage;
+using DotCelery.Broker.InMemory;
 using DotCelery.Broker.InMemory.Extensions;
 using DotCelery.Client;
 using DotCelery.Client.Extensions;
+using DotCelery.Core.Abstractions;
 using DotCelery.Core.Extensions;
 using DotCelery.Core.Serialization;
 using DotCelery.Dashboard;
 using DotCelery.Dashboard.Middleware;
 using DotCelery.Generated;
 using DotCelery.PackageSmoke;
+using DotCelery.Worker;
 using DotCelery.Worker.Extensions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,6 +26,7 @@ using Microsoft.Extensions.Options;
 // Runs the flow a consumer of the packed packages follows: the task is registered through the
 // source generator that DotCelery.Analyzers supplies, its payloads are serialized by a
 // source-generated context, and the worker runs it end to end. Exits non-zero on failure.
+VerifyRuntimeAssets();
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services.Configure<JsonMessageSerializerOptions>(options =>
@@ -65,6 +72,32 @@ try
 finally
 {
     await host.StopAsync();
+}
+
+static void VerifyRuntimeAssets()
+{
+    var expected = Assembly
+        .GetExecutingAssembly()
+        .GetCustomAttribute<TargetFrameworkAttribute>()!
+        .FrameworkName;
+    Assembly[] assets =
+    [
+        typeof(IMessageBroker).Assembly,
+        typeof(DotCeleryBuilder).Assembly,
+        typeof(ICeleryClient).Assembly,
+        typeof(CeleryWorkerService).Assembly,
+        typeof(InMemoryBroker).Assembly,
+        typeof(InMemoryStorageProvider).Assembly,
+        typeof(DashboardMiddleware).Assembly,
+    ];
+    foreach (var asset in assets)
+    {
+        var target = asset.GetCustomAttribute<TargetFrameworkAttribute>()?.FrameworkName;
+        if (target != expected)
+            throw new InvalidOperationException(
+                $"{asset.GetName().Name} resolves to {target}, expected {expected}."
+            );
+    }
 }
 
 static async Task VerifyDashboardAsync()

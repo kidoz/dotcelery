@@ -49,8 +49,12 @@ dotnet restore eng/PackageSmoke/PackageSmoke.csproj \
   --source "${packages_dir}" \
   --source "https://api.nuget.org/v3/index.json"
 
-dotnet run \
-  --project eng/PackageSmoke/PackageSmoke.csproj \
-  --configuration Release \
-  --no-restore \
-  -p:DotCeleryVersion="${version}"
+for framework in net10.0 net11.0; do
+  echo "Running the package smoke test on ${framework}"
+  dotnet run \
+    --project eng/PackageSmoke/PackageSmoke.csproj \
+    --configuration Release \
+    --framework "${framework}" \
+    --no-restore \
+    -p:DotCeleryVersion="${version}"
+done

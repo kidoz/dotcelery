@@ -16,7 +16,7 @@ Choose the source-specific guide:
 - [MassTransit or NServiceBus background work](migrate-from-message-bus.md).
 
 Check the [compatibility reference](../reference/migration-compatibility.md) before
-deciding which features to move. These instructions describe this .NET 10 source
+deciding which features to move. These instructions describe this .NET 10 and .NET 11 source
 checkout; record the versions of the source framework and DotCelery you deploy.
 
 ## 1. Inventory the existing operation

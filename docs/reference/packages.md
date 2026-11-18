@@ -2,8 +2,10 @@
 
 [Reference](README.md) / Packages
 
-DotCelery targets .NET 10 and C# 14. Packages are split by responsibility so a
-host can choose its transport and persistence providers.
+DotCelery runtime packages target `net10.0` and `net11.0` and use C# 14.
+`DotCelery.Analyzers` targets `netstandard2.0` for Roslyn compiler hosts.
+Packages are split by responsibility so a host can choose its transport and
+persistence providers.
 
 | Package                       | Responsibility                                                                         |
 | ----------------------------- | -------------------------------------------------------------------------------------- |
@@ -50,8 +52,9 @@ does not mean every optional feature has been registered.
 
 ## Source builds and runtime requirements
 
-- The solution uses the .NET 10 SDK. Source builds including the dashboard need
-  Node.js 24.3 or later to generate embedded assets.
+- Build the solution with the .NET 11 SDK. Install the .NET 10 and ASP.NET Core
+  10 runtimes to run the .NET 10 tests and package smoke checks. Source builds
+  including the dashboard need Node.js 24.3 or later to generate embedded assets.
 - Applications consuming the compiled dashboard package do not need Node.js.
 - Container integration tests require Docker.
 - Native AOT verification covers Abstractions, Core, Client, Worker, and the

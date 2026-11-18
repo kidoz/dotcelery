@@ -7,7 +7,7 @@ REST API response.
 
 ## Before you begin
 
-Use a DotCelery checkout with the .NET 10 SDK and Node.js 24.3 or later. The demo
+Use a DotCelery checkout with the .NET 11 SDK and Node.js 24.3 or later. The demo
 uses in-memory services and generates its own traffic. Keep port 5080 available.
 
 ## 1. Start the demo
@@ -15,7 +15,7 @@ uses in-memory services and generates its own traffic. Keep port 5080 available.
 From the repository root, run:
 
 ```bash
-dotnet run --project samples/DotCelery.Dashboard.Demo --no-launch-profile -- --urls http://localhost:5080 --Dashboard:ReadOnly=true
+dotnet run --project samples/DotCelery.Dashboard.Demo --framework net11.0 --no-launch-profile -- --urls http://localhost:5080 --Dashboard:ReadOnly=true
 ```
 
 The first source build restores the frontend dependencies and compiles the
