@@ -142,10 +142,14 @@ public sealed class WorkerChaosTests : IAsyncDisposable
 
         var result = await WaitForResultAsync(malformed.Id);
 
+        var acknowledgedTaskId = await _broker.FirstAcknowledged.WaitAsync(
+            WaitTimeout,
+            TestContext.Current.CancellationToken
+        );
+        Assert.Equal(malformed.Id, acknowledgedTaskId);
         Assert.Equal(TaskState.Rejected, result.State);
         Assert.Equal(0, _counter.Runs);
         Assert.Equal(0, _broker.Requeues);
-        Assert.True(_broker.Acks >= 1, "the rejected message is settled");
         Assert.Contains(
             _deadLetters.Handled,
             handled =>
@@ -326,9 +330,14 @@ public sealed class WorkerChaosTests : IAsyncDisposable
     // Counts what the worker settled, so the test can tell a requeue from a rejection
     private sealed class RecordingBroker(IMessageBroker inner) : IMessageBroker
     {
+        private readonly TaskCompletionSource<string> _firstAcknowledged = new(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
         private int _acks;
         private int _requeues;
         private int _rejections;
+
+        public Task<string> FirstAcknowledged => _firstAcknowledged.Task;
 
         public int Acks => Volatile.Read(ref _acks);
 
@@ -354,13 +363,14 @@ public sealed class WorkerChaosTests : IAsyncDisposable
             }
         }
 
-        public ValueTask AckAsync(
+        public async ValueTask AckAsync(
             BrokerMessage message,
             CancellationToken cancellationToken = default
         )
         {
+            await inner.AckAsync(message, cancellationToken);
             Interlocked.Increment(ref _acks);
-            return inner.AckAsync(message, cancellationToken);
+            _firstAcknowledged.TrySetResult(message.Message.Id);
         }
 
         public ValueTask RejectAsync(
