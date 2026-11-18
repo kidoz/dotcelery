@@ -73,3 +73,9 @@ appsettings.*.json
 *.log
 *.tmp
 *.temp
+
+# Dashboard JavaScript tooling
+node_modules/
+.eslintcache
+playwright-report/
+test-results/
