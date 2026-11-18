@@ -13,9 +13,12 @@ namespace DotCelery.Worker.Services;
 
 // Durable workflow documents are the recovery log. Every publication uses its persisted ID.
 internal sealed class WorkflowRecoveryService(
-    IServiceProvider services,
+    IServiceScopeFactory scopeFactory,
     ILogger<WorkflowRecoveryService> logger,
-    TimeProvider? timeProvider = null
+    TimeProvider? timeProvider = null,
+    IOptions<MultiTenancyOptions>? tenancy = null,
+    IOptions<MessageSecurityOptions>? security = null,
+    ITenantRouter? router = null
 ) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -23,17 +26,23 @@ internal sealed class WorkflowRecoveryService(
         var clock = timeProvider ?? TimeProvider.System;
         const int batchSize = 100;
         var offsets = new Dictionary<(string?, SagaState), int>();
+        var tenants = TenantWorkloads.GetTenants(tenancy?.Value, security?.Value);
         while (!stoppingToken.IsCancellationRequested)
         {
-            foreach (var tenant in TenantWorkloads.GetTenants(services))
+            foreach (var tenant in tenants)
             {
                 using var tenantScope = TenantContext.SetTenant(
                     tenant,
                     tenant is null
                         ? null
-                        : services.GetRequiredService<ITenantRouter>().GetQueue(tenant)
+                        : (
+                            router
+                            ?? throw new InvalidOperationException(
+                                "Tenant recovery requires a tenant router."
+                            )
+                        ).GetQueue(tenant)
                 );
-                await using var scope = services.CreateAsyncScope();
+                await using var scope = scopeFactory.CreateAsyncScope();
                 try
                 {
                     if (
@@ -156,10 +165,19 @@ internal static class TenantWorkloads
     public static IEnumerable<string?> GetTenants(IServiceProvider services)
     {
         var options = services.GetService<IOptions<MultiTenancyOptions>>()?.Value;
-        return options is { Enabled: true, RequireAuthenticatedTenants: true }
-            ? services
-                .GetRequiredService<IOptions<MessageSecurityOptions>>()
-                .Value.TenantSigningKeys.Keys
-            : new string?[] { null };
+        return GetTenants(options, services.GetService<IOptions<MessageSecurityOptions>>()?.Value);
     }
+
+    public static IEnumerable<string?> GetTenants(
+        MultiTenancyOptions? tenancy,
+        MessageSecurityOptions? security
+    ) =>
+        tenancy is { Enabled: true, RequireAuthenticatedTenants: true }
+            ? (
+                security
+                ?? throw new InvalidOperationException("Tenant recovery requires message security.")
+            )
+                .TenantSigningKeys
+                .Keys
+            : new string?[] { null };
 }
