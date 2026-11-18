@@ -153,6 +153,28 @@ public sealed class ConsumerChannelTests
         Assert.Empty(_channel.InFlight);
     }
 
+    [Fact]
+    public async Task DisposeAsync_WaitsForAnActiveChannelOperation()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var operation = _channel.UseAsync(
+            () => release.Task,
+            TestContext.Current.CancellationToken
+        );
+        var disposal = _channel.DisposeAsync().AsTask();
+        try
+        {
+            Assert.False(disposal.IsCompleted);
+            await _rabbitChannel.DidNotReceive().DisposeAsync();
+        }
+        finally
+        {
+            release.TrySetResult();
+            await Task.WhenAll(operation, disposal).WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        await _rabbitChannel.Received(1).DisposeAsync();
+    }
+
     private static BrokerMessage CreateMessage() =>
         new()
         {

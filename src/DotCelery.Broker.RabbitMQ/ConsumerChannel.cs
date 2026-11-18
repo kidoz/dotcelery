@@ -15,10 +15,11 @@ namespace DotCelery.Broker.RabbitMQ;
 /// requeues what it had delivered and the consumer rebuilds the channel, whose tags start
 /// again, so a tracked delivery is refused instead of settled.
 /// </remarks>
-internal sealed class ConsumerChannel(IChannel channel) : IDisposable
+internal sealed class ConsumerChannel(IChannel channel) : IAsyncDisposable
 {
     private readonly ConcurrentDictionary<ulong, BrokerMessage> _inFlight = new();
     private readonly SemaphoreSlim _settlementLock = new(1, 1);
+    private bool _closing;
 
     /// <summary>
     /// Gets the channel.
@@ -119,6 +120,7 @@ internal sealed class ConsumerChannel(IChannel channel) : IDisposable
         await _settlementLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ObjectDisposedException.ThrowIf(_closing, this);
             await Channel
                 .BasicRejectAsync(deliveryTag, requeue, cancellationToken)
                 .ConfigureAwait(false);
@@ -136,6 +138,7 @@ internal sealed class ConsumerChannel(IChannel channel) : IDisposable
         await _settlementLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ObjectDisposedException.ThrowIf(_closing, this);
             await action().ConfigureAwait(false);
         }
         finally
@@ -144,19 +147,21 @@ internal sealed class ConsumerChannel(IChannel channel) : IDisposable
         }
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
-        _settlementLock.Wait();
+        await _settlementLock.WaitAsync().ConfigureAwait(false);
         try
         {
-            Channel.Dispose();
+            if (_closing)
+                return;
+            _closing = true;
         }
         finally
         {
-            // Stale worker deliveries can still be settling; they must be allowed to enter,
-            // discover the closed channel, and fail without racing a disposed semaphore.
+            // Closing the channel can await delivery callbacks that also use this lock.
             _settlementLock.Release();
         }
+        await Channel.DisposeAsync().ConfigureAwait(false);
     }
 
     private void RequireLiveDelivery(ulong deliveryTag)
@@ -169,7 +174,7 @@ internal sealed class ConsumerChannel(IChannel channel) : IDisposable
             );
         }
 
-        if (!Channel.IsOpen)
+        if (_closing || !Channel.IsOpen)
         {
             throw new InvalidOperationException(
                 $"The channel that delivered message {message.Message.Id} is closed; the message "
