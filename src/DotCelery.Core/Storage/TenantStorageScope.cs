@@ -10,6 +10,9 @@ namespace DotCelery.Core.Storage;
 /// <summary>Applies an authenticated ambient tenant to every storage primitive operation.</summary>
 public static class TenantStorageScope
 {
+    private static readonly NameHashCache TenantPrefixes = new(512);
+    private static readonly NameHashCache CollectionHashes = new(128);
+
     /// <summary>Wraps primitives when tenant isolation is required; transaction ownership stays with the original provider.</summary>
     /// <param name="storage">The underlying provider.</param>
     /// <param name="options">The store isolation options.</param>
@@ -24,35 +27,56 @@ public static class TenantStorageScope
     }
 
     private static string Prefix =>
-        "t."
-        + Convert.ToHexStringLower(
-            SHA256.HashData(
-                Encoding.UTF8.GetBytes(
-                    TenantContext.Current.TenantId is { Length: > 0 } tenant
-                        ? tenant
-                        : throw new InvalidOperationException(
-                            "An authenticated tenant scope is required for storage access."
-                        )
-                )
+        TenantContext.Current.TenantId is { Length: > 0 } tenant
+            ? TenantPrefixes.Get(
+                tenant,
+                static id =>
+                    $"t.{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(id)))}."
             )
-        )
-        + ".";
+            : throw new InvalidOperationException(
+                "An authenticated tenant scope is required for storage access."
+            );
 
     private static string Scope(string name)
     {
         StorageGuard.ThrowIfInvalidName(name);
         return Prefix
-            + Convert
-                .ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(name)))
-                .TrimEnd('=')
-                .Replace('+', '-')
-                .Replace('/', '_');
+            + CollectionHashes.Get(
+                name,
+                static value =>
+                    Convert
+                        .ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
+                        .TrimEnd('=')
+                        .Replace('+', '-')
+                        .Replace('/', '_')
+            );
     }
 
     private static string ScopeKey(string key)
     {
         StorageGuard.ThrowIfInvalidKey(key);
         return Prefix + key;
+    }
+
+    // Cache collisions replace one entry and cannot grow the cache or change a storage key.
+    private sealed class NameHashCache(int capacity)
+    {
+        private readonly Entry?[] _entries = new Entry[capacity];
+
+        public string Get(string name, Func<string, string> hash)
+        {
+            var slot = (int)(
+                (uint)StringComparer.Ordinal.GetHashCode(name) % (uint)_entries.Length
+            );
+            var entry = Volatile.Read(ref _entries[slot]);
+            if (entry?.Name == name)
+                return entry.Hash;
+            var value = hash(name);
+            Volatile.Write(ref _entries[slot], new Entry(name, value));
+            return value;
+        }
+
+        private sealed record Entry(string Name, string Hash);
     }
 
     private sealed class ScopedProvider(IStorageProvider inner) : IStorageProvider
