@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Concurrent;
 
 namespace DotCelery.Beat;
 
@@ -7,7 +8,9 @@ namespace DotCelery.Beat;
 /// </summary>
 public sealed class Schedule : IEnumerable<ScheduleEntry>
 {
-    private readonly Dictionary<string, ScheduleEntry> _entries = [];
+    private readonly ConcurrentDictionary<string, ScheduleEntry> _entries = new(
+        StringComparer.Ordinal
+    );
 
     /// <summary>
     /// Gets the number of entries in the schedule.
@@ -29,7 +32,7 @@ public sealed class Schedule : IEnumerable<ScheduleEntry>
     /// </summary>
     /// <param name="name">The entry name.</param>
     /// <returns>True if removed.</returns>
-    public bool Remove(string name) => _entries.Remove(name);
+    public bool Remove(string name) => _entries.TryRemove(name, out _);
 
     /// <summary>
     /// Gets an entry by name.

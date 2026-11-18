@@ -491,7 +491,7 @@ public sealed class BeatSchedulerService : BackgroundService
         }
 
         var state = await ScheduleStateStore
-            .LoadAsync(_statePath, cancellationToken)
+            .LoadAsync(_statePath, _logger, cancellationToken)
             .ConfigureAwait(false);
 
         if (state.Count == 0)

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
 
 namespace DotCelery.Beat;
 
@@ -13,18 +14,15 @@ internal static class ScheduleStateStore
     /// Loads the last run time of every entry from the state file.
     /// </summary>
     /// <param name="path">The state file path.</param>
+    /// <param name="logger">The scheduler logger.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The last run time by entry name; empty when there is no readable state.</returns>
     public static async Task<Dictionary<string, DateTimeOffset>> LoadAsync(
         string path,
+        ILogger logger,
         CancellationToken cancellationToken
     )
     {
-        if (!File.Exists(path))
-        {
-            return new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
-        }
-
         try
         {
             await using var stream = File.OpenRead(path);
@@ -32,14 +30,22 @@ internal static class ScheduleStateStore
                 .DeserializeAsync(stream, BeatStateJsonContext.Default.BeatState, cancellationToken)
                 .ConfigureAwait(false);
 
-            return state is null
-                ? new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal)
-                : new Dictionary<string, DateTimeOffset>(state.Entries, StringComparer.Ordinal);
+            if (state?.Entries is null)
+                throw new JsonException("The schedule state has no entries object.");
+            return new Dictionary<string, DateTimeOffset>(state.Entries, StringComparer.Ordinal);
         }
-        catch (Exception ex) when (ex is IOException or JsonException)
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
-            // Unreadable state starts the schedule over instead of stopping the scheduler
-            return new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+            return new(StringComparer.Ordinal);
+        }
+        catch (Exception ex)
+            when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(
+                ex,
+                "Failed to load the Beat schedule state; starting with empty state"
+            );
+            return new(StringComparer.Ordinal);
         }
     }
 
@@ -66,7 +72,16 @@ internal static class ScheduleStateStore
 
         // Write beside the state file and replace it, so a crash cannot leave it half written
         var temporaryPath = path + ".tmp";
-        await using (var stream = File.Create(temporaryPath))
+        await using (
+            var stream = new FileStream(
+                temporaryPath,
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.None,
+                4096,
+                FileOptions.Asynchronous | FileOptions.WriteThrough
+            )
+        )
         {
             await JsonSerializer
                 .SerializeAsync(
@@ -78,6 +93,7 @@ internal static class ScheduleStateStore
                 .ConfigureAwait(false);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         File.Move(temporaryPath, path, overwrite: true);
     }
 }
