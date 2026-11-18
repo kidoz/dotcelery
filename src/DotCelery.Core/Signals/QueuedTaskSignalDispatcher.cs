@@ -11,6 +11,7 @@ namespace DotCelery.Core.Signals;
 /// </summary>
 public sealed class QueuedTaskSignalDispatcher : ITaskSignalDispatcher
 {
+    private readonly SignalTypeRegistry _types;
     private readonly ISignalStore _signalQueue;
     private readonly ILogger<QueuedTaskSignalDispatcher> _logger;
     private readonly JsonSerializerOptions _jsonOptions;
@@ -24,7 +25,16 @@ public sealed class QueuedTaskSignalDispatcher : ITaskSignalDispatcher
         ISignalStore signalQueue,
         ILogger<QueuedTaskSignalDispatcher> logger
     )
+        : this(signalQueue, logger, new SignalTypeRegistry()) { }
+
+    /// <summary>Initializes the dispatcher with the signal registry shared by the host.</summary>
+    public QueuedTaskSignalDispatcher(
+        ISignalStore signalQueue,
+        ILogger<QueuedTaskSignalDispatcher> logger,
+        SignalTypeRegistry types
+    )
     {
+        _types = types;
         _signalQueue = signalQueue;
         _logger = logger;
         _jsonOptions = new JsonSerializerOptions
@@ -58,7 +68,7 @@ public sealed class QueuedTaskSignalDispatcher : ITaskSignalDispatcher
 
         try
         {
-            var message = SignalMessage.Create(signal, _jsonOptions);
+            var message = _types.Create(signal, _jsonOptions);
 
             await _signalQueue.EnqueueAsync(message, cancellationToken).ConfigureAwait(false);
 

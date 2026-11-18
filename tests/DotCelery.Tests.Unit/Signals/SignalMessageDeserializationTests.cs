@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using DotCelery.Core.Signals;
 
 namespace DotCelery.Tests.Unit.Signals;
@@ -54,10 +55,13 @@ public sealed class SignalMessageDeserializationTests
         };
 
         var message = SignalMessage.Create(success);
+        Assert.Equal("task-success", message.SignalType);
         var roundtripped = message.Deserialize();
 
         Assert.IsType<TaskSuccessSignal>(roundtripped);
         Assert.Equal(success.TaskId, roundtripped.TaskId);
+        var legacy = message with { SignalType = typeof(TaskSuccessSignal).AssemblyQualifiedName! };
+        Assert.Equal(success.TaskId, legacy.Deserialize().TaskId);
     }
 
     [Fact]
@@ -76,6 +80,29 @@ public sealed class SignalMessageDeserializationTests
         var ex = Assert.Throws<InvalidOperationException>(() => message.Deserialize());
         Assert.Contains("Cannot resolve signal type", ex.Message, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void RegisteredCustomSignal_UsesItsExplicitMetadataAndStableName()
+    {
+        var registry = new SignalTypeRegistry();
+        var options = new JsonSerializerOptions
+        {
+            TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        };
+        registry.Register("custom", options.GetTypeInfo(typeof(CustomSignal)));
+        var signal = new CustomSignal("1", "task", DateTimeOffset.UtcNow, "value");
+        var envelope = registry.Create(signal);
+        Assert.Equal("custom", envelope.SignalType);
+        Assert.Equal(signal, registry.Deserialize(envelope));
+        Assert.Throws<InvalidOperationException>(() => envelope.Deserialize());
+    }
+
+    public sealed record CustomSignal(
+        string TaskId,
+        string TaskName,
+        DateTimeOffset Timestamp,
+        string Value
+    ) : ITaskSignal;
 
     private abstract class AbstractSignal : ITaskSignal
     {

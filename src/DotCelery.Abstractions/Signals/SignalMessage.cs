@@ -8,6 +8,8 @@ namespace DotCelery.Core.Signals;
 /// </summary>
 public sealed record SignalMessage
 {
+    private static readonly SignalTypeRegistry Registry = new();
+
     /// <summary>
     /// Gets the unique message ID.
     /// </summary>
@@ -55,20 +57,7 @@ public sealed record SignalMessage
         TSignal signal,
         JsonSerializerOptions? jsonOptions = null
     )
-        where TSignal : ITaskSignal
-    {
-        ArgumentNullException.ThrowIfNull(signal);
-
-        return new SignalMessage
-        {
-            Id = Guid.NewGuid().ToString(),
-            SignalType = typeof(TSignal).AssemblyQualifiedName!,
-            TaskId = signal.TaskId,
-            TaskName = signal.TaskName,
-            Payload = JsonSerializer.Serialize(signal, jsonOptions),
-            CreatedAt = DateTimeOffset.UtcNow,
-        };
-    }
+        where TSignal : ITaskSignal => Registry.Create(signal, jsonOptions);
 
     /// <summary>
     /// Deserializes the signal from the payload.
@@ -82,31 +71,6 @@ public sealed record SignalMessage
     [RequiresDynamicCode(
         "A signal payload is deserialized polymorphically from its type name, which may need runtime code generation; an AOT application dispatches signals inline."
     )]
-    [UnconditionalSuppressMessage(
-        "Trimming",
-        "IL2057",
-        Justification = "The type name comes from the signal envelope written by Create, and a type it cannot resolve is refused before the payload is deserialized."
-    )]
-    public ITaskSignal Deserialize(JsonSerializerOptions? jsonOptions = null)
-    {
-        var type =
-            Type.GetType(SignalType, throwOnError: false)
-            ?? throw new InvalidOperationException($"Cannot resolve signal type: {SignalType}");
-
-        // Guard against gadget deserialization: reject any type that is not an
-        // ITaskSignal *before* handing the payload to the JSON serializer. Without
-        // this check a crafted message could request an arbitrary .NET type and
-        // trigger side effects during deserialization.
-        if (!typeof(ITaskSignal).IsAssignableFrom(type) || type.IsAbstract || type.IsInterface)
-        {
-            throw new InvalidOperationException(
-                $"Refusing to deserialize signal type '{SignalType}': not a concrete ITaskSignal."
-            );
-        }
-
-        return (ITaskSignal)(
-            JsonSerializer.Deserialize(Payload, type, jsonOptions)
-            ?? throw new InvalidOperationException("Failed to deserialize signal payload")
-        );
-    }
+    public ITaskSignal Deserialize(JsonSerializerOptions? jsonOptions = null) =>
+        Registry.Deserialize(this, jsonOptions);
 }

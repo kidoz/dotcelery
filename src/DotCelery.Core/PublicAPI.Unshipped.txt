@@ -18,3 +18,4 @@ DotCelery.Core.Storage.Stores.SagaStore.TryAdvanceStepAsync(string! sagaId, stri
 
 DotCelery.Core.Storage.Stores.SagaStore.GetRecoveryBatchAsync(DotCelery.Core.Sagas.SagaState state, int offset, int limit, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<DotCelery.Core.Sagas.Saga!>!
 DotCelery.Core.Extensions.DotCeleryBuilder.UseMessageSecurity(System.Action<DotCelery.Core.Security.MessageSecurityOptions!>? configure = null) -> DotCelery.Core.Extensions.DotCeleryBuilder!
+DotCelery.Core.Signals.QueuedTaskSignalDispatcher.QueuedTaskSignalDispatcher(DotCelery.Core.Abstractions.ISignalStore! signalQueue, Microsoft.Extensions.Logging.ILogger<DotCelery.Core.Signals.QueuedTaskSignalDispatcher!>! logger, DotCelery.Core.Signals.SignalTypeRegistry! types) -> void

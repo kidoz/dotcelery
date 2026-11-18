@@ -120,3 +120,10 @@ DotCelery.Core.Security.MessageSecurityOptions.TenantAdditionalVerificationKeys.
 static DotCelery.Core.Security.MessageSecurityOptions.GenerateKey() -> byte[]!
 DotCelery.Core.Abstractions.BrokerMessage.ClaimLost.get -> System.Threading.CancellationToken
 DotCelery.Core.Abstractions.BrokerMessage.ClaimLost.init -> void
+DotCelery.Core.Signals.SignalTypeRegistry
+DotCelery.Core.Signals.SignalTypeRegistry.SignalTypeRegistry() -> void
+DotCelery.Core.Signals.SignalTypeRegistry.WriteLegacyTypeNames.get -> bool
+DotCelery.Core.Signals.SignalTypeRegistry.WriteLegacyTypeNames.set -> void
+DotCelery.Core.Signals.SignalTypeRegistry.Create(DotCelery.Core.Signals.ITaskSignal! signal, System.Text.Json.JsonSerializerOptions? jsonOptions = null) -> DotCelery.Core.Signals.SignalMessage!
+DotCelery.Core.Signals.SignalTypeRegistry.Deserialize(DotCelery.Core.Signals.SignalMessage! message, System.Text.Json.JsonSerializerOptions? jsonOptions = null) -> DotCelery.Core.Signals.ITaskSignal!
+DotCelery.Core.Signals.SignalTypeRegistry.Register(string! discriminator, System.Text.Json.Serialization.Metadata.JsonTypeInfo! typeInfo) -> void

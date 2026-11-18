@@ -17,6 +17,7 @@ namespace DotCelery.Worker.Services;
 /// </summary>
 public sealed class SignalQueueProcessor : BackgroundService
 {
+    private readonly SignalTypeRegistry _types;
     private readonly ISignalStore _signalQueue;
     private readonly IServiceProvider _serviceProvider;
     private readonly SignalQueueProcessorOptions _options;
@@ -35,6 +36,7 @@ public sealed class SignalQueueProcessor : BackgroundService
         ILogger<SignalQueueProcessor> logger
     )
     {
+        _types = serviceProvider.GetService<SignalTypeRegistry>() ?? new();
         _signalQueue = signalQueue;
         _serviceProvider = serviceProvider;
         _options = options.Value;
@@ -42,6 +44,7 @@ public sealed class SignalQueueProcessor : BackgroundService
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true,
         };
     }
 
@@ -150,7 +153,7 @@ public sealed class SignalQueueProcessor : BackgroundService
         ITaskSignal signal;
         try
         {
-            signal = message.Deserialize(_jsonOptions);
+            signal = _types.Deserialize(message, _jsonOptions);
         }
         catch (Exception ex)
             when (ex

@@ -542,6 +542,7 @@ public static class WorkerServiceCollectionExtensions
             builder.Services.Remove(existingDispatcher);
         }
 
+        builder.Services.TryAddSingleton<SignalTypeRegistry>();
         builder.Services.AddSingleton<ITaskSignalDispatcher, QueuedTaskSignalDispatcher>();
         builder.Services.AddHostedService<TenantHostedService<SignalQueueProcessor>>();
 

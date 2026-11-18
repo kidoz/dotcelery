@@ -79,3 +79,22 @@ stack trace. `MaxExceptionMessageLength` caps each message, and
 `ExceptionMessageRedactor` can replace or omit it. The stored chain contains
 at most five exceptions. `DeadLetterOptions.IncludeStackTrace` separately
 controls stack traces in dead-letter records and defaults to `false`.
+
+## Queued signals
+
+When using `UseQueuedSignalDispatch`, built-in signals write stable names such
+as `task-success`. Set `SignalTypeRegistry.WriteLegacyTypeNames = true` on the
+registry registered as a singleton while older consumers share the queue, then
+turn it off after upgrading those consumers. Current consumers can read legacy
+names for built-in and explicitly registered signal types.
+
+Register the same stable name and serializer metadata for a custom signal in
+each producer and consumer before they start.
+
+```csharp
+var signals = new SignalTypeRegistry();
+signals.Register("order-settled", MyJsonContext.Default.OrderSettledSignal);
+builder.Services.AddSingleton(signals);
+```
+
+Existing inline signal handlers can continue using their typed registrations.
