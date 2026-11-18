@@ -46,6 +46,6 @@ public static partial class SqlIdentifier
         }
     }
 
-    [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]*$")]
+    [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_]*\z")]
     private static partial Regex Pattern();
 }

@@ -18,6 +18,7 @@ public sealed class SqlMigrationTests
     [InlineData("1starts_with_digit")]
     [InlineData("semi;colon")]
     [InlineData("quote\"")]
+    [InlineData("abc\n")]
     [InlineData("")]
     public void SqlIdentifier_InvalidName_IsRejected(string name)
     {
