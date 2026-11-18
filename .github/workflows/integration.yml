@@ -24,6 +24,9 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      matrix:
+        framework: [net10.0, net11.0]
 
     env:
       DOTNET_NOLOGO: true
@@ -34,12 +37,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
@@ -48,7 +54,7 @@ jobs:
           cache: npm
 
       - name: Restore dashboard dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Restore packages
         run: dotnet restore DotCelery.slnx
@@ -57,4 +63,14 @@ jobs:
         run: dotnet build DotCelery.slnx --configuration Release --no-restore
 
       - name: Run integration tests
-        run: dotnet test tests/DotCelery.Tests.Integration --configuration Release --no-build
+        run: >-
+          dotnet test tests/DotCelery.Tests.Integration --configuration Release --no-build
+          --framework ${{ matrix.framework }} --collect 'XPlat Code Coverage'
+          --results-directory artifacts/coverage/integration
+
+      - name: Upload integration coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: integration-coverage-${{ matrix.framework }}
+          path: artifacts/coverage/integration/**/coverage.cobertura.xml
+          if-no-files-found: error

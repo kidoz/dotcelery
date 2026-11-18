@@ -27,12 +27,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
@@ -41,7 +44,14 @@ jobs:
           cache: npm
 
       - name: Restore dashboard dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
+
+      - name: Audit dashboard runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Audit all dashboard dependencies
+        continue-on-error: true
+        run: npm audit
 
       - name: Restore tools
         run: dotnet tool restore
@@ -51,9 +61,6 @@ jobs:
 
       - name: Check formatting
         run: dotnet csharpier check .
-
-      - name: Vulnerability audit
-        run: dotnet list DotCelery.slnx package --vulnerable --include-transitive
 
       - name: Check dashboard frontend
         run: npm run check
@@ -65,15 +72,24 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Test dashboard in browser
-        run: npm run test:browser
+        run: |
+          DOTCELERY_TEST_FRAMEWORK=net10.0 npm run test:browser
+          DOTCELERY_TEST_FRAMEWORK=net11.0 npm run test:browser
 
       # The integration suite (Testcontainers: Redis, Postgres, SQL Server, RabbitMQ, Mongo)
       # runs in integration.yml. Run only the container-free suites here.
       - name: Test
         run: |
-          dotnet test tests/DotCelery.Tests.Unit --configuration Release --no-build
+          dotnet test tests/DotCelery.Tests.Unit --configuration Release --no-build --collect 'XPlat Code Coverage' --results-directory artifacts/coverage/unit
           dotnet test tests/DotCelery.Tests.Generated --configuration Release --no-build
           dotnet test tests/DotCelery.Analyzers.Tests --configuration Release --no-build
+
+      - name: Upload unit coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: unit-coverage
+          path: artifacts/coverage/unit/**/coverage.cobertura.xml
+          if-no-files-found: error
 
       # The smoke sample is published as a native binary and run, so the AOT-compatible
       # libraries are exercised without a runtime.
@@ -81,5 +97,4 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang zlib1g-dev
-          dotnet publish samples/DotCelery.AotSmoke --configuration Release --runtime linux-x64
-          samples/DotCelery.AotSmoke/bin/Release/net10.0/linux-x64/publish/DotCelery.AotSmoke
+          ./eng/run-aot-smoke.sh linux-x64

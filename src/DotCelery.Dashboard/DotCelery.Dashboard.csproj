@@ -33,7 +33,7 @@
     Inputs="$(DashboardToolingRoot)/package.json;$(DashboardToolingRoot)/package-lock.json"
     Outputs="$(DashboardToolingRoot)/node_modules/.package-lock.json"
   >
-    <Exec WorkingDirectory="$(DashboardToolingRoot)" Command="npm ci" />
+    <Exec WorkingDirectory="$(DashboardToolingRoot)" Command="npm ci --ignore-scripts" />
   </Target>
 
   <Target
