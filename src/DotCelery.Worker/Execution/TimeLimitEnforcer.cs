@@ -10,14 +10,22 @@ namespace DotCelery.Worker.Execution;
 public sealed class TimeLimitEnforcer
 {
     private readonly ILogger<TimeLimitEnforcer> _logger;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TimeLimitEnforcer"/> class.
     /// </summary>
     /// <param name="logger">The logger.</param>
     public TimeLimitEnforcer(ILogger<TimeLimitEnforcer> logger)
+        : this(logger, TimeProvider.System) { }
+
+    /// <summary>Initializes the enforcer with the clock used for execution deadlines.</summary>
+    /// <param name="logger">The logger.</param>
+    /// <param name="timeProvider">The deadline clock.</param>
+    public TimeLimitEnforcer(ILogger<TimeLimitEnforcer> logger, TimeProvider timeProvider)
     {
         _logger = logger;
+        _timeProvider = timeProvider;
     }
 
     /// <summary>
@@ -43,21 +51,16 @@ public sealed class TimeLimitEnforcer
 
         // Create a CTS that will be cancelled on any time limit (soft or hard)
         // Cancellation is cooperative; keep ownership until execution has actually stopped.
-        using var executionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-
-        using var softLimitCts = policy.SoftLimit.HasValue ? new CancellationTokenSource() : null;
-
-        // Set up hard limit timeout
-        if (policy.HardLimit.HasValue)
-        {
-            executionCts.CancelAfter(policy.HardLimit.Value);
-        }
-
-        // Set up soft limit timeout
-        if (softLimitCts is not null && policy.SoftLimit.HasValue)
-        {
-            softLimitCts.CancelAfter(policy.SoftLimit.Value);
-        }
+        using var hardLimitCts = policy.HardLimit is { } hardLimit
+            ? new CancellationTokenSource(hardLimit, _timeProvider)
+            : null;
+        using var executionCts = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            hardLimitCts?.Token ?? CancellationToken.None
+        );
+        using var softLimitCts = policy.SoftLimit is { } softLimit
+            ? new CancellationTokenSource(softLimit, _timeProvider)
+            : null;
 
         var executionToken = executionCts.Token;
         var softLimitExceeded = false;

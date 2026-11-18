@@ -37,3 +37,4 @@ DotCelery.Worker.ResultExceptionDetail
 DotCelery.Worker.ResultExceptionDetail.TypeOnly = 0 -> DotCelery.Worker.ResultExceptionDetail
 DotCelery.Worker.ResultExceptionDetail.Message = 1 -> DotCelery.Worker.ResultExceptionDetail
 DotCelery.Worker.ResultExceptionDetail.Full = 2 -> DotCelery.Worker.ResultExceptionDetail
+DotCelery.Worker.Execution.TimeLimitEnforcer.TimeLimitEnforcer(Microsoft.Extensions.Logging.ILogger<DotCelery.Worker.Execution.TimeLimitEnforcer!>! logger, System.TimeProvider! timeProvider) -> void

@@ -280,21 +280,22 @@ public sealed class CircuitBreakerTests : IDisposable
     }
 
     [Fact]
-    public async Task HalfOpen_OnSuccess_TransitionsToClosed()
+    public void HalfOpen_OnSuccess_TransitionsToClosed()
     {
         var stateChanges = new List<CircuitStateChangedEventArgs>();
 
         var options = new CircuitBreakerOptions
         {
             FailureThreshold = 3,
-            OpenDuration = TimeSpan.FromMilliseconds(50),
+            OpenDuration = TimeSpan.FromSeconds(30),
             SuccessThreshold = 2,
         };
 
         using var circuitBreaker = new CircuitBreaker(
             "test",
             options,
-            NullLogger<CircuitBreaker>.Instance
+            NullLogger<CircuitBreaker>.Instance,
+            _timeProvider
         );
 
         circuitBreaker.StateChanged += (_, args) => stateChanges.Add(args);
@@ -307,8 +308,7 @@ public sealed class CircuitBreakerTests : IDisposable
 
         Assert.Equal(CircuitState.Open, circuitBreaker.State);
 
-        // Wait for transition to half-open
-        await Task.Delay(100, CancellationToken.None);
+        _timeProvider.Advance(options.OpenDuration);
 
         Assert.Equal(CircuitState.HalfOpen, circuitBreaker.State);
 
@@ -320,19 +320,20 @@ public sealed class CircuitBreakerTests : IDisposable
     }
 
     [Fact]
-    public async Task HalfOpen_OnFailure_TransitionsBackToOpen()
+    public void HalfOpen_OnFailure_TransitionsBackToOpen()
     {
         var options = new CircuitBreakerOptions
         {
             FailureThreshold = 3,
-            OpenDuration = TimeSpan.FromMilliseconds(50),
+            OpenDuration = TimeSpan.FromSeconds(30),
             SuccessThreshold = 2,
         };
 
         using var circuitBreaker = new CircuitBreaker(
             "test",
             options,
-            NullLogger<CircuitBreaker>.Instance
+            NullLogger<CircuitBreaker>.Instance,
+            _timeProvider
         );
 
         // Trip the circuit
@@ -341,8 +342,7 @@ public sealed class CircuitBreakerTests : IDisposable
             circuitBreaker.RecordFailure();
         }
 
-        // Wait for half-open
-        await Task.Delay(100, CancellationToken.None);
+        _timeProvider.Advance(options.OpenDuration);
 
         Assert.Equal(CircuitState.HalfOpen, circuitBreaker.State);
 
