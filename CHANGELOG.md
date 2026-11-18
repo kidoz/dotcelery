@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Runtime packages, samples, and tests now target .NET 11 alongside .NET 10. CI exercises both targets, including package consumption and Native AOT.
+- Message signing supports overlapping verification keys, key IDs, and verification-only hosts. Producers configure signing through `DotCelery.Core`.
+- Dashboard audit events record the authenticated operator, tenant, and target tasks. Hosts can configure the UI's Content Security Policy and framing.
+
+### Changed
+- Workers store bounded exception messages without stack traces by default. Full result details and dead-letter stack traces are opt-in.
+- Queued signals use stable type names. Existing built-in entries remain readable, and custom queued signal types require explicit registration.
+- Message security options validate at startup. Keys shorter than 32 bytes warn during migration, and an enabled message-age check rejects timestamps more than five minutes ahead by default.
+- Build and release jobs use central NuGet versions and audit dashboard dependencies. Only the publishing job enters the NuGet environment.
+
+### Fixed
+- Dashboard search and bulk filters have bounded scans, dashboard responses carry security headers, and SignalR task watches have per-connection limits.
+- Dashboard endpoint mapping uses the configured prefix by default, and bulk action previews bound concurrent task record lookups.
+- Redis scans beyond the first page of pending deliveries, cancels execution on claim loss, and reports claim renewal failures. RabbitMQ closes consumer channels asynchronously.
+- Beat snapshots tolerate concurrent schedule edits, flush local state before replacing it, and report unreadable state. MongoDB warns when using its development connection string outside development.
+- SQL identifiers with a trailing newline are rejected.
+
 ## [1.2.1] - 2026-10-28
 
 ### Added

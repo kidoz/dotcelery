@@ -107,6 +107,11 @@ Known gaps take priority over new features. Planned items have no committed rele
 ### Worker/Execution
 - Connection pooling controls for brokers: separate publish and consume connections with channel pooling for RabbitMQ, which currently separates channels on one connection
 - Batch execution tasks (one invocation processes an input batch), beyond the existing tracking and completion of batches of individual tasks
+- Evaluate an opt-in child-process executor for tasks that need enforced hard limits. The worker owns the broker delivery and requests cooperative cancellation first. It can reclaim the slot only after the child exits, and it records time-limit and child-crash outcomes separately. A prototype must demonstrate bounded time from hard limit to process exit, recovery after a worker crash, and consistent settlement when a child exits as cancellation arrives.
+
+### Package architecture for 2.0
+- Inventory interfaces, models, and JSON contracts in `DotCelery.Abstractions` that still use `DotCelery.Core` namespaces. Propose matching `DotCelery.Abstractions` namespaces for the next major release, with a migration guide and an analyzer code fix for source imports. A namespace change also changes CLR type identity. Evaluate compatibility adapters for interfaces and wire discriminators before removing old names.
+- Raise the minimum signing key length to 32 bytes after the migration warning has shipped. Keep accepting legacy signed deliveries during coordinated rotations.
 
 ### CLI
 - `dotcelery` command-line tool (worker, beat, inspect, task management, queue ops)
