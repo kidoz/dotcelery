@@ -118,3 +118,5 @@ DotCelery.Core.Security.MessageSecurityOptions.TenantSigningKeyIds.set -> void
 DotCelery.Core.Security.MessageSecurityOptions.TenantAdditionalVerificationKeys.get -> System.Collections.Generic.Dictionary<string!, System.Collections.Generic.Dictionary<string!, byte[]!>!>!
 DotCelery.Core.Security.MessageSecurityOptions.TenantAdditionalVerificationKeys.set -> void
 static DotCelery.Core.Security.MessageSecurityOptions.GenerateKey() -> byte[]!
+DotCelery.Core.Abstractions.BrokerMessage.ClaimLost.get -> System.Threading.CancellationToken
+DotCelery.Core.Abstractions.BrokerMessage.ClaimLost.init -> void

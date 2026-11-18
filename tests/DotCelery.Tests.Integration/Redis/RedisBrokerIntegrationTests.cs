@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Text.Json;
 using System.Threading.Channels;
 using DotCelery.Broker.Redis;
@@ -390,6 +391,118 @@ public class RedisBrokerIntegrationTests : IAsyncLifetime
 
         var reclaimed = await ReadForAsync(other, queue, TimeSpan.FromSeconds(15));
         Assert.Single(reclaimed);
+    }
+
+    [Fact]
+    public async Task ConsumeAsync_ReclaimsOrphansBeyondTheFirstPendingPage()
+    {
+        const string queue = "reclaim-paged";
+        const string stream = "dotcelery:stream:" + queue;
+        const string group = "dotcelery-workers";
+        const int activeCount = 15;
+        const int orphanCount = 5;
+        var tasks = Enumerable
+            .Range(0, activeCount + orphanCount)
+            .Select(_ => CreateTestMessage() with { Queue = queue })
+            .ToArray();
+        await using var broker = CreateBroker(options =>
+        {
+            options.ConsumerName = "reclaimer";
+            options.ClaimTimeout = TimeSpan.FromSeconds(15);
+            options.PendingCheckInterval = TimeSpan.FromSeconds(30);
+        });
+        foreach (var task in tasks)
+            await broker.PublishAsync(task);
+        await using var connection = await ConnectionMultiplexer.ConnectAsync(
+            _container.GetConnectionString()
+        );
+        var db = connection.GetDatabase();
+        await db.StreamCreateConsumerGroupAsync(stream, group, "0-0");
+        var active = await db.StreamReadGroupAsync(stream, group, "active", ">", activeCount);
+        var orphaned = await db.StreamReadGroupAsync(stream, group, "stopped", ">", orphanCount);
+        Assert.Equal(activeCount, active.Length);
+        Assert.Equal(orphanCount, orphaned.Length);
+        foreach (var entry in orphaned)
+            await db.ExecuteAsync(
+                "XCLAIM",
+                stream,
+                group,
+                "stopped",
+                0,
+                entry.Id,
+                "IDLE",
+                60_000,
+                "JUSTID"
+            );
+
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var received = new List<string>();
+        await foreach (var delivery in broker.ConsumeAsync([queue], deadline.Token))
+        {
+            received.Add(delivery.Message.Id);
+            await broker.AckAsync(delivery, deadline.Token);
+            if (received.Count == orphanCount)
+                break;
+        }
+        Assert.Equal(tasks.Skip(activeCount).Select(task => task.Id), received);
+    }
+
+    [Fact]
+    public async Task ConsumeAsync_SignalsWhenRedisTransfersTheClaim()
+    {
+        const string queue = "transfer-ownership";
+        const string stream = "dotcelery:stream:" + queue;
+        const string group = "dotcelery-workers";
+        await using var holder = CreateBroker(options =>
+        {
+            options.ConsumerName = "holder";
+            options.ClaimTimeout = TimeSpan.FromSeconds(3);
+        });
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await holder.PublishAsync(CreateTestMessage() with { Queue = queue }, deadline.Token);
+        await using var consumer = holder
+            .ConsumeAsync([queue], deadline.Token)
+            .GetAsyncEnumerator(deadline.Token);
+        Assert.True(await consumer.MoveNextAsync());
+        var delivery = consumer.Current;
+        var lost = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var recordedFailure = new TaskCompletionSource<long>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, source) =>
+        {
+            if (instrument.Name == "dotcelery.broker.claim_renewal_failures")
+                source.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<long>(
+            (_, count, _, _) => recordedFailure.TrySetResult(count)
+        );
+        listener.Start();
+        using var notice = delivery.ClaimLost.Register(() => lost.TrySetResult());
+
+        await using var connection = await ConnectionMultiplexer.ConnectAsync(
+            _container.GetConnectionString()
+        );
+        var db = connection.GetDatabase();
+        var pending = Assert.Single(
+            await db.StreamPendingMessagesAsync(stream, group, 10, RedisValue.Null)
+        );
+        Assert.Single(
+            await db.StreamClaimIdsOnlyAsync(
+                stream,
+                group,
+                "another-worker",
+                0,
+                [pending.MessageId]
+            )
+        );
+        await lost.Task.WaitAsync(deadline.Token);
+        Assert.Equal(1, await recordedFailure.Task.WaitAsync(deadline.Token));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            holder.AckAsync(delivery).AsTask()
+        );
+        Assert.Single(await db.StreamPendingMessagesAsync(stream, group, 10, "another-worker"));
     }
 
     [Fact]

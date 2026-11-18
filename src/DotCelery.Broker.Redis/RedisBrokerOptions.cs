@@ -56,8 +56,8 @@ public sealed class RedisBrokerOptions
     public string ConsumerGroupName { get; set; } = "dotcelery-workers";
 
     /// <summary>
-    /// Gets or sets the consumer name for this instance.
-    /// If null, a unique name is auto-generated using machine name and process ID.
+    /// Gets or sets a distinct consumer name for this broker instance.
+    /// If null, a unique name is generated automatically.
     /// </summary>
     public string? ConsumerName { get; set; }
 

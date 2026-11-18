@@ -39,6 +39,8 @@ internal sealed class EtaWaiter(
         }
 
         await settler.DelayAsync(wait, executionToken).ConfigureAwait(false);
+        if (message.ClaimLost.IsCancellationRequested)
+            return false;
 
         if (eta > timeProvider.GetUtcNow())
         {

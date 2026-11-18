@@ -95,4 +95,7 @@ public sealed class BrokerMessage
     /// Gets the message signature transported by the broker, if present.
     /// </summary>
     public string? Signature { get; init; }
+
+    /// <summary>Gets a token cancelled if this broker delivery loses its claim.</summary>
+    public CancellationToken ClaimLost { get; init; }
 }
