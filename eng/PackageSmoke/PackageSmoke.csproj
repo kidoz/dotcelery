@@ -2,12 +2,14 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <!-- Passed by eng/verify-packages.sh, which derives it from the packed Core package -->
     <DotCeleryVersion Condition="'$(DotCeleryVersion)' == ''">0.0.0-local</DotCeleryVersion>
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.402" />
     <PackageReference Include="DotCelery.Core" Version="$(DotCeleryVersion)" />
     <PackageReference Include="DotCelery.Client" Version="$(DotCeleryVersion)" />
     <PackageReference Include="DotCelery.Worker" Version="$(DotCeleryVersion)" />

@@ -9,9 +9,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="StackExchange.Redis" Version="3.4.5" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
-    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.13" />
-    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.402" />
+    <PackageReference Include="StackExchange.Redis" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
   </ItemGroup>
 </Project>
