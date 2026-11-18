@@ -284,8 +284,15 @@ public class TaskExecutorTests : IAsyncDisposable
         );
     }
 
-    [Fact]
-    public async Task ExecuteAsync_TaskThrowsException_ReturnsFailure()
+    [Theory]
+    [InlineData(ResultExceptionDetail.TypeOnly, "", false)]
+    [InlineData(ResultExceptionDetail.Message, "Test exception", false)]
+    [InlineData(ResultExceptionDetail.Full, "Test exception", true)]
+    public async Task ExecuteAsync_TaskThrowsException_PersistsConfiguredDetails(
+        ResultExceptionDetail detail,
+        string expectedMessage,
+        bool storesStackTrace
+    )
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -312,7 +319,7 @@ public class TaskExecutorTests : IAsyncDisposable
             _backend,
             _revocationManager,
             filterPipeline,
-            Options.Create(new WorkerOptions()),
+            Options.Create(new WorkerOptions { ResultExceptionDetail = detail }),
             NullLogger<TaskExecutor>.Instance
         );
 
@@ -328,7 +335,13 @@ public class TaskExecutorTests : IAsyncDisposable
         Assert.NotNull(result.Exception);
         // With compiled delegates, exceptions propagate directly without TargetInvocationException wrapping
         Assert.Equal("System.InvalidOperationException", result.Exception.Type);
-        Assert.Equal("Test exception", result.Exception.Message);
+        Assert.Equal(expectedMessage, result.Exception.Message);
+        Assert.Equal(storesStackTrace, result.Exception.StackTrace is not null);
+        var stored = await _backend.GetResultAsync(
+            message.Message.Id,
+            TestContext.Current.CancellationToken
+        );
+        Assert.Equal(result.Exception, stored?.Exception);
     }
 
     [Fact]
@@ -474,6 +487,40 @@ public class TaskExecutorTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task ExecuteAsync_CapsRedactedMessagesAndInnerExceptionDepth()
+    {
+        var registry = new TaskRegistry();
+        registry.Register(typeof(ThrowingTask), ThrowingTask.TaskName);
+        var executor = CreateExecutor(
+            registry,
+            options: new WorkerOptions
+            {
+                MaxExceptionMessageLength = 3,
+                ExceptionMessageRedactor = _ => "redacted",
+            }
+        );
+        var delivery = CreateBrokerMessage(
+            "deep-error",
+            ThrowingTask.TaskName,
+            new TestInput { Value = 12 }
+        );
+        var result = await executor.ExecuteAsync(
+            delivery,
+            "worker",
+            TestContext.Current.CancellationToken
+        );
+
+        var depth = 0;
+        for (var error = result.Exception; error is not null; error = error.InnerException)
+        {
+            depth++;
+            Assert.Equal("red", error.Message);
+            Assert.Null(error.StackTrace);
+        }
+        Assert.Equal(5, depth);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_StoresResultInBackend()
     {
         var taskId = "stored-task";
@@ -490,7 +537,11 @@ public class TaskExecutorTests : IAsyncDisposable
         Assert.Equal(TaskState.Success, storedResult.State);
     }
 
-    private TaskExecutor CreateExecutor(TaskRegistry registry, IInboxStore? inboxStore = null) =>
+    private TaskExecutor CreateExecutor(
+        TaskRegistry registry,
+        IInboxStore? inboxStore = null,
+        WorkerOptions? options = null
+    ) =>
         new(
             registry,
             _serviceProvider,
@@ -499,7 +550,8 @@ public class TaskExecutorTests : IAsyncDisposable
             _revocationManager,
             _filterPipeline,
             Options.Create(
-                new WorkerOptions { EnableRevocation = false, EnableRateLimiting = false }
+                options
+                    ?? new WorkerOptions { EnableRevocation = false, EnableRateLimiting = false }
             ),
             NullLogger<TaskExecutor>.Instance,
             inboxStore: inboxStore
@@ -611,7 +663,10 @@ public class TaskExecutorTests : IAsyncDisposable
             CancellationToken cancellationToken = default
         )
         {
-            throw new InvalidOperationException("Test exception");
+            Exception error = new InvalidOperationException("Test exception");
+            for (var depth = 1; depth < input.Value; depth++)
+                error = new InvalidOperationException("Test exception", error);
+            throw error;
         }
     }
 

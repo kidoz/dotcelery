@@ -23,9 +23,9 @@ public sealed class DeadLetterOptions
     public int MaxMessages { get; set; } = 10_000;
 
     /// <summary>
-    /// Gets or sets whether to include stack traces in DLQ messages.
+    /// Gets or sets whether to include stack traces in DLQ messages. Defaults to false.
     /// </summary>
-    public bool IncludeStackTrace { get; set; } = true;
+    public bool IncludeStackTrace { get; set; }
 
     /// <summary>
     /// Gets or sets the reasons that should trigger dead-lettering.

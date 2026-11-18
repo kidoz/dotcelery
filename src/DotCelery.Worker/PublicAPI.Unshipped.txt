@@ -27,3 +27,13 @@ DotCelery.Worker.Sagas.SagaOrchestrator.ContinueStepAsync(string! sagaId, string
 
 DotCelery.Worker.Filters.PartitionedExecutionFilter.PartitionedExecutionFilter(DotCelery.Core.Partitioning.IPartitionLockStore! lockStore, Microsoft.Extensions.Options.IOptions<DotCelery.Worker.Filters.PartitionOptions!>! options, Microsoft.Extensions.Logging.ILogger<DotCelery.Worker.Filters.PartitionedExecutionFilter!>! logger, System.TimeProvider! timeProvider) -> void
 DotCelery.Worker.Filters.PartitionedExecutionFilter.DisposeAsync() -> System.Threading.Tasks.ValueTask
+DotCelery.Worker.WorkerOptions.ResultExceptionDetail.get -> DotCelery.Worker.ResultExceptionDetail
+DotCelery.Worker.WorkerOptions.ResultExceptionDetail.set -> void
+DotCelery.Worker.WorkerOptions.MaxExceptionMessageLength.get -> int
+DotCelery.Worker.WorkerOptions.MaxExceptionMessageLength.set -> void
+DotCelery.Worker.WorkerOptions.ExceptionMessageRedactor.get -> System.Func<System.Exception!, string?>?
+DotCelery.Worker.WorkerOptions.ExceptionMessageRedactor.set -> void
+DotCelery.Worker.ResultExceptionDetail
+DotCelery.Worker.ResultExceptionDetail.TypeOnly = 0 -> DotCelery.Worker.ResultExceptionDetail
+DotCelery.Worker.ResultExceptionDetail.Message = 1 -> DotCelery.Worker.ResultExceptionDetail
+DotCelery.Worker.ResultExceptionDetail.Full = 2 -> DotCelery.Worker.ResultExceptionDetail

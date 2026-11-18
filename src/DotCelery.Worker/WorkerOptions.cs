@@ -47,6 +47,17 @@ public sealed class WorkerOptions
     /// </summary>
     public TimeSpan InfrastructureFailureRequeueDelay { get; set; } = TimeSpan.FromSeconds(5);
 
+    /// <summary>Gets or sets which exception details are stored with a failed task result.</summary>
+    public ResultExceptionDetail ResultExceptionDetail { get; set; } =
+        ResultExceptionDetail.Message;
+
+    /// <summary>Gets or sets the maximum length of a stored result exception message.</summary>
+    public int MaxExceptionMessageLength { get; set; } = 1024;
+
+    /// <summary>Gets or sets a callback to redact exception messages before storing them.</summary>
+    /// <remarks>A null return value omits the message.</remarks>
+    public Func<Exception, string?>? ExceptionMessageRedactor { get; set; }
+
     // ========== Delay Queue Settings ==========
 
     /// <summary>

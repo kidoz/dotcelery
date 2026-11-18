@@ -70,3 +70,12 @@ Source: [TaskState.cs](../../src/DotCelery.Abstractions/Models/TaskState.cs) and
 
 For a complete example, follow [Run your first task](../tutorials/first-task.md).
 For redelivery and repeated effects, read [Delivery and retries](../explanation/delivery-and-retries.md).
+
+## Stored failure details
+
+`WorkerOptions.ResultExceptionDetail` defaults to `Message`, which stores the
+exception type and message. `TypeOnly` omits the message, and `Full` adds the
+stack trace. `MaxExceptionMessageLength` caps each message, and
+`ExceptionMessageRedactor` can replace or omit it. The stored chain contains
+at most five exceptions. `DeadLetterOptions.IncludeStackTrace` separately
+controls stack traces in dead-letter records and defaults to `false`.
