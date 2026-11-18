@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-18
+
 ### Added
 - Runtime packages, samples, and tests now target .NET 11 alongside .NET 10. CI exercises both targets, including package consumption and Native AOT.
 - Message signing supports overlapping verification keys, key IDs, and verification-only hosts. Producers configure signing through `DotCelery.Core`.
@@ -323,7 +325,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Requires .NET 10.0 and C# 14
 - First public release
 
-[Unreleased]: https://github.com/kidoz/dotcelery/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/kidoz/dotcelery/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/kidoz/dotcelery/releases/tag/v1.3.0
 [1.2.1]: https://github.com/kidoz/dotcelery/releases/tag/v1.2.1
 [1.2.0]: https://github.com/kidoz/dotcelery/releases/tag/v1.2.0
 [1.1.0]: https://github.com/kidoz/dotcelery/releases/tag/v1.1.0
