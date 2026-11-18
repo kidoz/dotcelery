@@ -1,1 +1,2 @@
 #nullable enable
+DotCelery.Broker.RabbitMQ.RabbitMQBroker.RabbitMQBroker(Microsoft.Extensions.Options.IOptions<DotCelery.Broker.RabbitMQ.RabbitMQBrokerOptions!>! options, Microsoft.Extensions.Logging.ILogger<DotCelery.Broker.RabbitMQ.RabbitMQBroker!>! logger, Microsoft.Extensions.Options.IOptions<DotCelery.Core.DeadLetter.DeadLetterOptions!>! deadLetterOptions, DotCelery.Core.Abstractions.IDeadLetterStore? deadLetterStore, DotCelery.Core.Security.IMessageSecurityValidator? messageSecurityValidator, DotCelery.Core.Abstractions.IQueueMetrics? queueMetrics) -> void
