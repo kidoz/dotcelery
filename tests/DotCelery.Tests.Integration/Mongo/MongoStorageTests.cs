@@ -15,9 +15,62 @@ using DotCelery.Tests.Conformance.Storage;
 using DotCelery.Tests.Conformance.Stores;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Testcontainers.MongoDb;
 
 namespace DotCelery.Tests.Integration.Mongo;
+
+public sealed class MongoStartupDiagnosticsTests
+{
+    [Fact]
+    public async Task DefaultConnection_LogsAWarningInProduction()
+    {
+        var logs = new StartupLogs();
+        var builder = Host.CreateApplicationBuilder(
+            new HostApplicationBuilderSettings { EnvironmentName = Environments.Production }
+        );
+        builder.Logging.ClearProviders();
+        builder.Logging.AddProvider(logs);
+        builder.Services.AddMongoStorage();
+        using var host = builder.Build();
+        var check = Assert.Single(
+            host.Services.GetServices<IHostedService>(),
+            service => service is not StoragePurgeService
+        );
+        await check.StartAsync(TestContext.Current.CancellationToken);
+        Assert.Contains(
+            "MongoDB storage is using the built-in development connection string",
+            Assert.Single(logs.Warnings),
+            StringComparison.Ordinal
+        );
+    }
+
+    private sealed class StartupLogs : ILoggerProvider, ILogger
+    {
+        public List<string> Warnings { get; } = [];
+
+        public ILogger CreateLogger(string categoryName) => this;
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => logLevel == LogLevel.Warning;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter
+        )
+        {
+            if (IsEnabled(logLevel))
+                Warnings.Add(formatter(state, exception));
+        }
+
+        public void Dispose() { }
+    }
+}
 
 /// <summary>
 /// A MongoDB container shared by all storage tests. Tests use unique names, so they can share it.

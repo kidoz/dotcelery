@@ -1,3 +1,4 @@
+using DotCelery.Backend.Mongo.Services;
 using DotCelery.Backend.Mongo.Storage;
 using DotCelery.Core.Abstractions;
 using DotCelery.Core.Batches;
@@ -10,6 +11,7 @@ using DotCelery.Core.Storage;
 using DotCelery.Core.Storage.Stores;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 namespace DotCelery.Backend.Mongo.Extensions;
@@ -62,6 +64,7 @@ public static class ServiceCollectionExtensions
             sp.GetService<TimeProvider>()
         ));
         services.AddStoragePurge();
+        services.AddHostedService<MongoInsecureDefaultsCheck>();
 
         return services;
     }
