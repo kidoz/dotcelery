@@ -50,6 +50,17 @@ public sealed class DashboardMiddleware
             return;
         }
 
+        var headers = context.Response.Headers;
+        headers.ContentSecurityPolicy = _options.ContentSecurityPolicy;
+        headers.XContentTypeOptions = "nosniff";
+        headers["Referrer-Policy"] = "no-referrer";
+        headers.CacheControl = "no-store";
+        if (!_options.AllowFraming)
+        {
+            headers.Append("Content-Security-Policy", "frame-ancestors 'none'");
+            headers.XFrameOptions = "DENY";
+        }
+
         var isAuthorized = await DashboardAuthorization
             .IsAuthorizedAsync(context, _options)
             .ConfigureAwait(false);

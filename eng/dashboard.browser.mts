@@ -121,8 +121,16 @@ test("built embedded assets load at nested prefixes, slashless roots, and SPA pa
 }, testInfo) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.text().includes("Content Security Policy")) {
+      errors.push(message.text());
+    }
+  });
   await fixture(page);
-  await page.goto(prefix);
+  const response = await page.goto(prefix);
+  expect(response?.headers()["content-security-policy"]).toContain(
+    "frame-ancestors 'none'",
+  );
   await expect(
     page.getByRole("heading", { name: "Execution overview" }),
   ).toBeVisible();

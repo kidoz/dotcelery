@@ -6,6 +6,8 @@ using DotCelery.Dashboard.Controllers;
 using DotCelery.Dashboard.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 
@@ -194,6 +196,117 @@ public sealed class DashboardApiControllerTests
         await _revocations
             .Received(1)
             .RevokeAsync("2", Arg.Any<RevokeOptions>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PreviewFilter_ReportsTruncationAtTheConfiguredScanLimit()
+    {
+        var examined = ConfigureTaskRecords(50_000);
+        var controller = CreateController(options => options.MaxFilterScan = 155);
+        var result = await controller.PreviewFilter(
+            new TaskFilter { State = TaskState.Success, TaskNamePattern = "other.*" },
+            cancellationToken: TestContext.Current.CancellationToken
+        );
+        var preview = OkValue(result);
+        Assert.Empty(preview.Tasks);
+        Assert.True(preview.Truncated);
+        Assert.True(preview.HasMore);
+        Assert.Equal(155, examined());
+    }
+
+    [Fact]
+    public async Task PreviewFilter_RefusesPagesOutsideTheScanBudget()
+    {
+        var controller = CreateController(options => options.MaxFilterScan = 100);
+        var result = await controller.PreviewFilter(
+            new TaskFilter(),
+            page: 3,
+            pageSize: 50,
+            cancellationToken: TestContext.Current.CancellationToken
+        );
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task BulkRevoke_AnIncompleteScanLeavesTasksUntouched()
+    {
+        var examined = ConfigureTaskRecords(500);
+        var controller = CreateController(options => options.MaxFilterScan = 120);
+        var result = await controller.BulkRevoke(
+            new BulkRevokeRequest
+            {
+                Filter = new TaskFilter { State = TaskState.Success, TaskNamePattern = "existing" },
+            },
+            TestContext.Current.CancellationToken
+        );
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Equal(120, examined());
+        await _revocations
+            .DidNotReceiveWithAnyArgs()
+            .RevokeAsync(Arg.Any<string>(), default, default);
+    }
+
+    [Fact]
+    public async Task BulkRevoke_LogsStructuredAuditInformation()
+    {
+        var factory = Substitute.For<ILoggerFactory>();
+        var logger = Substitute.For<ILogger>();
+        logger.IsEnabled(LogLevel.Information).Returns(true);
+        factory.CreateLogger("DotCelery.Dashboard.Audit").Returns(logger);
+        await using var services = new ServiceCollection()
+            .AddSingleton(factory)
+            .BuildServiceProvider();
+        var controller = CreateController();
+        controller.HttpContext.RequestServices = services;
+
+        await controller.BulkRevoke(
+            new BulkRevokeRequest { TaskIds = ["first", "second"] },
+            TestContext.Current.CancellationToken
+        );
+
+        var call = Assert.Single(
+            logger.ReceivedCalls(),
+            invocation => invocation.GetMethodInfo().Name == nameof(ILogger.Log)
+        );
+        Assert.Equal(LogLevel.Information, call.GetArguments()[0]);
+        var fields = Assert
+            .IsAssignableFrom<IEnumerable<KeyValuePair<string, object?>>>(call.GetArguments()[2])
+            .ToDictionary();
+        Assert.Equal("bulk-revoke", fields["Operation"]);
+        Assert.Equal(2, fields["TaskCount"]);
+        Assert.Equal("first,second", fields["TaskIds"]);
+    }
+
+    private Func<int> ConfigureTaskRecords(int available)
+    {
+        var examined = 0;
+#pragma warning disable CA2012 // NSubstitute consumes the configured ValueTask.
+        _provider
+            .GetTasksByStateAsync(
+                TaskState.Success,
+                Arg.Any<int>(),
+                Arg.Any<int>(),
+                Arg.Any<CancellationToken>()
+            )
+            .Returns(call =>
+            {
+                var offset = call.ArgAt<int>(2);
+                var count = Math.Clamp(available - offset, 0, call.ArgAt<int>(1));
+                examined += count;
+                return ValueTask.FromResult<IReadOnlyList<TaskSummary>>([
+                    .. Enumerable
+                        .Range(offset, count)
+                        .Select(id => new TaskSummary
+                        {
+                            TaskId = $"task-{id}",
+                            TaskName = "existing",
+                            Queue = "celery",
+                            State = "Success",
+                        }),
+                ]);
+            });
+#pragma warning restore CA2012
+        return () => examined;
     }
 
     private DashboardApiController CreateController(Action<DashboardOptions>? configure = null)

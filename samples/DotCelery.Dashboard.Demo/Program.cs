@@ -65,7 +65,7 @@ builder.Services.AddHostedService<TrafficGeneratorService>();
 var app = builder.Build();
 
 app.UseDotCeleryDashboard(); // the UI page; API and hub paths pass through to their endpoints
-app.MapDotCeleryDashboard(dashboardPrefix); // API controllers + SignalR hub
+app.MapDotCeleryDashboard(); // API controllers + SignalR hub
 app.MapGet("/", () => Results.Redirect($"{dashboardPrefix.TrimEnd('/')}/"));
 
 app.Run();

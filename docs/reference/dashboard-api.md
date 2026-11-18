@@ -100,7 +100,10 @@ All supplied criteria are combined by `GET /tasks/search`.
 
 The update timestamp is `completedAt`, otherwise `startedAt`, otherwise `sentAt`.
 A supplied `from` must precede `until`. The response has `tasks`, `page`,
-`pageSize`, and `hasMore`; it does not include a total count. Task summaries use
+`pageSize`, `hasMore`, and `truncated`. When `truncated` is true, the server
+reached `DashboardOptions.MaxFilterScan` and more matches may exist. Narrow the
+filters when this happens. Pages starting at or beyond the scan budget receive
+HTTP 400. Task summaries use
 string state names and TimeSpan strings for durations.
 
 ## Task operations
@@ -124,7 +127,9 @@ Bulk results include `processedCount`, `successCount`, `failureCount`, optional
 success means the request was accepted; a running task can still finish.
 
 Explicit ID lists exceeding `MaxBulkOperationSize` are rejected. Filter-selected
-operations are bounded. `TaskFilter` uses `state`, `taskNamePattern`, `queue`,
+operations are bounded. `/tasks/filter` reports `truncated` when it exhausts its
+scan budget. Bulk revoke returns HTTP 400 without modifying tasks if that budget
+is exhausted before it can complete the selection. `TaskFilter` uses `state`, `taskNamePattern`, `queue`,
 `completedAfter`, and `completedBefore`; it is distinct from task search parameters.
 
 Source: [DashboardQueries.cs](../../src/DotCelery.Dashboard/Controllers/DashboardQueries.cs),

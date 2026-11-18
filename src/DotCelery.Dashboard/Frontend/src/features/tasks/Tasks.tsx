@@ -186,9 +186,11 @@ export function Tasks({
         <span role="status" aria-live="polite">
           {!taskPage
             ? "Loading tasks…"
-            : tasks.length
-              ? `Showing ${number(start + 1)}–${number(start + tasks.length)} · ${taskPage.hasMore ? "more available" : "end of results"}`
-              : "No matching tasks"}
+            : taskPage.truncated
+              ? "Search limit reached. Narrow the filters for complete results."
+              : tasks.length
+                ? `Showing ${number(start + 1)}–${number(start + tasks.length)} · ${taskPage.hasMore ? "more available" : "end of results"}`
+                : "No matching tasks"}
         </span>
         {writable && (
           <div className="flex flex-wrap items-center gap-2">
@@ -320,7 +322,7 @@ export function Tasks({
         </button>
         <button
           className="button secondary"
-          disabled={!taskPage?.hasMore}
+          disabled={!taskPage?.hasMore || taskPage.truncated}
           onClick={() => update({ page: filters.page + 1 })}
         >
           Next →

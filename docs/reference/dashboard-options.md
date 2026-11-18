@@ -19,6 +19,9 @@
 | `RefreshIntervalSeconds`    | `5`                   | Frontend refresh interval; capabilities report at least one second                             |
 | `PageSize`                  | `50`                  | Maximum requested page size; the effective cap is bounded to 1–1000                            |
 | `MaxBulkOperationSize`      | `1000`                | Maximum explicit IDs in a bulk request and bound for filter-selected operations                |
+| `MaxFilterScan`             | `10000`               | Maximum task records examined by one search or filter request                                  |
+| `ContentSecurityPolicy`     | Same-origin resources | Content Security Policy directives for dashboard UI responses                                  |
+| `AllowFraming`              | `false`               | Allows framing when the configured policy permits it                                           |
 | `MetricsWindow`             | One hour              | Default metrics window used by the overview endpoint                                           |
 | `TaskRecordRetention`       | 24 hours              | Retention of dashboard task records                                                            |
 | `WorkerOfflineTimeout`      | 90 seconds            | Heartbeat budget before a worker becomes unresponsive                                          |
@@ -34,8 +37,8 @@ dead-letter store. The capability response reports those effective conditions.
 With `RequireAuthorization = true`, a missing callback denies access. A callback
 that is configured still runs when `RequireAuthorization = false`.
 
-The normalized prefix gains a leading slash and loses trailing slashes. Use the
-same prefix in registration and endpoint mapping. Titles and prefixes are HTML
+The normalized prefix gains a leading slash and loses trailing slashes. The
+default endpoint mapping reads the registered prefix. Titles and prefixes are HTML
 encoded when injected into the embedded page.
 
 `WorkerOfflineTimeout` and storage `WorkerRetention` are different settings:

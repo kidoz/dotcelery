@@ -70,14 +70,22 @@ public partial class DashboardApiController
         if (query.From.HasValue && query.Until.HasValue && query.From >= query.Until)
             return BadRequest("The start of the range must be before its end.");
         var (page, pageSize, offset) = ClampPaging(query.Page, query.PageSize);
-        var tasks = await QueryTasksAsync(query, pageSize + 1, offset, cancellationToken);
+        if (offset >= FilterScanLimit)
+            return BadRequest("The requested page starts beyond the task search scan limit.");
+        var (tasks, truncated) = await QueryTasksAsync(
+            query,
+            pageSize + 1,
+            offset,
+            cancellationToken
+        );
         return Ok(
             new TaskListResponse
             {
                 Tasks = tasks.Take(pageSize).ToList(),
                 Page = page,
                 PageSize = pageSize,
-                HasMore = tasks.Count > pageSize,
+                HasMore = truncated || tasks.Count > pageSize,
+                Truncated = truncated,
             }
         );
     }
@@ -96,20 +104,41 @@ public partial class DashboardApiController
         var retry = new List<string>();
         if (!_options.ReadOnly && _options.AllowTaskOperations)
         {
-            foreach (var id in ids)
+            if (_revocationStore is not null)
             {
-                var task = await _dataProvider.GetTaskAsync(id, cancellationToken);
+                var taskRecords = new TaskSummary?[ids.Count];
                 if (
-                    _revocationStore is not null
-                    && task?.State
+                    _taskRecords is { IsAvailable: true } records
+                    && _dataProvider is DashboardDataService
+                )
+                    await Parallel.ForEachAsync(
+                        Enumerable.Range(0, ids.Count),
+                        new ParallelOptions
+                        {
+                            MaxDegreeOfParallelism = 8,
+                            CancellationToken = cancellationToken,
+                        },
+                        async (index, ct) =>
+                            taskRecords[index] = await records.GetAsync(ids[index], ct)
+                    );
+
+                for (var index = 0; index < ids.Count; index++)
+                {
+                    var id = ids[index];
+                    var task =
+                        taskRecords[index]
+                        ?? await _dataProvider.GetTaskAsync(id, cancellationToken);
+                    if (
+                        task?.State
                         is "Pending"
                             or "Received"
                             or "Started"
                             or "Progress"
                             or "Retry"
                             or "Requeued"
-                )
-                    cancel.Add(id);
+                    )
+                        cancel.Add(id);
+                }
             }
             if (_deadLetterStore is not null)
                 retry.AddRange((await ResolveRetryMessagesAsync(ids, cancellationToken)).Keys);
@@ -117,45 +146,65 @@ public partial class DashboardApiController
         return Ok(new { CancelTaskIds = cancel, RetryTaskIds = retry });
     }
 
-    private async ValueTask<IReadOnlyList<TaskSummary>> QueryTasksAsync(
+    private async ValueTask<(IReadOnlyList<TaskSummary> Tasks, bool Truncated)> QueryTasksAsync(
         TaskSearchRequest query,
         int limit,
         int offset,
         CancellationToken cancellationToken
     )
     {
-        if (_taskRecords is { IsAvailable: true })
-            return await _taskRecords.SearchAsync(query, limit, offset, cancellationToken);
+        if (_taskRecords is { IsAvailable: true } records)
+            return await records.SearchAsync(
+                query,
+                limit,
+                offset,
+                FilterScanLimit,
+                null,
+                cancellationToken
+            );
 
-        // Custom data providers retain their existing contract. Page their state listings and
-        // keep only the requested prefix, rather than buffering their entire history.
-        var matches = new List<TaskSummary>();
-        var needed = (int)Math.Min((long)offset + limit, int.MaxValue);
+        var (candidates, truncated) = await ReadTaskCandidatesAsync(
+            query,
+            FilterScanLimit,
+            cancellationToken
+        );
+        return (
+            OrderTasks(candidates, query.OldestFirst)
+                .DistinctBy(t => t.TaskId)
+                .Skip(offset)
+                .Take(limit)
+                .ToList(),
+            truncated
+        );
+    }
+
+    private async Task<(List<TaskSummary> Candidates, bool Truncated)> ReadTaskCandidatesAsync(
+        TaskSearchRequest query,
+        int budget,
+        CancellationToken cancellationToken
+    )
+    {
+        var candidates = new List<TaskSummary>();
         var states = query.State.HasValue ? [query.State.Value] : Enum.GetValues<TaskState>();
-        foreach (var state in states)
+        var remaining = new Queue<(TaskState State, int Offset)>(
+            states.Select(state => (state, 0))
+        );
+        while (budget > 0 && remaining.TryDequeue(out var next))
         {
-            var position = 0;
-            while (true)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var batch = await _dataProvider.GetTasksByStateAsync(
-                    state,
-                    100,
-                    position,
-                    cancellationToken
-                );
-                matches.AddRange(batch.Where(query.Matches));
-                matches = OrderTasks(matches, query.OldestFirst).Take(needed).ToList();
-                if (batch.Count < 100)
-                    break;
-                position = checked(position + batch.Count);
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            var count = Math.Min(100, budget);
+            var batch = await _dataProvider.GetTasksByStateAsync(
+                next.State,
+                count,
+                next.Offset,
+                cancellationToken
+            );
+            candidates.AddRange(batch.Take(count).Where(query.Matches));
+            budget -= Math.Min(count, batch.Count);
+            if (batch.Count >= count)
+                remaining.Enqueue((next.State, next.Offset + count));
         }
-        return OrderTasks(matches, query.OldestFirst)
-            .DistinctBy(t => t.TaskId)
-            .Skip(offset)
-            .Take(limit)
-            .ToList();
+        return (candidates, remaining.Count > 0);
     }
 
     private static IOrderedEnumerable<TaskSummary> OrderTasks(

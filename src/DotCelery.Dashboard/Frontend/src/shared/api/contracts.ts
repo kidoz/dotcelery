@@ -33,6 +33,7 @@ export interface TaskList {
   page: number;
   pageSize: number;
   hasMore: boolean;
+  truncated?: boolean;
 }
 
 export interface QueueStats {

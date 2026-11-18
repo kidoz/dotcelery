@@ -99,6 +99,18 @@ public sealed class DashboardOptions
     /// </summary>
     public IReadOnlyCollection<string> AllowedOrigins { get; set; } = [];
 
+    /// <summary>Gets or sets the CSP directives for dashboard UI responses.</summary>
+    /// <remarks>Frame restrictions are controlled separately by <see cref="AllowFraming"/>.</remarks>
+    public string ContentSecurityPolicy { get; set; } =
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+        + "connect-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'";
+
+    /// <summary>Gets or sets whether dashboard pages may be embedded in a frame.</summary>
+    public bool AllowFraming { get; set; }
+
+    /// <summary>Gets or sets the maximum records examined by a task filter request.</summary>
+    public int MaxFilterScan { get; set; } = 10_000;
+
     /// <summary>
     /// Gets or sets the maximum number of tasks one bulk operation may affect. A request with
     /// more explicit task IDs is refused, and a task filter resolves at most this many tasks.

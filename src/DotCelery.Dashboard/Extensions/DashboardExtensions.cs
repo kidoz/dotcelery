@@ -2,13 +2,17 @@ using Asp.Versioning;
 using DotCelery.Core.Dashboard;
 using DotCelery.Core.MultiTenancy;
 using DotCelery.Core.Signals;
+using DotCelery.Dashboard.Controllers;
 using DotCelery.Dashboard.Hubs;
 using DotCelery.Dashboard.Middleware;
 using DotCelery.Dashboard.Routing;
 using DotCelery.Dashboard.Security;
 using DotCelery.Dashboard.Services;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 namespace DotCelery.Dashboard.Extensions;
 
@@ -28,8 +32,6 @@ public static class DashboardExtensions
         Action<DashboardOptions>? configure = null
     )
     {
-        var routeOptions = CreateConfiguredOptions(configure);
-
         services.AddOptions<DashboardOptions>();
 
         if (configure is not null)
@@ -40,7 +42,7 @@ public static class DashboardExtensions
         // Register dashboard services. A registry the application already registered, such as a
         // shared one, wins over the in-process default
         services.TryAddSingleton<IWorkerRegistry, InMemoryWorkerRegistry>();
-        AddDashboardServices(services, routeOptions);
+        AddDashboardServices(services);
 
         return services;
     }
@@ -58,8 +60,6 @@ public static class DashboardExtensions
     )
         where TWorkerRegistry : class, IWorkerRegistry
     {
-        var routeOptions = CreateConfiguredOptions(configure);
-
         services.AddOptions<DashboardOptions>();
 
         if (configure is not null)
@@ -69,15 +69,12 @@ public static class DashboardExtensions
 
         // Register dashboard services with custom worker registry
         services.AddSingleton<IWorkerRegistry, TWorkerRegistry>();
-        AddDashboardServices(services, routeOptions);
+        AddDashboardServices(services);
 
         return services;
     }
 
-    private static void AddDashboardServices(
-        IServiceCollection services,
-        DashboardOptions routeOptions
-    )
+    private static void AddDashboardServices(IServiceCollection services)
     {
         services.AddScoped<IDashboardDataProvider, DashboardDataService>();
         services.AddSingleton<DashboardNotificationService>();
@@ -136,15 +133,27 @@ public static class DashboardExtensions
         services
             .AddControllers(options =>
             {
-                options.Conventions.Add(
-                    new DashboardRoutePrefixConvention(routeOptions.PathPrefix)
-                );
                 options.Filters.AddService<DashboardRequestVerificationFilter>();
                 options.Filters.AddService<DashboardAuthorizationFilter>();
                 options.Filters.AddService<DashboardTenantFilter>();
             })
             .AddApplicationPart(typeof(DashboardExtensions).Assembly);
+
+        services
+            .AddOptions<MvcOptions>()
+            .Configure<IOptions<DashboardOptions>>(
+                (mvc, dashboard) =>
+                    mvc.Conventions.Add(
+                        new DashboardRoutePrefixConvention(dashboard.Value.PathPrefix)
+                    )
+            );
     }
+
+    /// <summary>Registers the dashboard UI middleware using the configured options.</summary>
+    /// <param name="app">The application builder.</param>
+    /// <returns>The application builder for chaining.</returns>
+    public static IApplicationBuilder UseDotCeleryDashboard(this IApplicationBuilder app) =>
+        app.UseMiddleware<DashboardMiddleware>();
 
     /// <summary>
     /// Maps the DotCelery Dashboard middleware and endpoints.
@@ -152,6 +161,7 @@ public static class DashboardExtensions
     /// <param name="app">The application builder.</param>
     /// <param name="configure">Optional configuration action.</param>
     /// <returns>The application builder for chaining.</returns>
+    [Obsolete("Configure the dashboard in AddDotCeleryDashboard before building the application.")]
     public static IApplicationBuilder UseDotCeleryDashboard(
         this IApplicationBuilder app,
         Action<DashboardOptions>? configure = null
@@ -167,11 +177,13 @@ public static class DashboardExtensions
             }
         }
 
-        // Use the dashboard middleware
-        app.UseMiddleware<DashboardMiddleware>();
-
-        return app;
+        return app.UseDotCeleryDashboard();
     }
+
+    /// <summary>Maps the SignalR hub under the configured dashboard prefix.</summary>
+    public static HubEndpointConventionBuilder MapDotCeleryDashboardHub(
+        this IEndpointRouteBuilder endpoints
+    ) => endpoints.MapHub<DashboardHub>($"{ConfiguredPrefix(endpoints)}/hub");
 
     /// <summary>
     /// Maps the DotCelery Dashboard SignalR hub.
@@ -194,8 +206,21 @@ public static class DashboardExtensions
     /// Maps all DotCelery Dashboard endpoints (API controllers and SignalR hub).
     /// </summary>
     /// <param name="endpoints">The endpoint route builder.</param>
+    /// <returns>The dashboard API and hub endpoint conventions.</returns>
+    /// <remarks>Registers attribute-routed controllers in the host through <c>MapControllers()</c>.</remarks>
+    public static IEndpointConventionBuilder MapDotCeleryDashboard(
+        this IEndpointRouteBuilder endpoints
+    )
+    {
+        var controllers = endpoints.MapControllers();
+        return new DashboardEndpointConventions(controllers, endpoints.MapDotCeleryDashboardHub());
+    }
+
+    /// <summary>Maps the dashboard API and the hub using an explicit hub prefix.</summary>
+    /// <param name="endpoints">The endpoint route builder.</param>
     /// <param name="pathPrefix">The path prefix for the dashboard (default: /celery).</param>
     /// <returns>The endpoint route builder for chaining.</returns>
+    /// <remarks>Registers attribute-routed controllers in the host through <c>MapControllers()</c>.</remarks>
     public static IEndpointRouteBuilder MapDotCeleryDashboard(
         this IEndpointRouteBuilder endpoints,
         string pathPrefix = "/celery"
@@ -212,10 +237,41 @@ public static class DashboardExtensions
         return endpoints;
     }
 
-    private static DashboardOptions CreateConfiguredOptions(Action<DashboardOptions>? configure)
+    private static string ConfiguredPrefix(IEndpointRouteBuilder endpoints) =>
+        endpoints
+            .ServiceProvider.GetRequiredService<IOptions<DashboardOptions>>()
+            .Value.NormalizedPathPrefix;
+
+    private sealed class DashboardEndpointConventions(
+        IEndpointConventionBuilder controllers,
+        IEndpointConventionBuilder hub
+    ) : IEndpointConventionBuilder
     {
-        var options = new DashboardOptions();
-        configure?.Invoke(options);
-        return options;
+        public void Add(Action<EndpointBuilder> convention)
+        {
+            hub.Add(convention);
+            controllers.Add(endpoint => ApplyToDashboard(endpoint, convention));
+        }
+
+        public void Finally(Action<EndpointBuilder> convention)
+        {
+            hub.Finally(convention);
+            controllers.Finally(endpoint => ApplyToDashboard(endpoint, convention));
+        }
+
+        private static void ApplyToDashboard(
+            EndpointBuilder endpoint,
+            Action<EndpointBuilder> convention
+        )
+        {
+            if (
+                endpoint
+                    .Metadata.OfType<ControllerActionDescriptor>()
+                    .Any(action =>
+                        action.ControllerTypeInfo.AsType() == typeof(DashboardApiController)
+                    )
+            )
+                convention(endpoint);
+        }
     }
 }

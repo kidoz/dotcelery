@@ -34,21 +34,26 @@ role and starts with task mutations disabled. With the default
 
 ## Map the UI, API, and hub
 
-Use the same prefix when mapping endpoints. Put the host's existing authentication
-and authorization middleware before the dashboard middleware:
+The API and hub use the prefix configured at registration. Put the host's existing
+authentication and authorization middleware before the dashboard middleware:
 
 ```csharp
 var app = builder.Build();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseDotCeleryDashboard();
-app.MapDotCeleryDashboard(dashboardPrefix);
+app.MapDotCeleryDashboard();
 app.Run();
 ```
 
 The UI is at `/jobs/monitor/`, the REST API is under `/jobs/monitor/api/v1`, and the
 hub is at `/jobs/monitor/hub`. Verify that an authorized user can open the page and
 that a user rejected by your callback receives 403.
+
+The endpoint mapping also registers attribute-routed MVC controllers in the host.
+A convention chained to `MapDotCeleryDashboard()`, such as `.RequireAuthorization("Operations")`,
+applies to the dashboard API and hub. The UI middleware continues to use the
+dashboard's `AuthorizationCallback`.
 
 For shared tenants, also [configure authenticated tenant claims and scoped
 storage](isolate-tenants.md); the access callback alone does not select a tenant.
@@ -77,6 +82,9 @@ host's origin checks. A cancellation response records acceptance of a request;
 it does not prove that a running task stopped. See
 [Dashboard API v1](../reference/dashboard-api.md) for the operation contracts and
 [Dashboard options](../reference/dashboard-options.md) for all settings.
+
+State-changing calls log their operator and target task IDs under
+`DotCelery.Dashboard.Audit`. Configure that category in the host's logging setup.
 
 Versioning uses the host's shared MVC services. Mark unrelated unversioned MVC
 API controllers with `[ApiVersionNeutral]`, or declare their API versions. See

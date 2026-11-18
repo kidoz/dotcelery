@@ -347,13 +347,17 @@ public sealed class TaskRecordStore
 
     // Apply secondary criteria before paging. The state/name and time predicates are pushed
     // into the document index; remaining predicates stream records without buffering history.
-    internal async ValueTask<IReadOnlyList<TaskSummary>> SearchAsync(
+    internal async ValueTask<(IReadOnlyList<TaskSummary> Tasks, bool Truncated)> SearchAsync(
         TaskSearchRequest query,
         int limit,
         int offset,
+        int scanLimit,
+        Func<TaskSummary, bool>? additionalFilter,
         CancellationToken cancellationToken
     )
     {
+        if (_documents is null)
+            return ([], false);
         var byName = !string.IsNullOrEmpty(query.TaskName);
         var filter = new DocumentFilter
         {
@@ -366,29 +370,32 @@ public sealed class TaskRecordStore
         };
         var tasks = new List<TaskSummary>();
         var skipped = 0;
+        var scanned = 0;
         await foreach (
-            var task in QueryAsync(
+            var document in _documents
+                .QueryAsync(
                     byName ? _names : _collection,
                     filter,
-                    new DocumentPage { Descending = !query.OldestFirst },
+                    new DocumentPage { Descending = !query.OldestFirst, Limit = scanLimit },
                     cancellationToken
                 )
                 .ConfigureAwait(false)
         )
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!query.Matches(task))
+            scanned++;
+            var task = byName
+                ? await GetAsync(document.Id, cancellationToken).ConfigureAwait(false)
+                : Deserialize(document.Value.Span);
+            if (task is null || !query.Matches(task) || additionalFilter?.Invoke(task) == false)
                 continue;
-            if (skipped < offset)
-            {
-                skipped++;
+            if (skipped++ < offset)
                 continue;
-            }
             tasks.Add(task);
             if (tasks.Count >= limit)
-                break;
+                return (tasks, false);
         }
-        return tasks;
+        return (tasks, scanned >= scanLimit);
     }
 
     private IAsyncEnumerable<TaskSummary> QueryAsync(

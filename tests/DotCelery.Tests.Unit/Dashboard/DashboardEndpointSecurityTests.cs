@@ -30,6 +30,32 @@ namespace DotCelery.Tests.Unit.Dashboard;
 public sealed class DashboardEndpointSecurityTests
 {
     [Fact]
+    public async Task ConfiguredPrefix_MapsApiAndHubAndAppliesApiResponseHeaders()
+    {
+        await using var host = await StartAsync(options =>
+        {
+            options.PathPrefix = "/ops/dashboard";
+            options.RequireAuthorization = false;
+        });
+        using var overview = await host.Client.GetAsync(
+            "/ops/dashboard/api/v1/overview",
+            TestContext.Current.CancellationToken
+        );
+        Assert.Equal(HttpStatusCode.OK, overview.StatusCode);
+        Assert.True(overview.Headers.CacheControl?.NoStore);
+        Assert.Equal(
+            "nosniff",
+            Assert.Single(overview.Headers.GetValues("X-Content-Type-Options"))
+        );
+        using var negotiated = await host.Client.PostAsync(
+            "/ops/dashboard/hub/negotiate?negotiateVersion=1",
+            null,
+            TestContext.Current.CancellationToken
+        );
+        Assert.Equal(HttpStatusCode.OK, negotiated.StatusCode);
+    }
+
+    [Fact]
     public async Task VersionedEndpoints_ReportTheirContractAndRejectUnversionedOrUnknownVersions()
     {
         await using var host = await StartAsync(options => options.RequireAuthorization = false);
@@ -273,7 +299,7 @@ public sealed class DashboardEndpointSecurityTests
                 }
             );
         app.UseDotCeleryDashboard();
-        app.MapDotCeleryDashboard("/celery");
+        app.MapDotCeleryDashboard();
         await app.StartAsync();
 
         var address = app

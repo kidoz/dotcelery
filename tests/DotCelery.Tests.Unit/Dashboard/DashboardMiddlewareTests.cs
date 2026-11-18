@@ -46,6 +46,14 @@ public sealed class DashboardMiddlewareTests
 
         Assert.False(nextCalled);
         Assert.StartsWith("text/html", context.Response.ContentType);
+        Assert.Contains(
+            "frame-ancestors 'none'",
+            context.Response.Headers.ContentSecurityPolicy.ToString(),
+            StringComparison.Ordinal
+        );
+        Assert.Equal("DENY", context.Response.Headers.XFrameOptions.ToString());
+        Assert.Equal("nosniff", context.Response.Headers.XContentTypeOptions.ToString());
+        Assert.Equal("no-store", context.Response.Headers.CacheControl.ToString());
         Assert.NotEmpty(Encoding.UTF8.GetString(GetBody(context)));
     }
 
@@ -79,6 +87,7 @@ public sealed class DashboardMiddlewareTests
             var context = CreateContext($"/jobs/monitor/{asset}");
             await middleware.InvokeAsync(context);
             Assert.StartsWith(contentType, context.Response.ContentType);
+            Assert.Equal("nosniff", context.Response.Headers.XContentTypeOptions.ToString());
             Assert.NotEmpty(GetBody(context));
         }
     }

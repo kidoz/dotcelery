@@ -35,3 +35,16 @@ static DotCelery.Dashboard.Models.TaskSearchRequest.operator !=(DotCelery.Dashbo
 static DotCelery.Dashboard.Models.TaskSearchRequest.operator ==(DotCelery.Dashboard.Models.TaskSearchRequest? left, DotCelery.Dashboard.Models.TaskSearchRequest? right) -> bool
 DotCelery.Dashboard.DashboardOptions.TenantIdClaimType.get -> string!
 DotCelery.Dashboard.DashboardOptions.TenantIdClaimType.set -> void
+DotCelery.Dashboard.DashboardOptions.ContentSecurityPolicy.get -> string!
+DotCelery.Dashboard.DashboardOptions.ContentSecurityPolicy.set -> void
+DotCelery.Dashboard.DashboardOptions.AllowFraming.get -> bool
+DotCelery.Dashboard.DashboardOptions.AllowFraming.set -> void
+DotCelery.Dashboard.DashboardOptions.MaxFilterScan.get -> int
+DotCelery.Dashboard.DashboardOptions.MaxFilterScan.set -> void
+DotCelery.Dashboard.Controllers.TaskListResponse.Truncated.get -> bool
+DotCelery.Dashboard.Controllers.TaskListResponse.Truncated.init -> void
+DotCelery.Dashboard.Controllers.FilterPreviewResponse.Truncated.get -> bool
+DotCelery.Dashboard.Controllers.FilterPreviewResponse.Truncated.init -> void
+static DotCelery.Dashboard.Extensions.DashboardExtensions.UseDotCeleryDashboard(this Microsoft.AspNetCore.Builder.IApplicationBuilder! app) -> Microsoft.AspNetCore.Builder.IApplicationBuilder!
+static DotCelery.Dashboard.Extensions.DashboardExtensions.MapDotCeleryDashboard(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder! endpoints) -> Microsoft.AspNetCore.Builder.IEndpointConventionBuilder!
+static DotCelery.Dashboard.Extensions.DashboardExtensions.MapDotCeleryDashboardHub(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder! endpoints) -> Microsoft.AspNetCore.Builder.HubEndpointConventionBuilder!
