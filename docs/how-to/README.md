@@ -10,6 +10,7 @@ you need.
   Quartz.NET, Coravel/hosted services, and eligible MassTransit/NServiceBus work.
 - [Host and authorize the dashboard](host-dashboard.md).
 - [Isolate tenants on shared workers](isolate-tenants.md).
+- [Rotate message signing keys](rotate-signing-keys.md).
 - [Develop the dashboard with hot reload](develop-dashboard.md).
 - [Run project checks](run-checks.md).
 - [Add or update documentation](write-documentation.md).

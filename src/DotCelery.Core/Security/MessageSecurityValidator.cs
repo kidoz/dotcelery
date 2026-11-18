@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 using DotCelery.Core.Models;
 using DotCelery.Core.Serialization;
@@ -10,16 +9,20 @@ namespace DotCelery.Core.Security;
 /// <summary>
 /// Default implementation of <see cref="IMessageSecurityValidator"/>.
 /// </summary>
-public sealed class MessageSecurityValidator : IMessageSecurityValidator, IDisposable
+public sealed partial class MessageSecurityValidator : IMessageSecurityValidator, IDisposable
 {
     private readonly MessageSecurityOptions _options;
     private readonly ILogger<MessageSecurityValidator> _logger;
     private readonly TimeProvider _timeProvider;
 
-    // HMACSHA256 instances are not thread-safe, and this validator is a shared singleton,
-    // so each signature is computed with the stateless HMACSHA256.HashData API.
-    private readonly byte[]? _signingKey;
-    private readonly Dictionary<string, byte[]> _tenantKeys = new(StringComparer.Ordinal);
+    private readonly MessageSigningKeys? _keys;
+    private readonly Dictionary<string, MessageSigningKeys> _tenantKeys = new(
+        StringComparer.Ordinal
+    );
+    private readonly string? _legacyKeyId;
+    private readonly bool _sign;
+    private readonly bool _verify;
+    private int _reportedUnverifiedSignature;
     private bool _disposed;
 
     /// <summary>
@@ -38,16 +41,32 @@ public sealed class MessageSecurityValidator : IMessageSecurityValidator, IDispo
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
 
-        if (_options.EnableMessageSigning)
-        {
-            foreach (var (tenant, key) in _options.TenantSigningKeys)
-                _tenantKeys.Add(tenant, (byte[])key.Clone());
-        }
+        _sign = _options.EnableMessageSigning;
+        _verify = _sign || _options.VerifySignaturesWhenPresent;
+        _legacyKeyId = _options.LegacyVerificationKeyId;
+        if (!_verify)
+            return;
 
-        if (_options.EnableMessageSigning && _options.SigningKey is not null)
-        {
-            _signingKey = (byte[])_options.SigningKey.Clone();
-        }
+        foreach (
+            var tenant in _options.TenantSigningKeys.Keys.Union(
+                _options.TenantAdditionalVerificationKeys.Keys,
+                StringComparer.Ordinal
+            )
+        )
+            _tenantKeys.Add(
+                tenant,
+                new MessageSigningKeys(
+                    _options.TenantSigningKeys.GetValueOrDefault(tenant),
+                    _options.TenantSigningKeyIds.GetValueOrDefault(tenant),
+                    _options.TenantAdditionalVerificationKeys.GetValueOrDefault(tenant)
+                )
+            );
+        if (_tenantKeys.Count == 0)
+            _keys = new MessageSigningKeys(
+                _options.SigningKey,
+                _options.SigningKeyId,
+                _options.AdditionalVerificationKeys
+            );
     }
 
     /// <inheritdoc />
@@ -90,6 +109,11 @@ public sealed class MessageSecurityValidator : IMessageSecurityValidator, IDispo
         if (_options.MaxMessageAge is { } maxAge)
         {
             var age = _timeProvider.GetUtcNow() - message.Timestamp;
+            if (age < -_options.MaxClockSkew)
+                return MessageValidationResult.Failure(
+                    MessageValidationError.MessageExpired,
+                    "Message timestamp exceeds the allowed future clock skew."
+                );
             if (age > maxAge)
             {
                 _logger.LogWarning(
@@ -162,22 +186,20 @@ public sealed class MessageSecurityValidator : IMessageSecurityValidator, IDispo
     public string? Sign(byte[] payload)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var key = ResolveKey(payload);
-        if (key is null)
-        {
-            if (_tenantKeys.Count > 0)
-                throw new InvalidOperationException(
-                    "No signing key is available for the message's explicit tenant ID."
-                );
+        if (!_sign)
             return null;
-        }
-        return Convert.ToBase64String(HMACSHA256.HashData(key, payload));
+        var signature = ResolveKeys(payload)?.Sign(payload);
+        if (signature is null && _tenantKeys.Count > 0)
+            throw new InvalidOperationException(
+                "No signing key is available for the message's explicit tenant ID."
+            );
+        return signature;
     }
 
-    private byte[]? ResolveKey(byte[] payload)
+    private MessageSigningKeys? ResolveKeys(byte[] payload)
     {
         if (_tenantKeys.Count == 0)
-            return _signingKey;
+            return _keys;
         try
         {
             var message = JsonSerializer.Deserialize(
@@ -198,23 +220,25 @@ public sealed class MessageSecurityValidator : IMessageSecurityValidator, IDispo
     public bool VerifySignature(byte[] payload, string signature)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var key = ResolveKey(payload);
-        if (key is null)
-            return false;
-
-        try
-        {
-            var expectedHash = HMACSHA256.HashData(key, payload);
-            var actualHash = Convert.FromBase64String(signature);
-
-            return CryptographicOperations.FixedTimeEquals(expectedHash, actualHash);
-        }
-        catch (FormatException)
-        {
-            _logger.LogWarning("Invalid signature format");
-            return false;
-        }
+        return ResolveKeys(payload)?.Verify(payload, signature, _legacyKeyId) == true;
     }
+
+    internal bool RequiresSignature => _sign && _options.RejectUnsignedMessages;
+
+    internal bool AcceptUnverifiedSignature()
+    {
+        if (_verify)
+            return false;
+        if (Interlocked.Exchange(ref _reportedUnverifiedSignature, 1) == 0)
+            LogUnverifiedSignature(_logger);
+        return true;
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "A signed message was received while signature verification was disabled."
+    )]
+    private static partial void LogUnverifiedSignature(ILogger logger);
 
     /// <inheritdoc />
     public void Dispose()
@@ -227,11 +251,7 @@ public sealed class MessageSecurityValidator : IMessageSecurityValidator, IDispo
         _disposed = true;
 
         foreach (var key in _tenantKeys.Values)
-            CryptographicOperations.ZeroMemory(key);
-
-        if (_signingKey is not null)
-        {
-            CryptographicOperations.ZeroMemory(_signingKey);
-        }
+            key.Dispose();
+        _keys?.Dispose();
     }
 }

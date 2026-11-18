@@ -17,3 +17,4 @@ DotCelery.Core.MultiTenancy.TenantRouter.EnforcesIsolation.get -> bool
 DotCelery.Core.Storage.Stores.SagaStore.TryAdvanceStepAsync(string! sagaId, string! completedStepId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<DotCelery.Core.Sagas.Saga?>
 
 DotCelery.Core.Storage.Stores.SagaStore.GetRecoveryBatchAsync(DotCelery.Core.Sagas.SagaState state, int offset, int limit, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<DotCelery.Core.Sagas.Saga!>!
+DotCelery.Core.Extensions.DotCeleryBuilder.UseMessageSecurity(System.Action<DotCelery.Core.Security.MessageSecurityOptions!>? configure = null) -> DotCelery.Core.Extensions.DotCeleryBuilder!

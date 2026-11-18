@@ -103,3 +103,18 @@ DotCelery.Core.Dashboard.HistoricalDataOptions.MaxQueryRange.set -> void
 DotCelery.Core.Dashboard.HistoricalDataOptions.MaxQuerySnapshots.get -> int
 DotCelery.Core.Dashboard.HistoricalDataOptions.MaxQuerySnapshots.set -> void
 DotCelery.Core.Sagas.ISagaStore.GetRecoveryBatchAsync(DotCelery.Core.Sagas.SagaState state, int offset, int limit, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<DotCelery.Core.Sagas.Saga!>!
+DotCelery.Core.Security.MessageSecurityOptions.VerifySignaturesWhenPresent.get -> bool
+DotCelery.Core.Security.MessageSecurityOptions.VerifySignaturesWhenPresent.set -> void
+DotCelery.Core.Security.MessageSecurityOptions.SigningKeyId.get -> string?
+DotCelery.Core.Security.MessageSecurityOptions.SigningKeyId.set -> void
+DotCelery.Core.Security.MessageSecurityOptions.LegacyVerificationKeyId.get -> string?
+DotCelery.Core.Security.MessageSecurityOptions.LegacyVerificationKeyId.set -> void
+DotCelery.Core.Security.MessageSecurityOptions.MaxClockSkew.get -> System.TimeSpan
+DotCelery.Core.Security.MessageSecurityOptions.MaxClockSkew.set -> void
+DotCelery.Core.Security.MessageSecurityOptions.AdditionalVerificationKeys.get -> System.Collections.Generic.Dictionary<string!, byte[]!>!
+DotCelery.Core.Security.MessageSecurityOptions.AdditionalVerificationKeys.set -> void
+DotCelery.Core.Security.MessageSecurityOptions.TenantSigningKeyIds.get -> System.Collections.Generic.Dictionary<string!, string!>!
+DotCelery.Core.Security.MessageSecurityOptions.TenantSigningKeyIds.set -> void
+DotCelery.Core.Security.MessageSecurityOptions.TenantAdditionalVerificationKeys.get -> System.Collections.Generic.Dictionary<string!, System.Collections.Generic.Dictionary<string!, byte[]!>!>!
+DotCelery.Core.Security.MessageSecurityOptions.TenantAdditionalVerificationKeys.set -> void
+static DotCelery.Core.Security.MessageSecurityOptions.GenerateKey() -> byte[]!

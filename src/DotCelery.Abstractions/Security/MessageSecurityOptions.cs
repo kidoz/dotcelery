@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+
 namespace DotCelery.Core.Security;
 
 /// <summary>
@@ -33,6 +35,10 @@ public sealed class MessageSecurityOptions
     /// </summary>
     public bool EnableMessageSigning { get; set; }
 
+    /// <summary>Gets or sets whether to verify signed deliveries when local signing is disabled.</summary>
+    /// <remarks>Unsigned messages remain accepted in this mode.</remarks>
+    public bool VerifySignaturesWhenPresent { get; set; }
+
     /// <summary>
     /// Gets or sets the secret key for message signing.
     /// Required when <see cref="EnableMessageSigning"/> is true.
@@ -40,11 +46,32 @@ public sealed class MessageSecurityOptions
     /// </summary>
     public byte[]? SigningKey { get; set; }
 
+    /// <summary>Gets or sets the ID sent with newly signed messages. Null writes legacy signatures.</summary>
+    public string? SigningKeyId { get; set; }
+
+    /// <summary>Gets or sets the additional accepted verification keys, indexed by key ID.</summary>
+    public Dictionary<string, byte[]> AdditionalVerificationKeys { get; set; } =
+        new(StringComparer.Ordinal);
+
+    /// <summary>Gets or sets the key ID used to check legacy signatures that carry no key ID.</summary>
+    /// <remarks>Without an ID, legacy signatures are checked with the active key.</remarks>
+    public string? LegacyVerificationKeyId { get; set; }
+
     /// <summary>
     /// Gets or sets independent HMAC keys keyed by explicit TenantId. With this map populated,
     /// signing and verification never fall back to the process-wide key.
     /// </summary>
     public Dictionary<string, byte[]> TenantSigningKeys { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>Gets or sets the active key IDs by tenant. Missing entries write legacy signatures.</summary>
+    public Dictionary<string, string> TenantSigningKeyIds { get; set; } =
+        new(StringComparer.Ordinal);
+
+    /// <summary>Gets or sets additional verification keys by tenant and then key ID.</summary>
+    public Dictionary<
+        string,
+        Dictionary<string, byte[]>
+    > TenantAdditionalVerificationKeys { get; set; } = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Gets or sets the signing key as a Base64 string.
@@ -84,6 +111,13 @@ public sealed class MessageSecurityOptions
     /// </remarks>
     public TimeSpan? MaxMessageAge { get; set; }
 
+    /// <summary>Gets or sets the future clock skew allowed when <see cref="MaxMessageAge"/> is set.</summary>
+    public TimeSpan MaxClockSkew { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>Generates a cryptographically random 32-byte HMAC signing key.</summary>
+    /// <returns>The key bytes.</returns>
+    public static byte[] GenerateKey() => RandomNumberGenerator.GetBytes(32);
+
     /// <summary>
     /// Validates the security options.
     /// </summary>
@@ -109,14 +143,50 @@ public sealed class MessageSecurityOptions
                     "Each tenant needs an explicit ID and an independent signing key of at least 16 bytes."
                 );
         }
-        var keys = TenantSigningKeys.Values.ToArray();
+        foreach (var (tenant, id) in TenantSigningKeyIds)
+        {
+            if (!TenantSigningKeys.ContainsKey(tenant) || !IsValidKeyId(id))
+                throw new InvalidOperationException(
+                    "A tenant signing key ID requires an active key and a valid ID."
+                );
+        }
+
+        if (SigningKeyId is not null && (SigningKey is null || !IsValidKeyId(SigningKeyId)))
+            throw new InvalidOperationException(
+                "SigningKeyId requires an active signing key and a valid ID."
+            );
+        if (LegacyVerificationKeyId is not null && !IsValidKeyId(LegacyVerificationKeyId))
+            throw new InvalidOperationException("LegacyVerificationKeyId is invalid.");
+
+        ValidateVerificationKeys(AdditionalVerificationKeys, SigningKeyId);
+        foreach (var (tenant, verificationKeys) in TenantAdditionalVerificationKeys)
+        {
+            if (
+                string.IsNullOrWhiteSpace(tenant)
+                || (EnableMessageSigning && !TenantSigningKeys.ContainsKey(tenant))
+            )
+                throw new InvalidOperationException(
+                    "Tenant verification keys require an explicit tenant and, when signing is enabled, an active key."
+                );
+            ValidateVerificationKeys(
+                verificationKeys,
+                TenantSigningKeyIds.GetValueOrDefault(tenant)
+            );
+        }
+
+        var keys = TenantSigningKeys
+            .Select(pair => (Tenant: pair.Key, Key: pair.Value))
+            .Concat(
+                TenantAdditionalVerificationKeys.SelectMany(tenant =>
+                    tenant.Value.Values.Select(key => (Tenant: tenant.Key, Key: key))
+                )
+            )
+            .ToArray();
         for (var i = 0; i < keys.Length; i++)
         for (var j = i + 1; j < keys.Length; j++)
             if (
-                System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
-                    keys[i],
-                    keys[j]
-                )
+                keys[i].Tenant != keys[j].Tenant
+                && CryptographicOperations.FixedTimeEquals(keys[i].Key, keys[j].Key)
             )
                 throw new InvalidOperationException("Tenant signing keys must be distinct.");
 
@@ -124,5 +194,32 @@ public sealed class MessageSecurityOptions
         {
             throw new InvalidOperationException("MaxPayloadSizeBytes cannot be negative.");
         }
+
+        if (MaxMessageAge < TimeSpan.Zero || MaxClockSkew < TimeSpan.Zero)
+            throw new InvalidOperationException(
+                "Message age and clock skew limits cannot be negative."
+            );
+        if (MaxMessageAge > TimeSpan.MaxValue - MaxClockSkew)
+            throw new InvalidOperationException(
+                "The message age and clock skew limits are too large when combined."
+            );
     }
+
+    private static void ValidateVerificationKeys(
+        Dictionary<string, byte[]> keys,
+        string? activeKeyId
+    )
+    {
+        foreach (var (id, key) in keys)
+            if (!IsValidKeyId(id) || id == activeKeyId || key.Length < 16)
+                throw new InvalidOperationException(
+                    "Additional verification keys need a unique key ID and at least 16 bytes."
+                );
+    }
+
+    private static bool IsValidKeyId(string id) =>
+        id.Length is > 0 and <= 64
+        && id.All(character =>
+            char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.'
+        );
 }

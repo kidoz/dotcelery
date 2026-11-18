@@ -181,8 +181,11 @@ public abstract class OutboxStoreConformanceTests : StoreConformanceTests
         Time.Advance(TimeSpan.FromMinutes(90));
         Assert.True(await inbox.IsProcessedAsync("a"));
 
-        // Past the signing window the record goes
         Time.Advance(TimeSpan.FromMinutes(31));
+        // A message accepted with a future timestamp can still be fresh during the skew window.
+        Assert.True(await inbox.IsProcessedAsync("a"));
+
+        Time.Advance(TimeSpan.FromMinutes(4));
         Assert.False(await inbox.IsProcessedAsync("a"));
     }
 

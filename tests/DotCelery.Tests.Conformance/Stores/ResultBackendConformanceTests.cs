@@ -57,7 +57,7 @@ public abstract class ResultBackendConformanceTests : StoreConformanceTests
         Assert.True(recovered.SignalsPublished);
         Assert.True(recovered.FollowUpsPublished);
         Assert.True(await inbox.IsProcessedAsync("retained"));
-        Time.Advance(TimeSpan.FromDays(retentionDays - 2));
+        Time.Advance(TimeSpan.FromDays(retentionDays - 2) + TimeSpan.FromMinutes(5));
         Assert.False(await inbox.IsProcessedAsync("retained"));
         Assert.Null(await inbox.GetOutcomeAsync("retained"));
     }

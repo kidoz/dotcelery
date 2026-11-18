@@ -8,6 +8,8 @@ using DotCelery.Core.Storage.Stores;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace DotCelery.Core.Extensions;
@@ -105,6 +107,21 @@ public sealed class DotCeleryBuilder
     public DotCeleryBuilder(IServiceCollection services)
     {
         Services = services;
+        services.AddOptions<MessageSecurityOptions>().ValidateOnStart();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<
+                IValidateOptions<MessageSecurityOptions>,
+                MessageSecurityOptionsValidator
+            >()
+        );
+        services.TryAddSingleton<IMessageSecurityValidator>(
+            provider => new MessageSecurityValidator(
+                provider.GetRequiredService<IOptions<MessageSecurityOptions>>(),
+                provider.GetService<ILogger<MessageSecurityValidator>>()
+                    ?? NullLogger<MessageSecurityValidator>.Instance,
+                provider.GetService<TimeProvider>()
+            )
+        );
 
         // Register default serializer, configured through JsonMessageSerializerOptions
         services.AddSingleton<IMessageSerializer>(provider => new JsonMessageSerializer(
@@ -117,6 +134,16 @@ public sealed class DotCeleryBuilder
     /// Gets the service collection.
     /// </summary>
     public IServiceCollection Services { get; }
+
+    /// <summary>Configures message security for producers, workers, and brokers.</summary>
+    /// <param name="configure">The security options to apply.</param>
+    /// <returns>The builder for chaining.</returns>
+    public DotCeleryBuilder UseMessageSecurity(Action<MessageSecurityOptions>? configure = null)
+    {
+        if (configure is not null)
+            Services.Configure(configure);
+        return this;
+    }
 
     /// <summary>
     /// Gets the registered task types.

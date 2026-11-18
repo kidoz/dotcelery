@@ -56,10 +56,12 @@ public sealed class InboxStore : IInboxOutcomeStore, IStorageBackedStore
         _options = options?.Value ?? new StorageStoreOptions();
         _collection = _options.Name("inbox");
         _timeProvider = timeProvider ?? TimeProvider.System;
+        var security = securityOptions?.Value;
+        var signingWindow = security?.MaxMessageAge is { } maxAge
+            ? maxAge + security.MaxClockSkew
+            : TimeSpan.Zero;
         _retention =
-            securityOptions?.Value.MaxMessageAge is { } maxAge && maxAge > _options.InboxRetention
-                ? maxAge
-                : _options.InboxRetention;
+            signingWindow > _options.InboxRetention ? signingWindow : _options.InboxRetention;
     }
 
     /// <inheritdoc />

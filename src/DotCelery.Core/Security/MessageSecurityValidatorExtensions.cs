@@ -32,6 +32,12 @@ public static class MessageSecurityValidatorExtensions
             return true;
         }
 
+        if (validator is MessageSecurityValidator builtIn)
+            return string.IsNullOrEmpty(signature)
+                ? !builtIn.RequiresSignature
+                : builtIn.AcceptUnverifiedSignature()
+                    || builtIn.VerifySignature(payload, signature);
+
         var validation = validator.Validate(TaskMessageFactory.ForSignatureCheck(), signature);
 
         return validator.IsSignatureValid(validation, payload, signature);
@@ -60,6 +66,10 @@ public static class MessageSecurityValidatorExtensions
 
         // An unsigned payload the validator accepted needs no verification; a signed one must
         // match its payload
-        return string.IsNullOrEmpty(signature) || validator.VerifySignature(payload, signature);
+        return string.IsNullOrEmpty(signature)
+            || (
+                validator is MessageSecurityValidator builtIn && builtIn.AcceptUnverifiedSignature()
+            )
+            || validator.VerifySignature(payload, signature);
     }
 }

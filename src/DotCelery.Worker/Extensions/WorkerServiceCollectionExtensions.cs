@@ -93,8 +93,6 @@ public static class WorkerServiceCollectionExtensions
         // Schema version and payload size validation apply to every message without
         // configuration. Signing and the task allowlist remain opt-in, and the startup
         // diagnostics say when they are off.
-        builder.Services.AddOptions<MessageSecurityOptions>();
-        builder.Services.TryAddSingleton<IMessageSecurityValidator, MessageSecurityValidator>();
         builder.Services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IHostedService, WorkerStartupDiagnostics>()
         );
@@ -575,21 +573,11 @@ public static class WorkerServiceCollectionExtensions
     /// the dead letter queue and acknowledged instead of being executed.
     /// </para>
     /// </remarks>
+    [Obsolete("Use DotCeleryBuilder.UseMessageSecurity, available from DotCelery.Core.")]
     public static DotCeleryBuilder UseMessageSecurity(
         this DotCeleryBuilder builder,
         Action<MessageSecurityOptions>? configure = null
-    )
-    {
-        builder.Services.Configure<MessageSecurityOptions>(options =>
-        {
-            configure?.Invoke(options);
-            options.Validate();
-        });
-
-        builder.Services.TryAddSingleton<IMessageSecurityValidator, MessageSecurityValidator>();
-
-        return builder;
-    }
+    ) => builder.UseMessageSecurity(configure);
 
     /// <summary>
     /// Enables inbox-based message deduplication for the worker. A message that has already
