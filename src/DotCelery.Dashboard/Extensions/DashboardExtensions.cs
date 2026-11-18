@@ -115,7 +115,15 @@ public static class DashboardExtensions
         services.AddHostedService<TenantHostedService<DashboardMetricsCollector>>();
 
         // Add SignalR
-        services.AddSignalR(options => options.AddFilter<DashboardTenantHubFilter>());
+        services
+            .AddSignalR()
+            .AddHubOptions<DashboardHub>(options =>
+            {
+                options.AddFilter<DashboardTenantHubFilter>();
+                options.MaximumReceiveMessageSize = 16 * 1024;
+                // The hub updates its set of watched tasks in invocation order.
+                options.MaximumParallelInvocationsPerClient = 1;
+            });
 
         // Add controllers for API endpoints
         services.AddProblemDetails();

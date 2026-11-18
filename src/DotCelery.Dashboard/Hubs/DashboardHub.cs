@@ -1,4 +1,5 @@
 using DotCelery.Core.Dashboard;
+using DotCelery.Core.Storage;
 using DotCelery.Dashboard.Security;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
@@ -10,6 +11,8 @@ namespace DotCelery.Dashboard.Hubs;
 /// </summary>
 public sealed class DashboardHub : Hub
 {
+    private const int MaxWatchedTasks = 100;
+    private static readonly object WatchedTasksKey = new();
     private readonly IDashboardDataProvider _dataProvider;
     private readonly DashboardOptions _options;
 
@@ -70,10 +73,16 @@ public sealed class DashboardHub : Hub
     /// <param name="taskId">The task ID to watch.</param>
     public async Task WatchTask(string taskId)
     {
-        await Groups.AddToGroupAsync(
-            Context.ConnectionId,
-            DashboardTenantScope.Group($"task:{taskId}")
-        );
+        var group = GetTaskGroup(taskId);
+        if (!Context.Items.TryGetValue(WatchedTasksKey, out var value))
+            Context.Items[WatchedTasksKey] = value = new HashSet<string>(StringComparer.Ordinal);
+        var watched = (HashSet<string>)value!;
+        if (watched.Contains(group))
+            return;
+        if (watched.Count >= MaxWatchedTasks)
+            throw new HubException($"A connection can watch at most {MaxWatchedTasks} tasks.");
+        await Groups.AddToGroupAsync(Context.ConnectionId, group, Context.ConnectionAborted);
+        watched.Add(group);
     }
 
     /// <summary>
@@ -82,10 +91,27 @@ public sealed class DashboardHub : Hub
     /// <param name="taskId">The task ID to stop watching.</param>
     public async Task UnwatchTask(string taskId)
     {
-        await Groups.RemoveFromGroupAsync(
-            Context.ConnectionId,
-            DashboardTenantScope.Group($"task:{taskId}")
-        );
+        var group = GetTaskGroup(taskId);
+        if (
+            Context.Items.TryGetValue(WatchedTasksKey, out var value)
+            && value is HashSet<string> watched
+            && watched.Contains(group)
+        )
+        {
+            await Groups.RemoveFromGroupAsync(
+                Context.ConnectionId,
+                group,
+                Context.ConnectionAborted
+            );
+            watched.Remove(group);
+        }
+    }
+
+    private static string GetTaskGroup(string taskId)
+    {
+        if (string.IsNullOrWhiteSpace(taskId) || taskId.Length > StorageGuard.MaxKeyLength)
+            throw new HubException("Invalid task ID.");
+        return DashboardTenantScope.Group($"task:{taskId}");
     }
 
     /// <summary>
